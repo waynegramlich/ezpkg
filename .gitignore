@@ -1,0 +1,18 @@
+# git commit messages are composed in this file.
+# Use `git commit -F .git_commit.md` to commit the latest info.
+.git_commit.md
+# Mercurial holds the checkpoint history; git holds only curated commits.
+.hg/
+.hgignore
+.hgtags
+
+# Some Python testing leaves stuff behind that needs to be ignored.
+__pycache__/
+.git-/
+
+python_with_markdown.md
+
+# Editor backups
+*~
+#*#
+.#*
