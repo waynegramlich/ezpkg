@@ -76,8 +76,71 @@ the rules stay versioned alongside the work they govern.
    The point is to stop settled questions from being reopened over and
    over.
 
+7. **Issues live in `log_book.md` under `## Issues`**, and that
+   section's own preamble is the authority on how they work.  The
+   parts that are easy to get wrong:
+
+   * Each issue is named by an identifier such as `0whwnn` -- a
+     priority digit, then the first letter of each word of its title.
+     That identifier, not a list number, is how an issue is referred
+     to anywhere else.
+   * Changing an issue's priority or its title changes its
+     identifier.  Updating every reference to the old name in the
+     same pass is Claude's job, and is not a reason to leave an issue
+     mis-prioritised.
+   * A resolved issue is deleted outright, not archived.  Rejected
+     ones are kept, because their purpose is to stop the same idea
+     coming back.
+   * Frozen text above the `FENCE:` marker must not reference an
+     identifier, since the fixup above would be forbidden there.
+
 ### Why
 
 A log where every entry is meaningful is worth more than a log that
 records everything that happened.  Mercurial already records everything
 that happened.
+
+## Python style
+
+Python written for this project follows `python_with_markdown.md`, in
+this directory.  It is a symbolic link to Wayne's own write-up, which
+adapts the [Google Python Style
+Guide](https://google.github.io/styleguide/pyguide.html) to docstrings
+written in Markdown.  Read it before writing Python here; what follows
+is only the part that comes up most often.
+
+1. **Docstrings are Markdown.**  Triple double quotes, with a one line
+   summary ending in a period immediately after the opening quotes, a
+   blank line, then paragraphs.  Functions, classes and methods list
+   `Arguments:`, `Returns:` or `Yields:`, and `Raises:` as bulleted
+   lists, each name followed by its type in backquoted parentheses.
+   Classes document `Attributes:` and a `Constructor:` line.
+
+2. **79 columns**, per PEP 8, in docstrings and comments as much as in
+   code.
+
+3. **Backquote every identifier** named in prose, so that `my_func` and
+   `my_variable` read as code rather than as English.
+
+4. **Write complete sentences**, capitalized and ending in a period.
+   Editors have spell checkers; there is no excuse for typos.
+
+5. **Type hints everywhere, and both linters silent.**  `mypy <file>`
+   and `ruff check <file>` should report nothing before a piece of work
+   is called finished.  `ruff check --fix` is safe to run.
+
+6. **A license boilerplate closes the module docstring**, with the SPDX
+   identifier on the line immediately after the closing quotes.  This
+   project uses MIT No Attribution:
+
+       """
+       ...
+       MIT No Attribution
+
+       Copyright <year> Wayne C. Gramlich
+       ...
+       """
+       # SPDX-License-Identifier: MIT-0
+
+Documentation that costs more lines than the code it describes is
+fine.  Disk is cheap and rereading is not.

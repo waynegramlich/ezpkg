@@ -8,7 +8,7 @@
 
 # Some Python testing leaves stuff behind that needs to be ignored.
 __pycache__/
-.git-/
+
 
 python_with_markdown.md
 

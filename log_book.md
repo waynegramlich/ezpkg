@@ -220,19 +220,6 @@ The common thread is that **every one of these must itself be installed
 before the user can run the program.**  That single remaining
 requirement is what the rest of this log book is about.
 
-<!-- FENCE:
-tThe material above this fence is basically settled.  Editing it is
-discouraged, though exceptions can be made.  Leaving it alone is what
-keeps decisions that have already been made from being revisited over and
-over.
-
-Date: Mon Sep 21, 2026
--->
-
-## Strategy
-
-Work progresses in the following stages.
-
 ## Phase 1: Initial exploration (2026-09-20)
 
 1. **Decide whether to use `git`, `mercurial`, or both**:
@@ -244,424 +231,524 @@ Work progresses in the following stages.
 2. **Experiment 1**: Create the bootstrap code.
   
    This experiment assumes that eventually there will be a pip installable
-   package on [PyPI](https:/pypi.org) (i.e. the Python Package Index web site)
-   that contains a package that an `EmbeddedVenv` class.  The package name
+   package on [PyPI](https://pypi.org) (i.e. the Python Package Index web site)
+   that contains a package that has an `EmbeddedVenv` class.  The package name
    is to be decided.
 
    The bootstrap code will live in every program that needs to bootstrap this
-   code into their program.  This bootstrap code will assume that Python3
-   distribution being used has a small number packages like `venv`, `pip`,
-   and `importlib` preinstalled.
+   code into their program.  This bootstrap code will assume that the
+   Python3 distribution being used has a small number of packages like
+   `venv`, `pip`, and `importlib` preinstalled.
 
-   The code will create a `~/.embedded_venv` directory` and initialize it
+   The code will create a `~/.embedded_venv` directory and initialize it
    using the `venv` package.  The bootstrap is to be a pure Python program
    that does not cheat by directly executing `python3 -m pip install XXX`.
    Only `venv` and other "standard" Python libraries are to be used.  Finally,
-   the `coverage` package will imported using the `importlib` package.
+   the `coverage` package will be imported using the `importlib` package.
 
    In general, the bootstrap program should be optimized to be a relatively
    small number of lines.  Do not do this optimization just yet.
 
-   **Status: done.**  The code is `bootstrap.py`.  Both install
-   mechanisms from the open design question below are implemented: pip
-   driven in process when `pip` imports, and a pure-stdlib wheel fetch
-   when it does not.  Neither spawns a subprocess.  `coverage` is
-   imported through `importlib.import_module`.
+   The twelve mechanisms, measured by `bootstrap.py` itself.  What the
+   columns mean is in its module docstring.
 
-   All three mechanisms live in one `bootstrap.py`, inline in `main()`,
-   selected by a single command-line argument fed to a single `match`
-   statement.  Run it as `python3 bootstrap.py <1|2|3> [dir]`.  The
-   numbering matches the "Open design question" below: 1 is pip in
-   process, 2 is pip as a subprocess, 3 is no pip at all.
-
-   Deliberately un-Pythonic: every `import` not needed by all three
-   sits inside its own `case` clause, so each case is self-contained
-   and the cost of each mechanism can be read off directly.  Only
-   `importlib`, `pathlib`, `sys` and `sysconfig` are shared, at module
-   level.  `main()` has no blank lines in it.
-
-   | | imports | lines | cold | warm | size |
-   |---|---|---|---|---|---|
-   | 1, pip in process | 3 | 15 | 5.5 s | 0.14 s | 17 MB |
-   | 2, pip subprocess | 3 | 15 | 5.6 s | 0.14 s | 17 MB |
-   | 3, no pip at all | 4 | 39 | 1.2 s | 0.15 s | 1.7 MB |
-
-   "imports" and "lines" count only what is inside that `case` clause.
-   Shared on top of any of them: 4 imports and 10 lines of scaffolding,
-   and `main()` is 81 lines all told.
-
-   **The table now states the trade in one row each, and it is a real
-   trade.**  Mechanism 3 is 4.6x faster and 10x smaller *on disk*, and
-   it is the only one that survives a machine with no pip -- but it
-   costs 39 lines against 15, and those lines have to be pasted by hand
-   into the end user's program.  Mechanisms 1 and 2 buy their brevity
-   by making pip do the work, which is exactly the dependency the
-   project is trying to escape.
-
-   The disk figures come from mechanism 3 skipping the venv entirely; 1
-   and 2 must build one, and the venv's own copy of pip is 16 MB of
-   their 17.  An earlier version of this table had all three at ~5 s and
-   17 MB, indistinguishable, because every mechanism built a venv before
-   deciding whether it wanted one.  That was finding 7, and writing the
-   difference out as an explicit per-case decision is what exposed it.
-   This is Phase 1's "the venv is not actually needed" conclusion
-   arriving a second time, from the other direction, now measured
-   rather than argued.
-
-   Measured earlier, isolating the install step from venv creation:
-
-   | | cold | warm | size |
-   |---|---|---|---|
-   | in-process pip | 5.5 s | 0.15 s | 18 MB |
-   | stdlib wheel fetch | 1.0 s | 0.15 s | 972 KB |
-
-   The 18 MB is almost entirely the venv's own copy of pip; the 972 KB
-   is `coverage` alone, and grows to 1.7 MB once `__pycache__` is
-   written.  The stdlib timing is the fetch by itself, on a warm DNS
-   cache, and excludes venv creation.
++------+-----------------+---------+-------+-------+--------+--------+--------+
+| case | mechanism       | imports | lines | paste | cold   | warm   | size   |
++------+-----------------+---------+-------+-------+--------+--------+--------+
+| 1    | venv(pip), pip  | 4       | 20    | 24    | 6.12 s | 0.16 s | 16981  |
+|      | in process      |         |       |       |        |        |        |
+| 2    | venv(pip), pip  | 4       | 20    | 24    | 6.68 s | 0.15 s | 16981  |
+|      | subprocess      |         |       |       |        |        |        |
+| 3    | no venv, stdlib | 5       | 45    | 49    | 1.41 s | 0.15 s | 1682   |
+|      | wheel           |         |       |       |        |        |        |
+| 4    | venv(pip), then | 5       | 26    | 30    | 6.85 s | 0.16 s | 1790   |
+|      | delete pip      |         |       |       |        |        |        |
+| 5    | venv(no pip),   | 4       | 20    | 24    | 2.65 s | 0.15 s | 1790   |
+|      | pip in proc     |         |       |       |        |        |        |
+| 6    | no venv, pip in | 1       | 11    | 15    | 2.65 s | 0.14 s | 1762   |
+|      | process         |         |       |       |        |        |        |
+| 7    | no venv, pip    | 1       | 11    | 15    | 2.73 s | 0.14 s | 1762   |
+|      | subprocess      |         |       |       |        |        |        |
+| 8    | no venv, pip    | 2       | 15    | 19    | 4.22 s | 0.15 s | 1762   |
+|      | from wheel      |         |       |       |        |        |        |
+| 9    | as 6 plus --no- | 1       | 11    | 15    | 2.62 s | 0.14 s | 1698   |
+|      | compile         |         |       |       |        |        |        |
+| 10   | as 7 plus --no- | 1       | 11    | 15    | 2.69 s | 0.14 s | 1698   |
+|      | compile         |         |       |       |        |        |        |
+| 11   | as 4 but        | 5       | 26    | 30    | 5.25 s | 0.15 s | 1790   |
+|      | subprocess      |         |       |       |        |        |        |
+| 12   | venv(no pip),   | 7       | 51    | 55    | 1.42 s | 0.16 s | 1714   |
+|      | stdlib wheel    |         |       |       |        |        |        |
++------+-----------------+---------+-------+-------+--------+--------+--------+
 
    Findings:
 
-   1. **`venv.EnvBuilder` does not default to symlinks; the command line
-      does.**  `python3 -m venv` passes `symlinks=True` on POSIX, but
-      `EnvBuilder()`'s own default is `symlinks=False`.  Three bare
-      venvs, built three ways on the same box:
-
-      | how built | files | size | symlinks |
-      |---|---|---|---|
-      | `EnvBuilder(symlinks=False)` | 1013 | 35.7 MB | 1 |
-      | `EnvBuilder(symlinks=True)` | 1013 | 12.7 MB | 4 |
-      | `python3 -m venv` | 1013 | 12.7 MB | 4 |
-
-      All three produce the **identical list of 1013 files**; the only
-      difference is that `symlinks=False` writes `bin/python`,
-      `bin/python3` and `bin/python3.12` as three separate 7.7 MB copies
-      of the interpreter where the other two write symlinks.  3 x 7.7 MB
-      is the entire 23 MB gap.
-
-      `EnvBuilder(symlinks=True)` and the command line are otherwise the
-      same thing: a recursive diff finds nothing but the venv's own path
-      embedded in `bin/activate` and `pyvenv.cfg`.  (`pyvenv.cfg` claims
-      `command = /usr/bin/python3 -m venv <dir>` even when no command
-      line was involved -- `EnvBuilder` synthesizes that line.)
-
-      Creation time is ~3.1 s either way, so copying 23 MB costs nothing
-      measurable; the cost is purely disk.  Phase 1 never saw any of
-      this because Phase 1 used the command line.  Any code driving
-      `venv` programmatically has to pass `symlinks=True` explicitly.
-
-   2. **Both paths chose the same wheel**, including the compiled
-      `tracer.cpython-312-x86_64-linux-gnu.so`.  The 40-line tag matcher
-      in `compatible_wheel_tags()` agreed with pip on this package.
-      That is one package on one platform and should not be read as more
-      than it is; musl versus glibc is not distinguished at all.
-
-   3. **The pip being driven in process was the venv's, not the
-      system's.**  `sys.path.insert` happens before `import pip`, so the
-      venv's pip 24.0 shadowed `/usr/lib/python3/dist-packages/pip`.
-      This is accidental but convenient: it means the in-process path
-      would work on a system with no pip, *if* the venv could be built.
-
-   4. **That "if" is the whole question, and the answer looks like no.**
-      On Debian and Ubuntu, `ensurepip` ships inside `python3-venv`.  So
-      either both `venv` and `ensurepip` are present -- in which case the
-      venv can be built and it brings its own pip -- or neither is, in
-      which case step 1 fails before any of this matters.  The venv's
-      16 MB of pip therefore never earns itself: whenever it is
-      reachable, the system's pip was reachable too.  The stdlib fetch
-      path is the only one that survives the case the project exists
-      for.  (This still rests on unverified assumption 1 below.)
-
-   5. **What the stdlib path skips**: dependency resolution, `RECORD`,
-      and console-script generation.  `coverage` has no runtime
-      dependencies, so the only loss here is the `coverage` command,
-      which this experiment does not need.  A package with dependencies
-      would need real work.
-
-   6. **`.pth` files are inert under `sys.path.insert`.**  Both paths
-      install `a1_coverage.pth`, coverage's hook for measuring
-      subprocesses, but `.pth` files are only executed by
-      `site.addsitedir()`, which a bare `sys.path.insert` does not call.
-      Any package that relies on a `.pth` is quietly half-installed by
-      option C.  Using `site.addsitedir()` instead of `sys.path.insert`
-      would fix it and is worth trying.
-
-   7. **The code has a structural flaw worth keeping in view.**
-      `bootstrap()` creates the venv *before* deciding how to install,
-      so on the machine finding 4 describes -- no `venv`, no
-      `ensurepip`, no `pip` -- it fails at step 1 and never reaches the
-      one path that would have worked.  The venv is load-bearing in the
-      code and not in the argument.  Left as written because Experiment
-      1 asked for a venv, but the ordering is backwards for option C.
-
-Claude: I am currently ignoring the rest of this document...  Feel free to
-mention some of the stuff below to me, so don't delete anything. Yet.
-
-3. **Experiment 2**: 
-
-   `python3 -m venv /tmp/evenv` is the whole of it.  It needs no
-   privileges and takes a second or two.  The entire state of the
-   environment lives in one small `pyvenv.cfg` file naming the Python
-   that created it:
-
-       home = /usr/bin
-       include-system-site-packages = false
-       version = 3.12.3
-       executable = /usr/bin/python3.12
-       command = /usr/bin/python3 -m venv /tmp/evenv
-
-   Everything else in the tree is either a symlink back to that Python or
-   a copy of `pip`.  Activation is *not* required to use it: running
-   `/tmp/evenv/bin/python3` directly is enough, since `activate` only
-   edits `PATH` and the shell prompt.
-
-3. **Record the entire venv directory structure.**
-
-   A fresh venv is 1140 files and 15 MB, and nearly all of that is `pip`
-   itself:
-
-       evenv/
-           pyvenv.cfg
-           bin/
-               activate  activate.csh  activate.fish  Activate.ps1
-               pip  pip3  pip3.12         # scripts w/ absolute shebangs
-               python -> python3
-               python3 -> /usr/bin/python3
-               python3.12 -> python3
-           include/python3.12/            # empty
-           lib64 -> lib
-           lib/python3.12/site-packages/
-               pip/  pip-24.0.dist-info/
-
-   Python 3.12 no longer installs `setuptools` into a new venv.
-
-4. **Install a package into that environment.**
-
-   `/tmp/evenv/bin/python3 -m pip install requests` installed `requests`
-   plus its four dependencies (`certifi`, `charset_normalizer`, `idna`,
-   `urllib3`), taking the tree from 1140 to 1379 files and 15 MB to
-   19 MB.
-
-5. **Repeat step 3 and diff the files to see what changed.**
-
-   The diff is confined to exactly two places:
-
-   1. `lib/python3.12/site-packages/` gains one directory and one
-      `*.dist-info/` directory per installed package, plus `__pycache__`
-      directories.
-   2. `bin/` gains one small wrapper script per console entry point, here
-      `idna` and `normalizer`; packages without entry points add nothing
-      there.
-
-   Nothing else changes at all: `pyvenv.cfg`, `include/`, `lib64` and the
-   activate scripts are all untouched by installation.
-
-6. **Figure out Phase 2.**  See the two sections below.
-
-### Experiments beyond the plan
-
-These were not in the plan, but they decide the shape of Phase 2.
-
-**Activation is not required.**  Running `/tmp/evenv/bin/python3
-script.py` directly gives `sys.prefix = /tmp/evenv` and imports from the
-venv.  `activate` is a convenience, not a mechanism.
-
-**Activation is not even needed to reach the packages.**  A package
-installed only in the venv (`cowsay`, deliberately absent system-wide)
-imports fine under the *system* interpreter given either
-
-    PYTHONPATH=/tmp/evenv/lib/python3.12/site-packages python3 script.py
-
-or, with no environment variables and no wrapper at all, from inside the
-script itself:
-
-    sys.path.insert(0, "/tmp/evenv/lib/python3.12/site-packages")
-    import cowsay        # works
-
-**`pip install --target` skips the venv entirely.**
-
-    python3 -m pip install --target /tmp/etarget cowsay
-
-produces a plain directory of 32 files / 220 KB that `sys.path.insert`
-consumes identically -- versus 15 MB of `pip` for an empty venv.  The
-console scripts are still generated, so entry points are not lost.
-
-**A venv is relocatable, mostly.**  Moving `/tmp/evenv` to a new path and
-running `bin/python3` still works, because `bin/python3` is a symlink to
-`/usr/bin/python3` and `sys.prefix` is derived from the directory found
-at run time.  The `bin/pip*` wrapper scripts do break, since their
-shebangs hold the old absolute path.  Irrelevant if those wrappers are
-never used.
-
-Together these mean the venv is not actually needed; only a directory of
-installed packages is.
-
-## Where this leaves the project
-
-This problem is largely solved, and the earlier claim that nobody avoids
-the re-execution was wrong.  What every existing solution still requires
-is exactly one thing preinstalled before the user can run the program:
-`uv`, `pipx`, or `pip-run`, all described under Prior Art above.
-
-The only remaining niche for this project is needing *nothing*
-preinstalled beyond the standard Python that is already there: the
-bootstrap travels inside the program itself.
-
-**That niche rests on an assumption not yet tested.**  "Standard Python"
-is not one thing.  On Debian and Ubuntu, `python3-pip` and `python3-venv`
-are packaged separately from `python3`, so a machine can have a working
-interpreter and no `pip` and no `venv`.  On the machine used for Phase 1,
-`pip`, `ensurepip` and `venv` all import, but that is one box.  If `pip`
-is commonly absent, the bootstrap has to carry more than a
-`sys.path.insert`, and the niche is narrower than it looks.
-
-`ensurepip` is the obvious escape hatch: it is stdlib, and it can place a
-`pip` where there was none.  Whether Debian and Ubuntu actually ship it
-with the base interpreter -- they have been known to strip it -- is part
-of the same untested assumption.
-
-**The decision criterion.**  Building this is worth the work only if the
-program must run on a machine where the user cannot, or will not, install
-anything at all.  If the user can run one `pip install pip-run`, then
-`pip-run` is the answer and this project is an exercise.  Phase 2 should
-be judged against that sentence.
-
-## Phase 2: To Be Decided
-
-The Phase 1 findings argue for the lightest of three possible designs:
-
-* **A. Re-exec into a venv** -- what `scriptstrap` and the blog posts do.
-  Costs 15 MB per environment, and the re-exec is visible to the user
-  (doubled process, confused signal handling, `sys.argv[0]` surprises).
-* **B. Vendor the packages into the repository** -- no network needed,
-  but it bloats the repository and breaks on compiled extensions such as
-  `charset_normalizer`'s `.so`.
-* **C. Cache directory plus `sys.path.insert`** -- recommended.  A small
-  module the program imports first.  It checks whether each required
-  package is already importable; if not, it runs
-  `pip install --target <cache-dir>` once, then prepends `<cache-dir>` to
-  `sys.path`.  No venv, no activation, no re-exec, ~200 KB per package.
-
-Option C is also, essentially, what `pip-run` already does -- the
-difference is only that the module ships inside the program instead of
-being installed alongside it.
-
-Prototyping C should settle these questions:
-
-1. Is `pip` reliably present?  This is the load-bearing question above,
-   and it should be answered before any of the rest.
-2. Where does the cache directory live?  `~/.cache/<program>/` per XDG,
-   or next to the program?
-3. How are required packages declared?  Reusing the PEP 723
-   `# /// script` block would make the program compatible with `uv run`
-   for free.
-4. What identifies a cache as valid?  Python version, platform tag and
-   package versions all belong in the cache directory name, because of
-   compiled extensions like the `.so` above.
-5. What happens with no network, and should it fall back to whatever the
-   system already provides?
-6. Should an already-active venv be honored rather than overridden?
-
-## Open Loose Ends
-
-Where things stand as of 2026-09-21, written down so that none of it
-lives only in somebody's head.
-
-### Unverified assumptions
-
-These are believed true but were **not** measured.  Anything built on
-them is built on sand until they are checked.
-
-1. **`ensurepip` ships inside `python3-venv` on Debian and Ubuntu.**  If
-   so, the standard library's own mechanism for installing `pip` is
-   missing in exactly the situation where it would be needed.  This came
-   from Christian Heimes' write-up (see Problem Statement), not from a
-   measurement.
-2. **What a minimal install actually provides.**  Everything measured in
-   Phase 1 came from one Ubuntu 24.04 box on which `python3-venv` and
-   `python3-pip` both happen to be installed.  What was confirmed there
-   is only that the two are *separate apt packages* and that `pip`,
-   `venv` and `ensurepip` all import.  Nothing was confirmed about a
-   machine where they are absent.
-
-Both are settled the same way: a stock container for each distribution
-worth supporting, running `python3 -c "import venv, ensurepip, pip"` and
-`python3 -m venv /tmp/x`, and recording what happens.  That is Phase 2
-question 1, and it gates the rest.
-
-### Document structure
-
-Neither of these is urgent; both were noticed and deferred.
-
-1. **`## Strategy` is an empty heading.**  It holds one sentence, and
-   `## Phase 1` follows it as a *sibling* rather than a child, so the
-   phases are not actually inside it.  The natural content is the A/B/C
-   design comparison currently sitting under Phase 2 -- that comparison
-   *is* the strategy.
-2. **"Where this leaves the project" repeats the Problem Statement.**
-   Its "That niche rests on an assumption not yet tested" paragraph
-   re-derives the `python3-pip` / `python3-venv` split, which the Problem
-   Statement now covers at greater length and with sources.  Two places
-   for one fact is what produced the contradiction this log book was
-   created to end; the paragraph should shrink to a pointer.
-
-### Open design question: how does the bootstrap install a package?
-
-Experiment 1 says the bootstrap "does not cheat by directly executing
-`python3 -m pip install XXX`" and that "only `venv` and other 'standard'
-Python libraries are to be used".  It also assumes `pip` is preinstalled.
-Those two pull in different directions, and the reading chosen decides
-what gets written.  Three candidate mechanisms, undecided as of
-2026-09-21:
-
-1. **Drive `pip` in-process.**  Create the environment with `venv`, then
-   call pip from inside Python instead of spawning it.  Smallest code,
-   but it depends on `pip._internal`, which is explicitly unsupported and
-   changes between pip releases.
-2. **Spawn `pip` as a subprocess** (`sys.executable -m pip install
-   --target ...`).  Uses pip's supported CLI, is the most robust, and
-   still means the *user* never types a pip command.  Whether that counts
-   as "cheating" is the question.
-3. **Use no pip at all.**  Query the PyPI JSON API with `urllib`,
-   download the wheel, unpack it with `zipfile`, and put it on
-   `sys.path`.  A wheel is a zip, so this needs only the standard
-   library.  Much bigger, and dependency resolution becomes ours -- but
-   it is the only option that survives `pip` being absent, which the
-   Problem Statement says can happen.
-
-Related tension worth settling at the same time: Experiment 1's premise
-is that `venv`, `pip` and `importlib` are preinstalled, while the Problem
-Statement argues that exactly `venv` and `pip` are the two that Debian
-and Ubuntu split out.  Only `importlib` is safe.  Experiment 1 may
-reasonably accept that limitation as a starting point -- but it should be
-a deliberate choice rather than an oversight.
-
-### Where work resumes
-
-Phase 2, question 1 -- measure the baseline across distributions -- then
-prototype option C.  The decision criterion in "Where this leaves the
-project" is the thing to judge the result against: this is worth building
-only if the program must run where the user cannot, or will not, install
-anything at all.
-
-## Journal
-
-Dated entries that do not fit the phase structure.
-
-* **2026-09-20** -- Phase 1 steps 1 through 6 carried out; findings
-  above.  Initial prior-art research missed `pip-run` and concluded that
-  nobody avoids the re-execution.  Corrected the same day.
-* **2026-09-21** -- Learned that different Linux distributions ship
-  different subsets of the Python standard library; `venv` and `pip` are
-  separate apt packages on Debian and Ubuntu.  Until now they were
-  assumed to be uniform.  Problem Statement rewritten around the three
-  categories this implies.
-* **2026-09-21** -- Prior art consolidated into its own section ahead of
-  Strategy, and Phase 1 step 2 removed; the research had been split
-  across two places and described `pip-run` twice.  Remaining Phase 1
-  steps renumbered 2 through 6.
-* **2026-09-21** -- `PLAN.md` replaced by this log book, and `PHASE1.md`
-  folded in here and then deleted; it carried the uncorrected "nobody has
-  solved this" claim, which contradicted the corrected text.  Both files
-  remain recoverable from mercurial.
+   1. **`venv.EnvBuilder` does not default to symlinks; the command
+      line does.**  `python3 -m venv` passes `symlinks=True` on POSIX,
+      but `EnvBuilder()`'s own default is `symlinks=False`, which
+      copies the 7.7 MB interpreter into `bin/python`, `bin/python3`
+      and `bin/python3.12`.  That is 35.7 MB against 12.7 MB for an
+      otherwise byte-identical tree of 1013 files; the 23 MB gap is
+      exactly those three copies.  Creation takes ~3.1 s either way,
+      so the cost is purely disk.  Phase 1 never saw this because
+      Phase 1 used the command line.
+
+   2. **`ensurepip` is essentially the entire cost of making a venv.**
+      `EnvBuilder(with_pip=False)` builds one in 0.05 s and 28 KB,
+      against 3.1 s and 12.7 MB with pip.  Nearly everything a venv
+      costs is the pip it installs into itself.
+
+   3. **The venv is never load-bearing.**  `pip install --target`
+      needs no virtual environment at all.  Case 6 skips the venv and
+      costs 15 pasted lines and 1762 KB; case 1 builds one and costs
+      24 lines and 16981 KB, for identical observable behaviour.
+      Phase 1 reached this conclusion by argument, from the venv
+      side.  It is now measured from the bootstrap side and the
+      numbers agree.
+
+   4. **Running pip in process is not free of the user's program.**
+      After one in-process install, `sys.modules` grows from 99
+      entries to 740, 451 of them pip's, and pip leaves three
+      `RichPipStreamHandler` objects on the *root* logger.  The same
+      `log.warning("hello")` prints bare before the bootstrap runs and
+      `WARNING: hello` through pip's handler afterwards, on a
+      different stream.  Six of the twelve cases do this.  The subprocess
+      cases cannot: that state dies with the child.  This is the
+      strongest argument against the in-process mechanism, and it was
+      not visible until it was measured.
+
+   5. **pip can be imported straight out of its own wheel.**  A wheel
+      is a zip and zips are importable, so
+      `sys.path.insert(0, "<...>/pip-24.0-py3-none-any.whl")` makes
+      pip importable without installing it anywhere -- no venv, no
+      network, and nothing written to disk for pip itself.  Case 8
+      does this in 15 lines.
+
+   6. **Debian de-vendors `ensurepip`, and misnames the package that
+      carries it.**  There is no `ensurepip/_bundled` directory on
+      this machine; `_WHEEL_PKG_DIR` points at
+      `/usr/share/python-wheels/`, which holds
+      `pip-24.0-py3-none-any.whl` and `setuptools-68.1.2-...whl`.
+      That confirms the de-vendoring the Problem Statement describes.
+
+      The package layout is the surprise.  `python3.12-venv` contains
+      `ensurepip` and nothing else -- three files.  The `venv` module
+      itself lives in `libpython3.12-stdlib`, the base package.  So
+      `import venv` succeeds on a machine that does not have
+      `python3-venv` installed, while `python3 -m venv` fails there,
+      because venv calls `ensurepip` to put pip inside the
+      environment it builds.
+
+      Whoever designs Experiment 2 should know that `import venv` is
+      therefore not a valid probe for whether a virtual environment
+      can be built; it answers yes on a machine where the answer is
+      no.  The probes that discriminate are `import ensurepip` and
+      `python3 -m venv` itself.  Measured with `dpkg -L` and
+      `dpkg -S` on one Ubuntu 24.04 box.  Debian is believed to be
+      laid out the same way, which is not verified here.
+
+   7. **Reclaiming pip after the fact works.**  Deleting the venv's
+      `pip`, its `pip-*.dist-info` and `bin/pip*` takes the tree from
+      16981 KB to 1790 KB.  `coverage` still imports afterwards, a
+      second package still installs by the pure-stdlib path, and
+      `ensurepip` can put pip back if it is ever wanted again.  This
+      is the right answer for a machine that has `venv` but no pip --
+      and only for that machine, because `with_pip=False` reaches the
+      same size for 6 fewer pasted lines wherever a system pip exists.
+      Two cases do this reclaim and measure identically: case 4
+      imports the manufactured pip, case 11 runs the venv's own
+      interpreter as a child instead.  Case 11 is the one to ship,
+      because it needs nothing from `pip._internal`.
+
+   8. **`--no-compile` is worth almost nothing.**  60 KB, and 40
+      `.pyc` files against 44, because the bootstrap imports the
+      package two lines later and Python compiles what it imports
+      anyway.  Rounding sizes to `1.7 MB` had made this look like a
+      100 KB saving; reporting kilobytes killed the idea.
+
+   9. **`.pth` files are inert under `sys.path.insert`.**  Every case
+      installs coverage's `a1_coverage.pth`, its hook for measuring
+      subprocesses, and no case executes it; only `site.addsitedir()`
+      would.  Any package that relies on a `.pth` is quietly
+      half-installed by every mechanism here.
+
+   10. **Independence from pip costs 49 pasted lines against 15.**
+       That is the whole trade, stated in one line.  The hand-rolled
+       wheel-tag matcher agreed with pip's choice for one package on
+       one platform, including the compiled
+       `tracer.cpython-312-x86_64-linux-gnu.so`, and it cannot tell
+       musl from glibc.  Case 3 also produces the smallest tree,
+       1682 KB, because it never generates the three `coverage`
+       console scripts that `pip --target` writes into `bin/`.
+
+   **Where this departed from the instructions above.**  The
+   instructions asked for four things: build `~/.embedded_venv` using
+   `venv`, do not cheat by executing `python3 -m pip install`, use
+   only `venv` and other standard libraries, and import through
+   `importlib`.  Every case does the last of those.  No case does the
+   other three at once.
+
+   Cases 1, 4 and 5 build the venv and spawn nothing, but reach into
+   `pip._internal`, which is not a standard library.  Case 3 uses
+   nothing but standard libraries and spawns nothing, at the cost of
+   building no venv at all.  Cases 2, 7, 10 and 11 spawn pip, which
+   the instructions call cheating, and case 11 is the one finding 7
+   recommends.
+
+   Case 12 was then written to close that gap, and it is the only
+   one of the twelve that does all four: a venv built with
+   `with_pip=False`, filled by case 3's wheel fetcher.  It costs 55
+   pasted lines against case 3's 49, and 1714 KB against 1682.  So
+   the instructions were satisfiable after all, and the price of
+   satisfying them is 6 lines and 32 KB spent on a virtual
+   environment that nothing subsequently reads.  That is finding 3
+   arriving from the other side: the venv the instructions mandate is
+   not load-bearing, and now that has been measured rather than
+   argued.
+
+   **What Experiment 1 did not settle.**  The baseline question that
+   Experiment 2 exists for is untouched.  Every row of that table was
+   measured on one Ubuntu 24.04 machine that has `venv`, `ensurepip`
+   and `pip` all present.
+
+   What the experiment did produce is a priced answer for each way
+   that question could come out.  With `pip` importable, 15 pasted
+   lines.  With `pip` gone but `ensurepip` present to manufacture
+   one, 30.  With neither, 49 -- or 55 if a virtual environment is
+   wanted for its own sake.  Finding 6 is why those are phrased
+   around `ensurepip` rather than `venv`: `venv` is in the base
+   standard library and is effectively always present, so it is not
+   the thing that varies.  Which of these the project actually needs
+   is still the thing to measure.
+
+   **A defect worth recording.**  Experiment 1 also turned up a bug
+   that all twelve cases share, written up under Open Issues as the
+   already-importable defect.  It affects every case equally, so it
+   does not disturb the comparison above.
+
+<!-- FENCE:
+The material above this fence is basically settled.  Editing it is
+discouraged, though exceptions can be made.  Leaving it alone is what
+keeps decisions that have already been made from being revisited over and
+over.
+
+Date: Tue Sep 22, 2026
+-->
+
+3. **Experiment 2**: Measure the baseline across distributions.
+
+   **Scope: Linux only, for now.**  Windows and macOS are worth
+   measuring eventually and are not part of this experiment.  Not
+   every problem gets solved at once, and this one is narrow on
+   purpose.
+
+   Experiment 1 measured twelve mechanisms on one machine that has
+   `venv`, `ensurepip` and `pip` all present.  Which of its answers
+   the project actually needs depends on a fact nobody has measured
+   yet.
+
+   **A note on Docker images, recorded before any method is chosen.**
+   A Docker image is a prebuilt filesystem that a command can be run
+   inside, isolated from the host.  Two families of image matter here
+   and they answer different questions.
+
+   * `debian:12`, `ubuntu:24.04`, `fedora:41`, `alpine:3.20` are the
+     distributions' own base images.  Whatever `python3` they have, or
+     can install, is the distribution's packaged Python -- the same
+     thing a user of that distribution gets.  These answer the
+     question this project is asking.
+   * `python:3.12`, `python:3.12-slim` and friends are published by
+     the Docker Python maintainers, and the Python inside is **not**
+     any distribution's package.  It is built from source, from
+     python.org, during the image build.
+
+   That second point is the trap, and it is checkable rather than
+   folklore.  The Dockerfile for `python:3.12-bookworm` says so
+   outright:
+
+       FROM buildpack-deps:bookworm
+       ENV PYTHON_VERSION 3.12.14
+       wget -O python.tar.xz "https://www.python.org/ftp/python/..."
+       ./configure --with-ensurepip
+       make install
+
+   It starts from a Debian base, throws Debian's Python away, fetches
+   the python.org tarball, and compiles it with `--with-ensurepip`
+   explicitly requested.  So `python:3.12` always has `pip`, `venv`
+   and `ensurepip`, by construction, no matter what Debian ships.
+
+   Measuring `python:3.12` would therefore produce a confident,
+   well-formatted, entirely wrong answer: it measures what the Docker
+   Python image was built with, not what a distribution gives its
+   users.  Source:
+   `github.com/docker-library/python`, `3.12/bookworm/Dockerfile`,
+   read 2026-09-22.
+
+   None of this is a recommendation to use Docker.  It is the one fact
+   that would quietly invalidate the results if Docker were used
+   without knowing it.  Note also that no container runtime is
+   installed on the machine this project is being developed on.
+
+   **The decision criterion.**  Building this is worth the work only if
+   the program must run on a machine where the user cannot, or will
+   not, install anything at all.  If the user can run one
+   `pip install pip-run`, then `pip-run` is the answer and this project
+   is an exercise.  Experiment 2 should be judged against that
+   sentence.
+
+   **The procedure.**  A stock container for each distribution worth
+   supporting.  In each one, run:
+
+       python3 -c "import venv"
+       python3 -c "import ensurepip"
+       python3 -c "import pip"
+       python3 -m venv /tmp/x
+
+   and record what happens.  Debian and Ubuntu package `python3-pip`
+   and `python3-venv` separately from `python3`, so a machine can have
+   a working interpreter and neither of the other two.  How common that
+   is decides which Experiment 1 case this project should ship.
+
+   **What each outcome would mean**, from Experiment 1's table:
+
+   * `pip` imports: 15 pasted lines, case 7.  The project is an
+     exercise by the criterion above, since such a user can run
+     `pip install pip-run`.
+   * `pip` absent but `venv` and `ensurepip` present: 30 pasted lines,
+     case 11 -- manufacture a pip, use it once, delete it.
+   * Neither present: 49 pasted lines, case 3 -- the pure standard
+     library wheel fetch, and the only mechanism that survives this.
+
+   The middle outcome is the one that justifies the project.  The
+   experiment exists to find out whether it is real.
+
+   **Still open.**  The questions Experiment 2 does not itself
+   answer are collected under Open Issues below, in priority order.
+
+## Issues
+
+A resolved issue is deleted outright.  It is not moved to a "done"
+list: an ever growing issue list is no fun to read, the experiment that
+resolved it already records what happened, and mercurial and git hold
+every earlier version of this file.  Rejected issues are the one
+exception, and are kept below, because their whole purpose is to stop
+the same idea being proposed a second time.
+
+Each issue carries a short identifier in parentheses at the end of its
+title, and that identifier is how it is referred to anywhere else in
+this file.  It is a priority digit followed by the first letter of
+each word of the title, lower cased.  So *What happens with no
+network?* at priority 0 becomes `0whwnn`.  Punctuation is dropped and
+a hyphenated word counts once, so *five-line* contributes one `f`.
+
+The four priorities:
+
+* **0, extreme.**  It can break the bootstrap once the bootstrap is
+  out in the wild.  The bootstrap is pasted by hand into other
+  people's programs and is never updated afterwards, so a failure
+  there happens on a stranger's machine, at their version of
+  everything, with nobody around to fix it.  Nothing else outranks
+  this.
+* **1, high.**  It gates the work or decides what gets built.  Nothing
+  breaks, but the answer changes the direction.
+* **2, medium.**  It costs time or disk, or it is a correctness
+  problem with a narrow blast radius.
+* **3, low.**  Worth doing, nothing turns on when.
+
+Digits rather than letters because they sort.  `H`, `M` and `L` sort
+as H, L, M, which puts low above medium; `sort` on a list of these
+identifiers puts the levels in the right order with no special
+handling.  Within a level the order is editorial and a plain sort will
+not reproduce it, which is intended: the digit is the priority, and
+position inside a level is judgement.
+
+Issues carry no list numbers.  Changing an issue's priority or its
+title changes its identifier, and every reference to the old name must
+be updated in the same pass.  That fixup is Claude's job and is not a
+reason to avoid re-prioritising something.
+
+The statement of an issue is written by Claude and is meant to be
+checkable.  "Wayne's current thoughts" underneath it is Wayne's, and
+is where the disposition lives.
+
+### Open Issues
+
+Unresolved, highest priority first.
+
+* **0, extreme.**  It can break the bootstrap once the bootstrap is
+  out in the wild.  The bootstrap is pasted by hand into other
+  people's programs and is never updated afterwards, so a failure
+  there happens on a stranger's machine, at their version of
+  everything, with nobody around to fix it.  Nothing else outranks
+  this.
+* **1, high.**  It gates the work or decides what gets built.  Nothing
+  breaks, but the answer changes the direction.
+* **2, medium.**  It costs time or disk, or it is a correctness
+  problem with a narrow blast radius.
+* **3, low.**  Worth doing, nothing turns on when.
+
+Digits rather than letters because they sort.  `H`, `M` and `L` sort
+as H, L, M, which puts low above medium; `sort` on a list of these
+identifiers puts the levels in the right order with no special
+handling.  Within a level the order is editorial and a plain sort will
+not reproduce it, which is intended: the digit is the priority, and
+position inside a level is judgement.
+
+Issues carry no list numbers.  Changing an issue's priority or its
+title changes its identifier, and every reference to the old name must
+be updated in the same pass.  That fixup is Claude's job and is not a
+reason to avoid re-prioritising something.
+
+The statement of an issue is written by Claude and is meant to be
+checkable.  "Wayne's current thoughts" underneath it is Wayne's, and
+is where the disposition lives.
+
+* **Nothing identifies a cache as valid. (0niacav)**  Every case installs into
+  `~/.embedded_venv` with no version, platform tag or interpreter
+  version in the path.  Experiment 1 installs
+  `tracer.cpython-312-x86_64-linux-gnu.so`, so the same directory
+  reached by a different Python, or copied to a different machine,
+  would load a shared object built for something else.  This is a
+  correctness bug waiting rather than a tidiness question.
+
+  Wayne's current thoughts:
+  * We'll eventually have a test suite, and we can ensure this issue
+    gets covered then.  To be honest, the test suite is going to
+    cover all sorts of issues.  They always do.
+
+* **`pip._internal` is not a public API. (0pinapa)**  Six of the twelve
+  cases import it.  The pip documentation says in as many words not to,
+  and
+  the module path has moved before.  This is code pasted into
+  programs and never updated afterwards, so when it breaks it breaks
+  on some other person's machine, at their pip version, with no one
+  around to fix it.
+
+  Since this issue was written, case 11 was added to close the gap it
+  creates.  Avoiding `pip._internal` rules out cases 1, 4, 5, 6, 8
+  and 9, which left the "no pip but `venv` present" branch with no
+  answer at all, because case 4 was its only mechanism.  Case 11
+  reaches the same manufactured pip by running the venv's own
+  interpreter as a child process, and measures identically to case 4
+  on every column: 5 imports, 26 lines, 30 pasted, 1790 KB.  The
+  surviving set is therefore cases 2, 3, 7, 10 and 11, and nothing is
+  lost by discarding the rest.
+
+  Wayne's current thoughts:
+  * In general, this seems quite bad.  I'd very much like to avoid
+    using `pip._internal`.  I'd very much dislike using this interface
+    since the bootstrap code in theory could be replicated a large number
+    of places.  I will point out that the reason why we have 10 bootstrap
+    code candidates gives us some flexibility dealing with this issue.
+
+* **The wheel tag matcher is a five-line stand-in. (0twtmifs)**  Cases
+  3 and 12 pick wheels with a substring test that cannot tell musl
+  from glibc, and does not read the glibc version a manylinux tag
+  encodes.  It agreed with pip for one package on one platform.  On
+  Alpine it would download a manylinux wheel and fail at import with
+  a loader error.  Only those two cases are affected, and they are
+  the mechanisms that matter if `1itnr` comes out the interesting
+  way.  The matcher is also written out twice, once per case, so a
+  correction has to be made in both places.
+
+  Wayne's current thoughts:
+  * Let's revisit this issue after Experiment 2.
+
+* **What happens with no network? (0whwnn)**  Undefined in all twelve
+  cases.  Should the bootstrap fail, or fall back to whatever the
+  system already provides?
+
+  Wayne's current thoughts:
+  * We are going to die without the network to fetch the package.
+    We need to at least let the user know that we died because we
+    could not get the package.
+
+* **Is the niche real? (1itnr)**  Nobody has measured whether a stock Debian
+  or Ubuntu machine actually lacks `pip`.  If it does not, the
+  decision criterion says this project is an exercise and `pip-run`
+  is the answer.  Everything below matters only if this comes out the
+  right way.  This is Experiment 2, and it gates the rest.
+
+  Wayne's current thoughts:
+  * It would be nice to test on Windows and MacOS.
+  * I know people who have these machines and would be glad to
+    help.  Until then, the answer is currently unknown.
+
+* **`embeddedvenv` does not exist yet. (1edney)**  Every case installs
+  `coverage` as a stand-in while the comment at the top of each says
+  `# Ensure embeddedvenv is downloaded.`  The whole design is two
+  stage -- a small pasted stub fetches a real package that carries
+  the heavy logic -- and only the stub half has been built.  The
+  `paste` column therefore measures the cost of fetching a test
+  package, not of the real thing.  Nothing in Experiment 1 is wrong
+  because of this, but nothing in it validates the second stage
+  either.
+
+  Wayne's current thoughts:
+  * We'll start getting answer's in experiment 2.
+
+* **An already-importable package is installed anyway. (2aapiia)**  All
+  twelve cases ask whether the package is on disk at their own target,
+  never whether it is already importable.  With `coverage` present in an
+  active virtual environment, a case spends 1.42 s and 1.8 MB
+  installing a copy it will not use, where a leading `try: import`
+  costs 0.10 s.  Cheap to fix; deliberately not fixed yet.
+
+  Wayne's current thoughts:
+  * This can be dealt with much later since it is easy to fix.
+
+* **How should required packages be declared? (2hsrpbd)**  Every case has
+  `PACKAGE = "coverage"` written into it.  Reusing the PEP 723
+  `# /// script` block instead would make the same program work under
+  `uv run` for free, and would let one bootstrap serve a list of
+  packages rather than one.
+
+  Wayne's current thoughts:
+  * Sounds like it is worth doing.  The question is when?
+
+* **Where should the cache directory live? (2wstcdl)**  `~/.cache/<program>/`
+  per the XDG spec, or beside the program, or the `~/.embedded_venv`
+  that Experiment 1 assumed without examining?  This interacts with
+  `0niacav`: whatever the location, the name has to carry the
+  interpreter and platform.
+
+  Wayne's current thoughts:
+  * I have no idea what this issue is about.  Let's do the experiment
+    when we get the chance.
+
+* **The venv executable directory is hard-coded. (3tvedih)**  Cases
+  4 and 11 reach into `root / "bin"` at `bootstrap.py:296`, `400` and
+  `407`.  On Windows a virtual environment puts its executables in
+  `Scripts`, so the pip reclaim would silently delete nothing and
+  case 11's subprocess would not find an interpreter at all.  The
+  inconsistency is inside a single case body: the same code checks
+  `os.name != "nt"` when choosing symlinks, and asks `sysconfig` for
+  the platform's site-packages, then hard-codes `bin`.  Nothing
+  breaks on Linux, which is the whole of the current scope.
+
+  Wayne's current thoughts:
+  *
+
+* **`.pth` files are installed but never executed. (3pfaibne)**  Every case
+  writes coverage's `a1_coverage.pth`, its hook for measuring
+  subprocesses, and no case runs it, because only `site.addsitedir()`
+  executes `.pth` files and every case uses `sys.path.insert`.  Any
+  package relying on a `.pth` is quietly half-installed.  Switching
+  to `site.addsitedir()` is the obvious experiment.
+
+  Wayne's current thoughts:
+  * I have no idea what this issue is about.  Let's do the experiment when we
+    get the chance.
+
+### Rejected Issues
+
+Approaches that were considered and declined, recorded so that they
+are not proposed again.
+
+* **Vendor the packages into the repository. (3vtpitr)**  Needs no
+  network, but it bloats the repository and breaks on compiled
+  extensions -- the same `.so` problem as `0niacav`.  Declined
+  2026-09-21, before Experiment 1; Experiment 1 then confirmed the
+  `.so` problem is real by installing
+  `tracer.cpython-312-x86_64-linux-gnu.so`.
 
