@@ -435,7 +435,22 @@ over.
 Date: Tue Sep 22, 2026
 -->
 
-3. **Experiment 2**: Measure the baseline across distributions.
+3. **Experiment 2**: Master `pip` and Associated `PyPI` Compatible Servers
+
+   The ultimate goal is to build a testing framework that allows installing
+   the `embeddedvenv` (to be developed) package from a `pip` compatible server
+   (e.g `pipiserver`) and load it into program via the bootstrap technology
+   developed in the previous experiment.
+
+   Here is an initial unordered set of tasks:
+   * Create a new `embeddedvenv` class.
+   * Download, install, and run a Python Package server.
+   * Create Python package that contains the `embeddedvenv` package.
+   * Download the `embeddedvenv` package.
+   * Use bootstrap code (see above) to download `embeddedvenv` package.
+   * Build a test framework for all these tasks.
+
+## Misc.
 
    **Scope: Linux only, for now.**  Windows and macOS are worth
    measuring eventually and are not part of this experiment.  Not
