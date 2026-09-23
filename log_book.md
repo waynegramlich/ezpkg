@@ -438,16 +438,16 @@ Date: Tue Sep 22, 2026
 3. **Experiment 2**: Master `pip` and Associated `PyPI` Compatible Servers
 
    The ultimate goal is to build a testing framework that allows installing
-   the `embeddedvenv` (to be developed) package from a `pip` compatible server
+   the `embeddedenv` (to be developed) package from a `pip` compatible server
    (e.g `pipiserver`) and load it into program via the bootstrap technology
    developed in the previous experiment.
 
    Here is an initial unordered set of tasks:
-   * Create a new `embeddedvenv` class.
+   * Create a new `embeddedenv` class.
    * Download, install, and run a Python Package server.
-   * Create Python package that contains the `embeddedvenv` package.
-   * Download the `embeddedvenv` package.
-   * Use bootstrap code (see above) to download `embeddedvenv` package.
+   * Create Python package that contains the `embeddedenv` package.
+   * Download the `embeddedenv` package.
+   * Use bootstrap code (see above) to download `embeddedenv` package.
    * Build a test framework for all these tasks.
 
    Some initial conclusions after some research and discussion:
@@ -469,6 +469,13 @@ Date: Tue Sep 22, 2026
        it, so requiring `pip` brings it along.
      * Once `pip` is present, any further Python package can be
        downloaded as needed.
+   * Package server for the test harness:
+     A standard
+     [PEP 503 directory tree](https://peps.python.org/pep-0503/) is to
+     be used instead of a running full web server.  `pip --index-url`
+     accepts a local directory laid out in that format, which removes
+     any need to start and stop a server.  Later on, testing with an
+     actual web server is necessary.
 
 ## Misc.
 
@@ -657,9 +664,9 @@ Unresolved, highest priority first.
     We need to at least let the user know that we died because we
     could not get the package.
 
-* **`embeddedvenv` does not exist yet. (1edney)**  Every case installs
+* **`embeddedenv` does not exist yet. (1edney)**  Every case installs
   `coverage` as a stand-in while the comment at the top of each says
-  `# Ensure embeddedvenv is downloaded.`  The whole design is two
+  `# Ensure embeddedenv is downloaded.`  The whole design is two
   stage -- a small pasted stub fetches a real package that carries
   the heavy logic -- and only the stub half has been built.  The
   `paste` column therefore measures the cost of fetching a test
@@ -737,7 +744,7 @@ Unresolved, highest priority first.
   `pip` demoted cases 3 and 12 from shipping candidates to
   measurement, so the matcher is no longer on the path to a
   stranger's machine unless that decision is revisited.  And the
-  stub's job is to fetch `embeddedvenv`, which is pure Python and
+  stub's job is to fetch `embeddedenv`, which is pure Python and
   ships as `py3-none-any`, so no tag matching is needed for it at
   all; the matcher exists only because Experiment 1 fetched
   `coverage`, which has compiled wheels.  The 49 pasted lines the

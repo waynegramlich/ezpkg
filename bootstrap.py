@@ -198,7 +198,7 @@ def main() -> None:
     mechanism = sys.argv[1]
     match mechanism:
         case "1":
-            # Ensure `embeddedvenv` is downloaded.
+            # Ensure `embeddedenv` is downloaded.
             import os
             import sysconfig
             import venv
@@ -219,7 +219,7 @@ def main() -> None:
             importlib.invalidate_caches()
             module = importlib.import_module(PACKAGE)
         case "2":
-            # Ensure `embeddedvenv` is downloaded.
+            # Ensure `embeddedenv` is downloaded.
             import os
             import subprocess
             import sysconfig
@@ -240,7 +240,7 @@ def main() -> None:
             importlib.invalidate_caches()
             module = importlib.import_module(PACKAGE)
         case "3":
-            # Ensure `embeddedvenv` is downloaded.
+            # Ensure `embeddedenv` is downloaded.
             import io
             import json
             import sysconfig
@@ -286,7 +286,7 @@ def main() -> None:
             importlib.invalidate_caches()
             module = importlib.import_module(PACKAGE)
         case "4":
-            # Ensure `embeddedvenv` is downloaded.
+            # Ensure `embeddedenv` is downloaded.
             import os
             import shutil
             import sysconfig
@@ -313,7 +313,7 @@ def main() -> None:
             importlib.invalidate_caches()
             module = importlib.import_module(PACKAGE)
         case "5":
-            # Ensure `embeddedvenv` is downloaded.
+            # Ensure `embeddedenv` is downloaded.
             import os
             import sysconfig
             import venv
@@ -334,7 +334,7 @@ def main() -> None:
             importlib.invalidate_caches()
             module = importlib.import_module(PACKAGE)
         case "6":
-            # Ensure `embeddedvenv` is downloaded.
+            # Ensure `embeddedenv` is downloaded.
             target = pathlib.Path.home() / ".embedded_venv"
             if not (target / PACKAGE).is_dir():
                 from pip._internal.cli.main import main as pip_main
@@ -346,7 +346,7 @@ def main() -> None:
             importlib.invalidate_caches()
             module = importlib.import_module(PACKAGE)
         case "7":
-            # Ensure `embeddedvenv` is downloaded.
+            # Ensure `embeddedenv` is downloaded.
             import subprocess
             target = pathlib.Path.home() / ".embedded_venv"
             if not (target / PACKAGE).is_dir():
@@ -358,7 +358,7 @@ def main() -> None:
             importlib.invalidate_caches()
             module = importlib.import_module(PACKAGE)
         case "8":
-            # Ensure `embeddedvenv` is downloaded.
+            # Ensure `embeddedenv` is downloaded.
             import ensurepip
             target = pathlib.Path.home() / ".embedded_venv"
             if not (target / PACKAGE).is_dir():
@@ -374,7 +374,7 @@ def main() -> None:
             importlib.invalidate_caches()
             module = importlib.import_module(PACKAGE)
         case "9":
-            # Ensure `embeddedvenv` is downloaded.
+            # Ensure `embeddedenv` is downloaded.
             target = pathlib.Path.home() / ".embedded_venv"
             if not (target / PACKAGE).is_dir():
                 from pip._internal.cli.main import main as pip_main
@@ -386,7 +386,7 @@ def main() -> None:
             importlib.invalidate_caches()
             module = importlib.import_module(PACKAGE)
         case "10":
-            # Ensure `embeddedvenv` is downloaded.
+            # Ensure `embeddedenv` is downloaded.
             import subprocess
             target = pathlib.Path.home() / ".embedded_venv"
             if not (target / PACKAGE).is_dir():
@@ -398,7 +398,7 @@ def main() -> None:
             importlib.invalidate_caches()
             module = importlib.import_module(PACKAGE)
         case "11":
-            # Ensure `embeddedvenv` is downloaded.
+            # Ensure `embeddedenv` is downloaded.
             import os
             import shutil
             import subprocess
@@ -425,7 +425,7 @@ def main() -> None:
             importlib.invalidate_caches()
             module = importlib.import_module(PACKAGE)
         case "12":
-            # Ensure `embeddedvenv` is downloaded.
+            # Ensure `embeddedenv` is downloaded.
             import io
             import json
             import os
