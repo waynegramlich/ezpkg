@@ -476,6 +476,10 @@ Date: Tue Sep 22, 2026
      accepts a local directory laid out in that format, which removes
      any need to start and stop a server.  Later on, testing with an
      actual web server is necessary.
+   * `bootstrap.py` is not being merged into `embeddedenv_test.py`.
+     This allows `bootstrap.py` to perform end-to-end testing with
+     a real Python package server, whereas `embeddedenv_test.py` can
+     use non server based testing.
 
 ## Misc.
 

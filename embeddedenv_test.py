@@ -36,34 +36,68 @@ SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 """
 # SPDX-License-Identifier: MIT-0
 
+import pathlib
+import shutil
+import tempfile
+import unittest
 
-class EmbeddedEnvTest:
+import embeddedenv
+
+
+class EmbeddedEnvTest(unittest.TestCase):
     """Build, exercise and discard the Experiment 2 pipeline.
 
-    The class is empty until there is something in `EmbeddedEnv` worth
-    testing.  What it eventually holds is the fixtures that lay out a
-    PEP 503 directory tree, publish a package into it, point the
-    bootstrap stub at it through `PIP_INDEX_URL`, and remove it again
-    -- together with the failure cases that matter, such as an index
-    that does not contain the requested package.
+    The suite is nearly empty until there is something in
+    `EmbeddedEnv` worth testing.  What it eventually holds is the
+    tests that lay out a PEP 503 directory tree, publish a package
+    into it, point the bootstrap stub at it through `PIP_INDEX_URL`,
+    and check what comes back -- together with the failure cases that
+    matter, such as an index that does not contain the requested
+    package.
+
+    The index directory is created once for the whole class and
+    removed afterwards, because building it is the expensive part and
+    no test needs a private copy.
 
     Attributes:
-    * None yet.
+    * `index` (`pathlib.Path`):
+      The root of the PEP 503 directory tree that stands in for a
+      package server.  Empty for now.
 
     Constructor:
-    * `EmbeddedEnvTest()`
+    * `EmbeddedEnvTest()`, by `unittest` rather than by hand.
     """
+
+    index: pathlib.Path
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        """Create the temporary PEP 503 index directory."""
+        cls.index = pathlib.Path(tempfile.mkdtemp(prefix="embeddedenv-"))
+
+    @classmethod
+    def tearDownClass(cls) -> None:
+        """Remove the temporary PEP 503 index directory."""
+        shutil.rmtree(cls.index, ignore_errors=True)
+
+    def test_index_exists(self) -> None:
+        """The index directory is created before the tests run."""
+        self.assertTrue(self.index.is_dir())
+
+    def test_embeddedenv_constructs(self) -> None:
+        """`EmbeddedEnv` can be imported and constructed."""
+        self.assertIsInstance(embeddedenv.EmbeddedEnv(),
+                              embeddedenv.EmbeddedEnv)
 
 
 def main() -> None:
     """Run the `embeddedenv` test suite.
 
     This is the entry point used when the file is executed directly.
-    For now it only instantiates `EmbeddedEnvTest`, which is enough to
-    prove that the module imports and that the class can be
-    constructed.
+    It hands control to `unittest`, which discovers the test methods
+    of `EmbeddedEnvTest` and reports on them.
     """
-    EmbeddedEnvTest()
+    unittest.main()
 
 
 if __name__ == "__main__":
