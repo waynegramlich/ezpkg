@@ -450,6 +450,26 @@ Date: Tue Sep 22, 2026
    * Use bootstrap code (see above) to download `embeddedvenv` package.
    * Build a test framework for all these tasks.
 
+   Some initial conclusions after some research and discussion:
+   * Preinstalled Python environment.  What follows was measured on one
+     Ubuntu 24.04 machine.  We will *eventually* survey Ubuntu, Redhat,
+     Windows, and MacOS systems to turn these assumptions into facts.
+     * Not every Python installation has the whole standard library, but
+       the parts the bootstrap uses -- `importlib`, `pathlib`, `ssl`,
+       `subprocess`, `sysconfig`, `urllib.request`, `venv`, `zipfile`
+       and friends -- are all either compiled into `python3` or in a
+       base package Debian marks `Priority: important`.  Assuming those
+       is effectively assuming Python itself.
+     * Exactly one thing must additionally be preinstalled: `pip`, from
+       the `Priority: optional` package `python3-pip`.  `ensurepip`, in
+       `python3.12-venv`, is the only other optional piece, and is
+       needed only by the cases that manufacture a `pip`.
+     * A working TLS trust store (`ca-certificates`) is also required,
+       since every case fetches over HTTPS.  `python3-pip` depends on
+       it, so requiring `pip` brings it along.
+     * Once `pip` is present, any further Python package can be
+       downloaded as needed.
+
 ## Misc.
 
    **Scope: Linux only, for now.**  Windows and macOS are worth
@@ -590,34 +610,6 @@ is where the disposition lives.
 
 Unresolved, highest priority first.
 
-* **0, extreme.**  It can break the bootstrap once the bootstrap is
-  out in the wild.  The bootstrap is pasted by hand into other
-  people's programs and is never updated afterwards, so a failure
-  there happens on a stranger's machine, at their version of
-  everything, with nobody around to fix it.  Nothing else outranks
-  this.
-* **1, high.**  It gates the work or decides what gets built.  Nothing
-  breaks, but the answer changes the direction.
-* **2, medium.**  It costs time or disk, or it is a correctness
-  problem with a narrow blast radius.
-* **3, low.**  Worth doing, nothing turns on when.
-
-Digits rather than letters because they sort.  `H`, `M` and `L` sort
-as H, L, M, which puts low above medium; `sort` on a list of these
-identifiers puts the levels in the right order with no special
-handling.  Within a level the order is editorial and a plain sort will
-not reproduce it, which is intended: the digit is the priority, and
-position inside a level is judgement.
-
-Issues carry no list numbers.  Changing an issue's priority or its
-title changes its identifier, and every reference to the old name must
-be updated in the same pass.  That fixup is Claude's job and is not a
-reason to avoid re-prioritising something.
-
-The statement of an issue is written by Claude and is meant to be
-checkable.  "Wayne's current thoughts" underneath it is Wayne's, and
-is where the disposition lives.
-
 * **Nothing identifies a cache as valid. (0niacav)**  Every case installs into
   `~/.embedded_venv` with no version, platform tag or interpreter
   version in the path.  Experiment 1 installs
@@ -656,19 +648,6 @@ is where the disposition lives.
     of places.  I will point out that the reason why we have 10 bootstrap
     code candidates gives us some flexibility dealing with this issue.
 
-* **The wheel tag matcher is a five-line stand-in. (0twtmifs)**  Cases
-  3 and 12 pick wheels with a substring test that cannot tell musl
-  from glibc, and does not read the glibc version a manylinux tag
-  encodes.  It agreed with pip for one package on one platform.  On
-  Alpine it would download a manylinux wheel and fail at import with
-  a loader error.  Only those two cases are affected, and they are
-  the mechanisms that matter if `1itnr` comes out the interesting
-  way.  The matcher is also written out twice, once per case, so a
-  correction has to be made in both places.
-
-  Wayne's current thoughts:
-  * Let's revisit this issue after Experiment 2.
-
 * **What happens with no network? (0whwnn)**  Undefined in all twelve
   cases.  Should the bootstrap fail, or fall back to whatever the
   system already provides?
@@ -677,17 +656,6 @@ is where the disposition lives.
   * We are going to die without the network to fetch the package.
     We need to at least let the user know that we died because we
     could not get the package.
-
-* **Is the niche real? (1itnr)**  Nobody has measured whether a stock Debian
-  or Ubuntu machine actually lacks `pip`.  If it does not, the
-  decision criterion says this project is an exercise and `pip-run`
-  is the answer.  Everything below matters only if this comes out the
-  right way.  This is Experiment 2, and it gates the rest.
-
-  Wayne's current thoughts:
-  * It would be nice to test on Windows and MacOS.
-  * I know people who have these machines and would be glad to
-    help.  Until then, the answer is currently unknown.
 
 * **`embeddedvenv` does not exist yet. (1edney)**  Every case installs
   `coverage` as a stand-in while the comment at the top of each says
@@ -701,6 +669,32 @@ is where the disposition lives.
 
   Wayne's current thoughts:
   * We'll start getting answer's in experiment 2.
+
+* **How many machines does requiring `pip` exclude? (2hmmdrpe)**  The
+  decision to require `pip`, recorded under the preinstalled
+  environment conclusions in Experiment 2, removed `pip`'s absence
+  from the design space, so this no longer decides what gets built.
+  What remains is reach: a machine without `pip` now gets a diagnosed
+  failure instead of a bootstrap, and nobody has measured how many
+  machines that is.  The question is also narrower than it was.  It
+  is not "what is installed on a stock machine" but "is `pip` inside
+  the distribution's base `python3` package," which is one
+  `dnf repoquery`, `apk info` or `pacman -Qi` per distribution and
+  needs no container runtime.
+
+  Note what this issue cannot settle.  Its original teeth came from
+  the decision criterion under Misc.: if the user can run
+  `pip install pip-run`, this project is an exercise.  Requiring
+  `pip` sharpens that rather than blunting it, since it assumes the
+  very tool that makes `pip-run` installable.  The answer is that the
+  recipient runs no commands at all where `pip-run` costs them one,
+  and that is an argument about what the product is.  No survey of
+  distributions will confirm or refute it.
+
+  Wayne's current thoughts:
+  * It would be nice to test on Windows and MacOS.
+  * I know people who have these machines and would be glad to
+    help.  Until then, the answer is currently unknown.
 
 * **An already-importable package is installed anyway. (2aapiia)**  All
   twelve cases ask whether the package is on disk at their own target,
@@ -730,6 +724,29 @@ is where the disposition lives.
   Wayne's current thoughts:
   * I have no idea what this issue is about.  Let's do the experiment
     when we get the chance.
+
+* **The wheel tag matcher is a five-line stand-in. (2twtmifs)**  Cases
+  3 and 12 pick wheels with a substring test that cannot tell musl
+  from glibc, and does not read the glibc version a manylinux tag
+  encodes.  It agreed with pip for one package on one platform.  On
+  Alpine it would download a manylinux wheel and fail at import with
+  a loader error.  The matcher is also written out twice, once per
+  case, so a correction has to be made in both places.
+
+  Two things have narrowed this since it was written.  Requiring
+  `pip` demoted cases 3 and 12 from shipping candidates to
+  measurement, so the matcher is no longer on the path to a
+  stranger's machine unless that decision is revisited.  And the
+  stub's job is to fetch `embeddedvenv`, which is pure Python and
+  ships as `py3-none-any`, so no tag matching is needed for it at
+  all; the matcher exists only because Experiment 1 fetched
+  `coverage`, which has compiled wheels.  The 49 pasted lines the
+  table charges the pure standard library path are therefore priced
+  against the wrong package, and that number should be remeasured
+  before it is used to justify anything.
+
+  Wayne's current thoughts:
+  * Let's revisit this issue after Experiment 2.
 
 * **The venv executable directory is hard-coded. (3tvedih)**  Cases
   4 and 11 reach into `root / "bin"` at `bootstrap.py:296`, `400` and
