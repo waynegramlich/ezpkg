@@ -438,16 +438,16 @@ Date: Tue Sep 22, 2026
 3. **Experiment 2**: Master `pip` and Associated `PyPI` Compatible Servers
 
    The ultimate goal is to build a testing framework that allows installing
-   the `embeddedenv` (to be developed) package from a `pip` compatible server
+   the `embedded_venv` (to be developed) package from a `pip` compatible server
    (e.g `pipiserver`) and load it into program via the bootstrap technology
    developed in the previous experiment.
 
    Here is an initial unordered set of tasks:
-   * Create a new `embeddedenv` class.
+   * Create a new `embedded_venv` class.
    * Download, install, and run a Python Package server.
-   * Create Python package that contains the `embeddedenv` package.
-   * Download the `embeddedenv` package.
-   * Use bootstrap code (see above) to download `embeddedenv` package.
+   * Create Python package that contains the `embedded_venv` package.
+   * Download the `embedded_venv` package.
+   * Use bootstrap code (see above) to download `embedded_venv` package.
    * Build a test framework for all these tasks.
 
    Some initial conclusions after some research and discussion:
@@ -476,15 +476,15 @@ Date: Tue Sep 22, 2026
      accepts a local directory laid out in that format, which removes
      any need to start and stop a server.  Later on, testing with an
      actual web server is necessary.
-   * `bootstrap.py` is not being merged into `embeddedenv_test.py`.
+   * `bootstrap.py` is not being merged into `embedded_venv_test.py`.
      This allows `bootstrap.py` to perform end-to-end testing with
-     a real Python package server, whereas `embeddedenv_test.py` can
+     a real Python package server, whereas `embedded_venv_test.py` can
      use non server based testing.
    * While there are tools that can generate a PEP 503 directory tree
      it easier to just manually generate the tree.
    * Simulate the Package server to download into the `~/.embedded_venv/`
      directory:
-     1. Construct a Wheel for `EmbeddedVenv.py`.
+     1. Construct a Wheel for `embedded_venv.py`.
      2. Create the associated PEP 503 tree.
      3. Set up an environment variable.  ("coverage" => "embedded_venv"?)
      4. Do an end-to-test.
@@ -677,9 +677,9 @@ Unresolved, highest priority first.
     We need to at least let the user know that we died because we
     could not get the package.
 
-* **`embeddedenv` does not exist yet. (1edney)**  Every case installs
+* **`embedded_venv` does not exist yet. (1edney)**  Every case installs
   `coverage` as a stand-in while the comment at the top of each says
-  `# Ensure embeddedenv is downloaded.`  The whole design is two
+  `# Ensure embedded_venv is downloaded.`  The whole design is two
   stage -- a small pasted stub fetches a real package that carries
   the heavy logic -- and only the stub half has been built.  The
   `paste` column therefore measures the cost of fetching a test
@@ -757,7 +757,7 @@ Unresolved, highest priority first.
   `pip` demoted cases 3 and 12 from shipping candidates to
   measurement, so the matcher is no longer on the path to a
   stranger's machine unless that decision is revisited.  And the
-  stub's job is to fetch `embeddedenv`, which is pure Python and
+  stub's job is to fetch `embedded_venv`, which is pure Python and
   ships as `py3-none-any`, so no tag matching is needed for it at
   all; the matcher exists only because Experiment 1 fetched
   `coverage`, which has compiled wheels.  The 49 pasted lines the

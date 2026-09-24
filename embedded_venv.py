@@ -6,11 +6,11 @@ that needs it, fetches this package and imports it.  Everything that is
 too large to paste lives here.
 
 The stub fetches exactly one package, of known name and with no
-dependencies.  `EmbeddedEnv` then fetches whatever the calling program
+dependencies.  `EmbeddedVEnv` then fetches whatever the calling program
 actually declared, which is the general case: version constraints,
 extras, transitive dependencies and compiled wheels.
 
-This file is a placeholder.  `EmbeddedEnv` is deliberately empty until
+This file is a placeholder.  `EmbeddedVEnv` is deliberately empty until
 the shape of the general case fetch has been worked out.
 
 MIT No Attribution
@@ -35,7 +35,7 @@ SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 # SPDX-License-Identifier: MIT-0
 
 
-class EmbeddedEnv:
+class EmbeddedVEnv:
     """Fetch and import Python packages that are not preinstalled.
 
     The class is empty for now.  What it eventually holds is the
@@ -48,5 +48,5 @@ class EmbeddedEnv:
     * None yet.
 
     Constructor:
-    * `EmbeddedEnv()`
+    * `EmbeddedVEnv()`
     """
