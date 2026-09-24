@@ -232,8 +232,8 @@ requirement is what the rest of this log book is about.
   
    This experiment assumes that eventually there will be a pip installable
    package on [PyPI](https://pypi.org) (i.e. the Python Package Index web site)
-   that contains a package that has an `EmbeddedVenv` class.  The package name
-   is to be decided.
+   that contains a package that has an `EmbeddedVEnv` class.  The package is
+   named `embedded-venv` on PyPI and imports as `embedded_venv`.
 
    The bootstrap code will live in every program that needs to bootstrap this
    code into their program.  This bootstrap code will assume that the
@@ -442,13 +442,21 @@ Date: Tue Sep 22, 2026
    (e.g `pipiserver`) and load it into program via the bootstrap technology
    developed in the previous experiment.
 
-   Here is an initial unordered set of tasks:
-   * Create a new `embedded_venv` class.
-   * Download, install, and run a Python Package server.
-   * Create Python package that contains the `embedded_venv` package.
-   * Download the `embedded_venv` package.
-   * Use bootstrap code (see above) to download `embedded_venv` package.
-   * Build a test framework for all these tasks.
+   Here is the task list, with what is done struck from it:
+
+   * DONE.  Build a wheel for `embedded_venv.py`, and lay it out as a
+     PEP 503 tree.  Both are in `embedded_venv_test.py` and use
+     nothing but the standard library.
+   * DONE.  Let the environment aim `bootstrap.py` at that tree,
+     through `PIP_INDEX_URL` and `BOOTSTRAP_PACKAGE`.
+   * Fill in `EmbeddedVEnv` with something worth fetching.
+   * End-to-end: run a `bootstrap.py` case against the local tree and
+     check that `embedded_venv` lands in `~/.embedded_venv` and
+     imports.
+   * Failure testing: an index missing the package, a truncated wheel,
+     a missing `index.html`.
+   * Eventually, a real package server, which is the only way to test
+     cases 3 and 12.
 
    Some initial conclusions after some research and discussion:
    * Preinstalled Python environment.  What follows was measured on one

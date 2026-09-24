@@ -34,6 +34,11 @@ SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 """
 # SPDX-License-Identifier: MIT-0
 
+# The one place the version is written down.  `bootstrap.py`
+# prints it after importing, and the test suite stamps it into
+# the wheel it builds.
+__version__: str = "0.0.1"
+
 
 class EmbeddedVEnv:
     """Fetch and import Python packages that are not preinstalled.

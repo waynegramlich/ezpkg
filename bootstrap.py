@@ -28,6 +28,16 @@ case is counted and is exactly the line a real program would carry --
 `~/.embedded_venv` is named in the code rather than passed in, so that
 stays true.
 
+`PACKAGE` is internal in the same way.  A pasted case carries one
+literal line, `PACKAGE = "embedded_venv"`, and that is the line
+`paste` counts.  Here it defaults to `coverage` and the environment
+can aim the cases at something else through `BOOTSTRAP_PACKAGE`, so
+that the test suite can point them at a locally built
+`embedded_venv` wheel without editing a case body.  The `import os`
+that makes the lookup possible is harness machinery too, and is
+excluded from the count along with `sys.argv[1]` and the closing
+`print`.
+
 Measuring twelve cases against one `~/.embedded_venv` would be wrong: the
 second case onwards would find `coverage` already on disk and report a
 warm time as its cold time.  Each run therefore gets its own `HOME`,
@@ -176,10 +186,13 @@ SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 # SPDX-License-Identifier: MIT-0
 
 import importlib
+import os
 import pathlib
 import sys
 
-PACKAGE = "coverage"
+# The package every case fetches.  See the docstring above: a pasted
+# case carries a literal, while the harness steers this one instead.
+PACKAGE: str = os.environ.get("BOOTSTRAP_PACKAGE", "coverage")
 
 
 def main() -> None:

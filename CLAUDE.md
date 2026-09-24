@@ -38,18 +38,16 @@ the rules stay versioned alongside the work they govern.
    commits while setting up the repository, which is exactly the
    cluttered log this project was organized to avoid.
 
-3. **Commit messages are drafted in `.git_commit.md`.**  That file is
-   the one place a git commit message is composed; Claude writes a
-   proposed message there, says it is ready, and stops.  Wayne reviews
-   it and runs `git commit -F .git_commit.md` himself.  The file is
-   listed in `.gitignore`, so it never becomes part of a commit -- it
-   holds only the *next* message, and is overwritten by the one after
-   that.  It is tracked in mercurial, so drafts are recoverable like
-   everything else.
+3. **Claude does not write commit messages at all.**  When a chunk of
+   work looks finished, Claude says so -- "this looks like a commit
+   point" -- and stops.  Wayne writes the message himself, by hand.
 
-   Claude adds no `Co-Authored-By:` trailer, and no other generated
-   attribution line, to anything written there.  Wayne is the author of
-   record for every git commit.
+   An earlier version of this rule had Claude drafting messages into a
+   `.git_commit.md` file for Wayne to review.  Wayne never used them,
+   so the file and the rule were retired on 2026-09-23.  Do not
+   recreate it.  Wayne is the author of record for every git commit,
+   and no generated attribution line -- `Co-Authored-By:` or any
+   other -- appears in one.
 
 4. **Every git commit message must stand on its own** in `git log`.  One
    commit per meaningful unit of work.  No "wip", no "fix typo", no
