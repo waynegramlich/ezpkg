@@ -489,7 +489,11 @@ def main() -> None:
             sys.path.insert(0, str(target))
             importlib.invalidate_caches()
             module = importlib.import_module(PACKAGE)
-    print(f"{PACKAGE} {module.__version__} imported from {module.__file__}")
+    # `type(sys)` is `types.ModuleType`, reached without importing
+    # `types`, because `sys` is a module and is already imported.
+    assert isinstance(module, type(sys)), f"{PACKAGE} gave {module!r}"
+    print(f"{PACKAGE}: module {module.__name__} "
+          f"version {module.__version__} from {module.__file__}")
 
 
 MECHANISMS = {

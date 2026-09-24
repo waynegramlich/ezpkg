@@ -685,19 +685,6 @@ Unresolved, highest priority first.
     We need to at least let the user know that we died because we
     could not get the package.
 
-* **`embedded_venv` does not exist yet. (1edney)**  Every case installs
-  `coverage` as a stand-in while the comment at the top of each says
-  `# Ensure embedded_venv is downloaded.`  The whole design is two
-  stage -- a small pasted stub fetches a real package that carries
-  the heavy logic -- and only the stub half has been built.  The
-  `paste` column therefore measures the cost of fetching a test
-  package, not of the real thing.  Nothing in Experiment 1 is wrong
-  because of this, but nothing in it validates the second stage
-  either.
-
-  Wayne's current thoughts:
-  * We'll start getting answer's in experiment 2.
-
 * **How many machines does requiring `pip` exclude? (2hmmdrpe)**  The
   decision to require `pip`, recorded under the preinstalled
   environment conclusions in Experiment 2, removed `pip`'s absence

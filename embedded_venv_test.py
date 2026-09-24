@@ -51,6 +51,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+import unittest.mock
 import zipfile
 from pathlib import Path
 from typing import Any
@@ -323,21 +324,188 @@ class EmbeddedVEnvTest(unittest.TestCase):
     def test_installed_package_imports(self) -> None:
         """The installed copy imports and exposes `EmbeddedVEnv`."""
         # Import in a fresh interpreter, so nothing here can help it.
+        # HOME is faked because constructing an `EmbeddedVEnv` with no
+        # argument writes into `~/.embedded_venv` for real.
         target: Path = self.root / "importable"
+        (self.root / "fake_home").mkdir(exist_ok=True)
         self.assertEqual(self.pip_install(target, DISTRIBUTION).returncode, 0)
         done: subprocess.CompletedProcess[str] = subprocess.run(
             [sys.executable, "-c",
              f"import {MODULE}; print({MODULE}.EmbeddedVEnv())"],
-            env=dict(os.environ, PYTHONPATH=str(target)),
+            env=dict(os.environ, PYTHONPATH=str(target),
+                     HOME=str(self.root / "fake_home")),
             capture_output=True, text=True, check=False)
         self.assertEqual(done.returncode, 0, done.stderr)
         self.assertIn("EmbeddedVEnv object", done.stdout)
 
     def test_embedded_venv_constructs(self) -> None:
-        """`EmbeddedVEnv` can be imported and constructed in process."""
-        # The in process sanity check that needs no pip at all.
-        self.assertIsInstance(embedded_venv.EmbeddedVEnv(),
-                              embedded_venv.EmbeddedVEnv)
+        """Constructing one makes the cache directory and a README."""
+        # Never construct without a root: the default is the real
+        # `~/.embedded_venv`, and a test must not write there.
+        cache: Path = self.root / "cache"
+        venv: embedded_venv.EmbeddedVEnv = embedded_venv.EmbeddedVEnv(cache)
+        self.assertTrue(cache.is_dir())
+        self.assertEqual(venv.readme, cache / "README.md")
+
+    def test_readme_comes_from_the_docstring(self) -> None:
+        """The README is the constructor docstring, retitled."""
+        # The summary line becomes the title; `Arguments:` is dropped.
+        cache: Path = self.root / "readme"
+        text: str = embedded_venv.EmbeddedVEnv(cache).readme.read_text()
+        self.assertTrue(
+            text.startswith("# Embedded Virtual Environment Cache\n"))
+        self.assertIn("Deleting this directory is safe.", text)
+        self.assertNotIn("Arguments:", text)
+
+    def test_default_root_follows_home(self) -> None:
+        """With no argument the cache lands under the home directory."""
+        # `Path.home()` reads HOME, so a fake HOME keeps this contained.
+        home: Path = self.root / "home"
+        home.mkdir(exist_ok=True)
+        with unittest.mock.patch.dict(os.environ, {"HOME": str(home)}):
+            venv: embedded_venv.EmbeddedVEnv = embedded_venv.EmbeddedVEnv()
+        self.assertEqual(venv.root, home / ".embedded_venv")
+        self.assertTrue((home / ".embedded_venv" / "README.md").is_file())
+
+
+class IncludeTest(unittest.TestCase):
+    """Exercise `EmbeddedVEnv.include` against a local index.
+
+    A throwaway package is built and published for these tests, so
+    that nothing here depends on PyPI or on the network.
+
+    Attributes:
+    * `cache` (`Path`):
+      The cache directory that `include` installs into.
+    * `index` (`Path`):
+      The PEP 503 tree holding the throwaway package.
+    * `root` (`Path`):
+      The temporary directory holding everything.
+
+    Constructor:
+    * `IncludeTest()`, by `unittest` rather than by hand.
+    """
+
+    # Built once by `setUpClass`, shared by every test below.
+    cache: Path
+    index: Path
+    root: Path
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        """Publish a throwaway package into a throwaway index."""
+        # A module of its own, so no test can pass by accident.
+        cls.root = Path(tempfile.mkdtemp(prefix="include-"))
+        module: Path = cls.root / "widget.py"
+        module.write_text('"""A throwaway."""\n__version__ = "1.2.3"\n')
+        wheel: Path = build_wheel(module, "widget", "1.2.3",
+                                  "A throwaway.", cls.root / "dist")
+
+        # A second one whose PyPI name and import name differ, the way
+        # `python-dateutil` imports as `dateutil`.
+        other: Path = cls.root / "gadgetlib.py"
+        other.write_text('"""A second throwaway."""\n'
+                         '__version__ = "4.5.6"\n')
+        two_named: Path = build_wheel(other, "python-gadget", "4.5.6",
+                                      "A second throwaway.",
+                                      cls.root / "dist")
+        cls.index = build_index([wheel, two_named], cls.root / "index")
+        cls.cache = cls.root / "cache"
+
+    @classmethod
+    def tearDownClass(cls) -> None:
+        """Remove everything the class built."""
+        # One directory holds everything, so one removal suffices.
+        shutil.rmtree(cls.root, ignore_errors=True)
+
+    def include(self, target: Path, package: str, *argv: str,
+                distribution: str | None = None) -> str:
+        """Run `include` in a child interpreter and return its output.
+
+        A child is used because `include` inserts into `sys.path` and
+        imports, neither of which should leak between tests.
+
+        Arguments:
+        * `target` (`Path`):
+          The cache directory to install into.
+        * `package` (`str`):
+          What to include.
+        * `argv` (`str`):
+          Extra arguments for `pip install`.
+        * `distribution` (`str | None`):
+          The PyPI name, when it differs from the import name.
+
+        Returns:
+        * (`str`): Standard output, or standard error if it failed.
+        """
+        # Point pip at the local index and run the whole thing remotely.
+        script: str = (
+            "import sys, embedded_venv;"
+            "from pathlib import Path;"
+            f"v = embedded_venv.EmbeddedVEnv(Path({str(target)!r}));"
+            f"m = v.include({package!r}, {list(argv)!r}, "
+            f"{distribution!r});"
+            "print(m.__name__, m.__version__)")
+        environment: dict[str, str] = dict(
+            os.environ, PIP_INDEX_URL=self.index.as_uri(),
+            PYTHONPATH=str(Path(__file__).resolve().parent),
+            HOME=str(self.root / "home"))
+        done: subprocess.CompletedProcess[str] = subprocess.run(
+            [sys.executable, "-c", script], env=environment,
+            capture_output=True, text=True, check=False)
+        return done.stdout.strip() if done.returncode == 0 else done.stderr
+
+    def test_include_fetches_and_imports(self) -> None:
+        """A missing package is fetched and handed back imported."""
+        # The package does not exist anywhere but the local index.
+        self.assertEqual(self.include(self.cache, "widget"), "widget 1.2.3")
+        self.assertTrue((self.cache / "widget.py").is_file())
+
+    def test_include_passes_argv_to_pip(self) -> None:
+        """Extra arguments reach `pip install`."""
+        # `--no-deps` is harmless here, so success proves it parsed.
+        target: Path = self.root / "argv"
+        self.assertEqual(self.include(target, "widget", "--no-deps"),
+                         "widget 1.2.3")
+
+    def test_include_rejects_bad_argv(self) -> None:
+        """A bad argument fails loudly rather than silently."""
+        # pip exits non-zero, and `include` turns that into an error.
+        target: Path = self.root / "bad"
+        self.assertIn("could not fetch",
+                      self.include(target, "widget", "--no-such-option"))
+
+    def test_include_reports_a_missing_package(self) -> None:
+        """A package the index does not have raises a clear error."""
+        # This is the `0whwnn` shape: say why, do not just fail to import.
+        target: Path = self.root / "missing"
+        output: str = self.include(target, "nosuchwidget")
+        self.assertIn("could not fetch 'nosuchwidget'", output)
+
+    def test_include_takes_two_names(self) -> None:
+        """A distribution named apart from its module still works."""
+        # `pip` is asked for `python-gadget`; `import` gets `gadgetlib`.
+        target: Path = self.root / "two_names"
+        self.assertEqual(
+            self.include(target, "gadgetlib", distribution="python-gadget"),
+            "gadgetlib 4.5.6")
+        self.assertTrue((target / "gadgetlib.py").is_file())
+
+    def test_one_name_is_not_enough(self) -> None:
+        """Asking by import name alone fails when the names differ."""
+        # This is why `distribution` exists rather than being inferred.
+        target: Path = self.root / "one_name"
+        self.assertIn("could not fetch 'gadgetlib'",
+                      self.include(target, "gadgetlib"))
+
+    def test_contains_reports_what_is_cached(self) -> None:
+        """`contains` is False before an include and True after."""
+        # A single module counts, not only a package directory.
+        target: Path = self.root / "contains"
+        venv: embedded_venv.EmbeddedVEnv = embedded_venv.EmbeddedVEnv(target)
+        self.assertFalse(venv.contains("widget"))
+        self.include(target, "widget")
+        self.assertTrue(venv.contains("widget"))
 
 
 def main() -> None:

@@ -34,6 +34,14 @@ SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 """
 # SPDX-License-Identifier: MIT-0
 
+import importlib
+import inspect
+import subprocess
+import sys
+from collections.abc import Sequence
+from pathlib import Path
+from types import ModuleType
+
 # The one place the version is written down.  `bootstrap.py`
 # prints it after importing, and the test suite stamps it into
 # the wheel it builds.
@@ -43,15 +51,155 @@ __version__: str = "0.0.1"
 class EmbeddedVEnv:
     """Fetch and import Python packages that are not preinstalled.
 
-    The class is empty for now.  What it eventually holds is the
-    general case fetch: read the calling program's declared
+    Most of the class is still to come.  What it eventually holds is
+    the general case fetch: read the calling program's declared
     requirements, resolve them, install them into a cache directory
     keyed by interpreter and platform, and put that directory on
     `sys.path`.
 
+    What works today is the cache directory itself.  Constructing an
+    `EmbeddedVEnv` creates the directory and drops a `README.md` into
+    it, so that somebody who finds the directory and wonders what it
+    is can read the answer without leaving it.
+
     Attributes:
-    * None yet.
+    * `readme` (`Path`):
+      The `README.md` written into `root`.
+    * `root` (`Path`):
+      The cache directory.  Created if it does not exist.
 
     Constructor:
-    * `EmbeddedVEnv()`
+    * `EmbeddedVEnv(root=None)`
     """
+
+    # Set by the constructor; see `Attributes:` above.
+    readme: Path
+    root: Path
+
+    def __init__(self, root: Path | None = None) -> None:
+        """Embedded Virtual Environment Cache.
+
+        This directory holds Python packages that a program needed but
+        that the Python installation did not provide.  A small
+        bootstrap, pasted into the top of that program, fetched them
+        and put this directory on `sys.path`.
+
+        Nothing here is managed by the system package manager, and
+        nothing here is a virtual environment despite the name.  It is
+        an ordinary directory of installed packages.
+
+        Deleting this directory is safe.  The next program that needs
+        one of these packages will fetch it again.
+
+        Arguments:
+        * `root` (`Path | None`):
+          The cache directory to use.  `None`, the default, means
+          `~/.embedded_venv`, which is the directory the bootstrap
+          code names.  Tests pass a temporary directory instead.
+        """
+        # Default to the cache directory that the bootstrap code names.
+        self.root = Path.home() / ".embedded_venv" if root is None else root
+        self.root.mkdir(parents=True, exist_ok=True)
+
+        # The docstring above is the README; the summary line becomes
+        # its title.  Docstrings are absent under `python3 -OO`, so
+        # fall back to a title only rather than failing.
+        document: str | None = inspect.getdoc(EmbeddedVEnv.__init__)
+        title: str
+        body: str
+        if document is None:
+            title, body = "Embedded Virtual Environment Cache", ""
+        else:
+            title, _, body = document.partition("\n")
+            title = title.rstrip(".")
+            body = body.split("Arguments:")[0].rstrip()
+
+        # Write it out, replacing any earlier copy.
+        self.readme = self.root / "README.md"
+        self.readme.write_text(f"# {title}\n{body}\n")
+
+    def include(self, package: str, argv: Sequence[str] = (),
+                distribution: str | None = None) -> ModuleType:
+        """Make a package importable, fetching it if it is missing.
+
+        The package is installed into the cache directory with
+        `pip install --target`, which needs no virtual environment,
+        and the cache directory is then put on `sys.path` so that the
+        import succeeds.  A package already in the cache is not
+        fetched again.
+
+        `pip` runs as a child process rather than through
+        `pip._internal`, which is not a public interface, and which
+        leaves its logging handlers on the root logger of whatever
+        imports it.
+
+        Arguments:
+        * `package` (`str`):
+          The import name: what `import` is given afterwards, and
+          what the cache is checked for.
+        * `argv` (`Sequence[str]`):
+          Extra arguments for `pip install`, such as a version
+          specifier or `--no-deps`.  They follow this method's own
+          arguments, so `pip` lets them win where it takes the last
+          of a repeated option.
+        * `distribution` (`str | None`):
+          What to ask `pip` for, when that differs from the import
+          name.  `None`, the default, means they are the same, which
+          covers most packages and all of the ones this project
+          builds.  They part company often enough to matter, though:
+          `python-dateutil` imports as `dateutil`, and
+          `typing-extensions` as `typing_extensions`.  `pip`
+          normalizes punctuation, so only a real difference needs
+          this.
+
+        Returns:
+        * (`ModuleType`): The imported module.
+
+        Raises:
+        * `RuntimeError`:
+          If `pip` fails.  Its standard error is included, because
+          the usual cause is no network and the caller deserves to
+          be told that rather than left with an import error.
+        * `ModuleNotFoundError`:
+          If `pip` succeeds but the package still will not import,
+          which means `package` is not the import name.
+        """
+        # A package already in the cache costs nothing but a path
+        # insert; see the `2aapiia` issue in `log_book.md`.
+        done: subprocess.CompletedProcess[str]
+        if not self.contains(package):
+            done = subprocess.run(
+                [sys.executable, "-m", "pip", "install", "--quiet",
+                 "--no-input", "--disable-pip-version-check",
+                 *argv, "--target", str(self.root),
+                 package if distribution is None else distribution],
+                capture_output=True, text=True, check=False)
+            if done.returncode != 0:
+                raise RuntimeError(
+                    f"could not fetch "
+                    f"{package if distribution is None else distribution!r}"
+                    f" into {self.root}: "
+                    f"{done.stderr.strip() or 'pip gave no reason'}")
+
+        # Put the cache on `sys.path` before importing out of it.
+        if str(self.root) not in sys.path:
+            sys.path.insert(0, str(self.root))
+        importlib.invalidate_caches()
+        return importlib.import_module(package)
+
+    def contains(self, package: str) -> bool:
+        """Report whether a package is already in the cache.
+
+        A package arrives either as a directory or as a single
+        module, so both spellings count.
+
+        Arguments:
+        * `package` (`str`):
+          The import name to look for.
+
+        Returns:
+        * (`bool`): True if the cache already holds it.
+        """
+        # Either spelling means there is nothing to fetch.
+        return ((self.root / package).is_dir()
+                or (self.root / f"{package}.py").is_file())

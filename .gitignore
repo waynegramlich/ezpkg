@@ -15,7 +15,8 @@ __pycache__/
 python_with_markdown.md
 
 
-# Editor backups
+# Editor backups.  Git needs the leading hash escaped, because an
+# unescaped one would start a comment and ignore nothing.
 *~
-#*#
+\#*#
 .#*
