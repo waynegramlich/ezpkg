@@ -480,6 +480,15 @@ Date: Tue Sep 22, 2026
      This allows `bootstrap.py` to perform end-to-end testing with
      a real Python package server, whereas `embeddedenv_test.py` can
      use non server based testing.
+   * While there are tools that can generate a PEP 503 directory tree
+     it easier to just manually generate the tree.
+   * Simulate the Package server to download into the `~/.embedded_venv/`
+     directory:
+     1. Construct a Wheel for `EmbeddedVenv.py`.
+     2. Create the associated PEP 503 tree.
+     3. Set up an environment variable.  ("coverage" => "embedded_venv"?)
+     4. Do an end-to-test.
+     5. Do failure testing (e.g. breaking the wheel, etc.)
 
 ## Misc.
 
@@ -606,7 +615,7 @@ as H, L, M, which puts low above medium; `sort` on a list of these
 identifiers puts the levels in the right order with no special
 handling.  Within a level the order is editorial and a plain sort will
 not reproduce it, which is intended: the digit is the priority, and
-position inside a level is judgement.
+position inside a level is judgment.
 
 Issues carry no list numbers.  Changing an issue's priority or its
 title changes its identifier, and every reference to the old name must
