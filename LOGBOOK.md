@@ -635,9 +635,7 @@ code with a real package server.  A proposed list of steps list belows:
   `https://pypi.org/pypi/{PACKAGE}/json` with bare `urllib`, which knows
   nothing of `PIP_INDEX_URL`, so they are the one real gap: either serve
   that JSON shape from the same server, or teach both cases the simple
-  API instead.  Either way their line counts move, so the `paste` column
-  in Task 2 has to be remeasured.  The `Leftovers from task 3` section
-  below belongs here and should be folded in and deleted.
+  API instead.
 * Step 5.4: The failure cases carried over from Task 3.  A truncated
   wheel, a missing `index.html`, and a 500 from the index.  All three are
   cheap once a server exists, because a server can be told to misbehave
@@ -655,7 +653,7 @@ code with a real package server.  A proposed list of steps list belows:
   to beef up code coverage.
 * Step 5.8: (This is an open list that can be added to as needed.)
 
-## Step 5.1: Select a package server (research only)
+### Step 5.1: Select a package server (research only)
 
 `build_index` in `embedded_venv_test.py` already emits a complete PEP
 503 tree, so the question was whether any server buys anything that
@@ -682,7 +680,7 @@ Not settled here: `http.server` has no TLS, so Step 5.6 will need
 `ssl.SSLContext.wrap_socket` on the listening socket.  No alternative
 above supplies a trusted certificate either.
 
-## Step 5.2: Serve the existing tree over HTTP
+### Step 5.2: Serve the existing tree over HTTP
 
 `serve_index` in `embedded_venv_test.py` publishes the tree that
 `build_index` already produced, and both test classes now reach it
@@ -707,18 +705,35 @@ Not done here: cases 3 and 12 still cannot be tested, because they
 want `/pypi/{PACKAGE}/json` rather than the simple API.  That is Step
 5.3.
 
+### Step 5.3: Settle cases 3 and 12
+
+Cases 3 and 12 read PyPI's JSON API with `urllib`, which knows nothing
+of `PIP_INDEX_URL`, so they were the two cases no local index could
+reach.  They are now tested, and the choice was to serve the JSON
+rather than to convert them to the simple API.  That keeps what the
+cases measure -- a bootstrap needing neither `pip` nor `venv` -- which
+converting them would have thrown away.
+
+* `bootstrap.py` gained `JSON_API`, read from `BOOTSTRAP_JSON_API` and
+  defaulting to `https://pypi.org/pypi`.  This copies what `PACKAGE`
+  and `BOOTSTRAP_PACKAGE` already do, and for the same reason: the
+  harness aims a case at a local server without editing a case body.
+* The `paste` column did not move.  The substitution costs no lines,
+  and `measure_source` still reports 5 imports and 45 lines for case 3
+  and 7 and 51 for case 12, which is what the Task 2 table says.  No
+  remeasurement was needed after all.
+* `_IndexHandler` answers `/pypi/{project}/json` from the tree, in the
+  modern `{"urls": [...]}` shape that those two cases parse, and 404s
+  a project the index does not hold.  The payload is the subset they
+  read rather than all of PyPI's, since the rest cannot be checked.
+* Both cases now run end to end: three new tests take the suite to 18,
+  and pointing `BOOTSTRAP_JSON_API` at a dead port fails them, so they
+  are measuring the fetch and not passing vacuously.
+
 ### Leftovers from task 3
 
 Before we close task 5, stuff in this section needs to be either moved
 to another section or deleted.
-
-Cases 3 and 12 cannot be tested against a directory.  They do not speak
-the PEP 503 simple API at all: they fetch
-`https://pypi.org/pypi/{PACKAGE}/json`, which is PyPI's JSON API, and
-`urllib` knows nothing of `PIP_INDEX_URL`.  So this task has to either
-serve that JSON shape from a local server or teach those two cases the
-simple API instead, and the second choice changes their line counts and
-therefore the `paste` column.
 
 Carried over from Task 3:
 

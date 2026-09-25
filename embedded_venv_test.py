@@ -49,6 +49,7 @@ import hashlib
 import html
 import http.server
 import io
+import json
 import os
 import re
 import shutil
@@ -58,6 +59,8 @@ import tempfile
 import threading
 import unittest
 import unittest.mock
+import urllib.error
+import urllib.request
 import zipfile
 from pathlib import Path
 from typing import Any
@@ -216,18 +219,70 @@ def build_index(wheels: list[Path],
 
 
 class _IndexHandler(http.server.SimpleHTTPRequestHandler):
-    """Serve a PEP 503 tree from disk, and say nothing while doing it.
+    """Serve a PEP 503 tree from disk, plus PyPI's JSON API.
 
-    `SimpleHTTPRequestHandler` already does the whole job: it serves a
-    directory's `index.html` for a path ending in a slash, which is
-    exactly what the two levels of a PEP 503 tree ask for.  The only
-    reason to subclass it is to silence the request log, which would
-    otherwise interleave with the test output on standard error.
+    `SimpleHTTPRequestHandler` already does most of the job: it serves
+    a directory's `index.html` for a path ending in a slash, which is
+    exactly what the two levels of a PEP 503 tree ask for.  Two things
+    are added.  The request log is silenced, because it would
+    otherwise interleave with the test output on standard error.  And
+    `/pypi/{project}/json` is answered from the tree, because cases 3
+    and 12 of `bootstrap.py` read that endpoint with `urllib` rather
+    than going through `pip`.
+
+    The JSON is the modern per release shape, `{"urls": [...]}` with a
+    `filename` and a `url` in each entry, which is what those two
+    cases parse.  It is not PyPI's full payload; it is the subset they
+    read, which is the only part a test can check them against.
 
     Constructor:
     * `_IndexHandler(...)`, by `http.server` rather than by hand.  The
       `directory` argument is bound by `serve_index` beforehand.
     """
+
+    def do_GET(self) -> None:
+        """Answer the JSON API here, and everything else from disk."""
+        # `/pypi/<project>/json` is the only synthesized path.
+        parts: list[str] = self.path.strip("/").split("/")
+        if len(parts) == 3 and parts[0] == "pypi" and parts[2] == "json":
+            self.send_json(parts[1])
+            return
+        super().do_GET()
+
+    def send_json(self, project: str) -> None:
+        """Answer one JSON API request for `project`.
+
+        Arguments:
+        * `project` (`str`):
+          The project name as the request spelled it.  It is
+          normalized the way PEP 503 and `build_index` normalize it,
+          so that `embedded-venv` and `embedded_venv` both arrive.
+        """
+        # Find the project's wheels, which are the whole of the answer.
+        normalized: str = re.sub(r"[-_.]+", "-", project).lower()
+        directory: Path = Path(self.directory) / normalized
+        wheels: list[Path] = sorted(directory.glob("*.whl"))
+
+        # A project with no files is a 404, exactly as PyPI answers.
+        if not wheels:
+            self.send_error(404, f"no project {normalized}")
+            return
+
+        # Build the subset of the payload that cases 3 and 12 read.
+        host: str = self.headers.get("Host", "127.0.0.1")
+        payload: dict[str, Any] = {"urls": [
+            {"filename": wheel.name, "yanked": False,
+             "packagetype": "bdist_wheel",
+             "url": f"http://{host}/{normalized}/{wheel.name}"}
+            for wheel in wheels]}
+        body: bytes = json.dumps(payload).encode()
+
+        # Send it with a length, so `urllib` does not wait for a close.
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
 
     def log_message(self, format: str, *args: Any) -> None:
         """Discard a request log line.
@@ -407,6 +462,70 @@ class EmbeddedVEnvTest(unittest.TestCase):
         escaped: str = escaped_name(DISTRIBUTION)
         info: Path = target / f"{escaped}-{VERSION}.dist-info"
         self.assertTrue((info / "METADATA").is_file())
+
+    def run_case(self, label: str) -> subprocess.CompletedProcess[str]:
+        """Run one `bootstrap.py` case against the local server.
+
+        The case is aimed at the local index entirely through the
+        environment, which is what `bootstrap.py` documents that
+        `BOOTSTRAP_PACKAGE` and `BOOTSTRAP_JSON_API` are for, so no
+        case body is edited to make it testable.  `HOME` is faked
+        because every case installs into `~/.embedded_venv`.
+
+        Arguments:
+        * `label` (`str`):
+          The case label, as `bootstrap.py` spells it in `MECHANISMS`.
+
+        Returns:
+        * (`subprocess.CompletedProcess[str]`): The finished child.
+        """
+        # Give the case its own HOME, so it cannot find a warm cache.
+        home: Path = Path(tempfile.mkdtemp(prefix=f"case-{label}-",
+                                           dir=self.root))
+        script: Path = Path(__file__).resolve().parent / "bootstrap.py"
+
+        # Aim it at the local server, both for pip and for the JSON API.
+        environment: dict[str, str] = dict(
+            os.environ, HOME=str(home), PIP_INDEX_URL=self.index_url,
+            BOOTSTRAP_PACKAGE=MODULE,
+            BOOTSTRAP_JSON_API=f"{self.index_url}pypi")
+        environment.pop("VIRTUAL_ENV", None)
+        return subprocess.run(
+            [sys.executable, str(script), label],
+            env=environment, capture_output=True, text=True, check=False)
+
+    def test_json_api_lists_the_wheel(self) -> None:
+        """The synthesized JSON API answers in the shape case 3 reads."""
+        # Ask the way case 3 asks, by import name rather than PyPI name.
+        url: str = f"{self.index_url}pypi/{MODULE}/json"
+        payload: dict[str, Any]
+        with urllib.request.urlopen(url, timeout=30) as response:
+            payload = json.load(response)
+        self.assertEqual(len(payload["urls"]), 1)
+        self.assertEqual(payload["urls"][0]["filename"], self.wheel.name)
+        self.assertTrue(payload["urls"][0]["url"].endswith(self.wheel.name))
+
+    def test_json_api_reports_a_missing_project(self) -> None:
+        """A project the index does not hold is a 404, as on PyPI."""
+        # `urllib` raises on a 404 rather than returning it.
+        url: str = f"{self.index_url}pypi/nosuchproject/json"
+        error: urllib.error.HTTPError
+        with self.assertRaises(urllib.error.HTTPError) as caught:
+            urllib.request.urlopen(url, timeout=30)
+        error = caught.exception
+        self.assertEqual(error.code, 404)
+
+    def test_json_api_cases_bootstrap_end_to_end(self) -> None:
+        """Cases 3 and 12 fetch and import through the JSON API."""
+        # These two are the only cases that bypass pip entirely.
+        label: str
+        done: subprocess.CompletedProcess[str]
+        for label in ("3", "12"):
+            with self.subTest(case=label):
+                done = self.run_case(label)
+                self.assertEqual(done.returncode, 0, done.stderr)
+                self.assertIn(f"module {MODULE}", done.stdout)
+                self.assertIn(embedded_venv.__version__, done.stdout)
 
     def test_installed_package_imports(self) -> None:
         """The installed copy imports and exposes `EmbeddedVEnv`."""
