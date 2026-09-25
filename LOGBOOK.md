@@ -619,6 +619,56 @@ under its own separate version control, and then deleted.
 
 ## Task 5: A Real Package Server
 
+The primary purpose of this task is to do end-to-end testing of the bootstrap
+code with a real package server.  A proposed list of steps list belows:
+* Step 5.1: Decide what serves the pages.  This is a research task.  No
+  coding.  `build_index` in `embedded_venv_test.py` already emits a
+  complete PEP 503 tree, so the question is not which of `pypiserver`,
+  `devpi` and `simpleindex` to adopt, but whether any of them buys
+  anything that `http.server` over that tree does not.  The criterion is
+  that the test suite must run with nothing installed beyond
+  `python3-pip`, since a suite that needs `pip install pypiserver` argues
+  against the premise of the project.  Record the decision and why.
+* Step 5.2: Serve the existing tree over HTTP.  A `ThreadingHTTPServer`
+  bound to `127.0.0.1` on port 0, so that the operating system assigns
+  the port and the test reads it back rather than colliding with a stale
+  server; a daemon thread; torn down through `addClassCleanup`, which is
+  also what makes a control-C leave nothing behind.  Prove it by pointing
+  `PIP_INDEX_URL` at `http://127.0.0.1:<port>/` and re-running the tests
+  that pass today over `file://` -- the same assertions, a different
+  transport.  Measured 2026-09-25: `pip` reaches a plain HTTP loopback
+  index with no `--trusted-host` and no TLS.
+* Step 5.3: Settle cases 3 and 12.  They fetch
+  `https://pypi.org/pypi/{PACKAGE}/json` with bare `urllib`, which knows
+  nothing of `PIP_INDEX_URL`, so they are the one real gap: either serve
+  that JSON shape from the same server, or teach both cases the simple
+  API instead.  Either way their line counts move, so the `paste` column
+  in Task 2 has to be remeasured.  The `Leftovers from task 3` section
+  below belongs here and should be folded in and deleted.
+* Step 5.4: The failure cases carried over from Task 3.  A truncated
+  wheel, a missing `index.html`, and a 500 from the index.  All three are
+  cheap once a server exists, because a server can be told to misbehave
+  where a directory cannot.  Whether a hung connection is in scope is
+  still open.
+* Step 5.5: Run every `bootstrap.py` case against the server end to end,
+  asserting that `embedded_venv` lands in the cache and imports.  This is
+  the test the task exists for.
+* Step 5.6: (Optional) TLS and the `ca-certificates` dependency, which
+  nothing has exercised yet.  A self-signed certificate has to be trusted
+  by the client, and `pip` reads `PIP_CERT` while `urllib` reads
+  `SSL_CERT_FILE`.  Cases 3 and 12 may have nowhere to put either, which
+  would itself be a finding.
+* Step 5.7: (Optional) Do some test suite code coverage testing and try
+  to beef up code coverage.
+* Step 5.8: (This is an open list that can be added to as needed.)
+
+## Step 5.1: Select a package server (research only)
+
+### Leftovers from task 3
+
+Before we close task 5, stuff in this section needs to be either moved
+to another section or deleted.
+
 Cases 3 and 12 cannot be tested against a directory.  They do not speak
 the PEP 503 simple API at all: they fetch
 `https://pypi.org/pypi/{PACKAGE}/json`, which is PyPI's JSON API, and
