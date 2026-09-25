@@ -613,9 +613,9 @@ The issue tracker changed shape:
   `Rejected` and `Closed`.
 * `Wayne's current thoughts` became `Various thoughts`
 
-Decisions about the format of `LOGBOOK_NOTES.md` are in a file called
-`claude_notes.md` that resides as separate file in another directory
-with its on separate version control.
+Decisions about the logbook format were collected in `LOGBOOK_NOTES.md`,
+propagated into `claude_notes.md`, which resides in another directory
+under its own separate version control, and then deleted.
 
 ## Task 5: A Real Package Server
 
@@ -734,6 +734,10 @@ Not yet started, in priority order.
     error, so a caller is told why rather than left with an import failure.
     The twelve bootstrap cases still do not, and they are the half that runs on
     a stranger's machine.
+  * Claude (2026-09-25): A candidate for `### Closed Issues`, since the second
+    stage is the part that ships.  Left pending because the bootstrap half is
+    the half that reaches a stranger's machine, and closing the issue would
+    stop anyone looking at it again.  Wayne's call.
 
 * **An already-importable package is installed anyway. (2apiia)**  All
   twelve cases ask whether the package is on disk at their own target,
@@ -749,6 +753,9 @@ Not yet started, in priority order.
     asks `contains` first and skips the install when the package is already in
     the cache.  The twelve cases are unchanged, so the measurement in Task 2
     still shows the defect.
+  * Claude (2026-09-25): A candidate for `### Closed Issues`, on the same
+    terms as `0whwnn`: fixed where it ships, unfixed in the pasted bootstrap.
+    The two should close together or not at all.  Wayne's call.
 
 * **How many machines does requiring `pip` exclude? (2hmmdrpe)**  The
   decision to require `pip`, recorded under the preinstalled
@@ -828,6 +835,25 @@ Not yet started, in priority order.
   Various thoughts:
   * Wayne (2026-09-22): I have no idea what this issue is about.  Let's do the
     experiment when we get the chance.
+
+* **Reviewer thoughts have two formats. (3rthtf)**  Task 4 propagated the
+  reviewer thought rules into `claude_notes.md`, and the two files came out
+  disagreeing about the shape.  `claude_notes.md` puts reviewer thoughts
+  inside the `{ ... }` braces it uses for annotating a closed task, listing
+  the dating, naming and ordering rules as sub-points of the annotation
+  rules.  `LOGBOOK.md` instead uses a `Various thoughts:` label followed by
+  plain bullets, describes it that way in its own `## Issues` preamble, and
+  uses it in fourteen places.  The rules themselves agree; only the syntax
+  differs.  Whichever file is wrong, the other is the specification, so one
+  of the two has to move.
+
+  Various thoughts:
+  * Claude (2026-09-25): `LOGBOOK.md` has the better of it.  Braces are for
+    annotating settled text, and a multi-reviewer thread that grows over
+    months is a discussion rather than an annotation; wrapping fourteen of
+    them in braces would also bury the reviewer names one level deeper.  But
+    `claude_notes.md` is the general write-up, in another repository and in
+    Wayne's voice, so this is a proposal rather than an edit.
 
 * **The venv executable directory is hard-coded. (3vedih)**  Cases
   4 and 11 reach into `root / "bin"` at `bootstrap.py:296`, `400` and
