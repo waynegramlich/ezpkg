@@ -621,14 +621,7 @@ under its own separate version control, and then deleted.
 
 The primary purpose of this task is to do end-to-end testing of the bootstrap
 code with a real package server.  A proposed list of steps list belows:
-* Step 5.1: Decide what serves the pages.  This is a research task.  No
-  coding.  `build_index` in `embedded_venv_test.py` already emits a
-  complete PEP 503 tree, so the question is not which of `pypiserver`,
-  `devpi` and `simpleindex` to adopt, but whether any of them buys
-  anything that `http.server` over that tree does not.  The criterion is
-  that the test suite must run with nothing installed beyond
-  `python3-pip`, since a suite that needs `pip install pypiserver` argues
-  against the premise of the project.  Record the decision and why.
+* Step 5.1: Select a package server.  This is a research task.  No coding.
 * Step 5.2: Serve the existing tree over HTTP.  A `ThreadingHTTPServer`
   bound to `127.0.0.1` on port 0, so that the operating system assigns
   the port and the test reads it back rather than colliding with a stale
@@ -663,6 +656,31 @@ code with a real package server.  A proposed list of steps list belows:
 * Step 5.8: (This is an open list that can be added to as needed.)
 
 ## Step 5.1: Select a package server (research only)
+
+`build_index` in `embedded_venv_test.py` already emits a complete PEP
+503 tree, so the question was whether any server buys anything that
+`http.server` over that tree does not.  The criterion is that the test
+suite run with nothing installed beyond `python3-pip`, since a suite
+needing `pip install` to test a bootstrap that exists because one
+cannot `pip install` argues against itself.  Dependency counts come
+from `pip install --dry-run --report`.
+
+* `devpi-server` -- rejected: 43 dependencies, one of them the compiled
+  `argon2-cffi-bindings`, which is the `.so` problem of `0nicav`.
+* `simpleindex` -- rejected: 14 dependencies, including `pydantic`,
+  `uvicorn` and `starlette`, to serve a static file tree.
+* `pypiserver` -- rejected: 4 dependencies, and its JSON route is
+  `/:project/json` returning the legacy `info`/`releases` shape, so
+  cases 3 and 12 would need a translating shim and a path rewrite.
+* `http.server` -- **selected**: 0 dependencies, and a
+  `ThreadingHTTPServer` on port 0 serving the existing tree installed
+  `embedded_venv` through `PIP_INDEX_URL` with returncode 0.  The
+  handler is about 35 lines, including the 12 that synthesize
+  `/pypi/{PACKAGE}/json` in the shape case 3 already parses.
+
+Not settled here: `http.server` has no TLS, so Step 5.6 will need
+`ssl.SSLContext.wrap_socket` on the listening socket.  No alternative
+above supplies a trusted certificate either.
 
 ### Leftovers from task 3
 
