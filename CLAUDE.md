@@ -61,14 +61,15 @@ the rules stay versioned alongside the work they govern.
    here, and mercurial is the only tool Claude has for it.
 
 6. **`LOGBOOK.md` is this project's running record** -- purpose,
-   problem statement, prior art, findings and decisions.  Wayne
-   maintains it, with suggestions from Claude.
+   problem statement, prior art, findings and decisions.  Wayne and
+   Claude maintain it jointly.
 
-   The `FENCE:` marker that used to protect settled material was
-   removed on 2026-09-24, and nothing replaces it yet.  Until the file
-   is restructured into tasks marked `(CLOSED YYYY-MM-DD)`, propose
-   changes to settled material rather than making them, and ask when
-   unsure.
+   The file is organised as numbered tasks.  A task whose heading
+   carries `(CLOSED YYYY-MM-DD)` and a summary section is settled: do
+   not edit it, propose the change and let Wayne make the call.  A task
+   with neither is open and can be edited normally.  A task with one
+   but not the other is a mistake worth pointing out.  This replaced
+   the `FENCE:` marker on 2026-09-24.
 
    The point is to stop settled questions from being reopened over and
    over.
@@ -78,15 +79,18 @@ the rules stay versioned alongside the work they govern.
    parts that are easy to get wrong:
 
    * Each issue is named by an identifier such as `0whwnn` -- a
-     priority digit, then the first letter of each word of its title.
-     That identifier, not a list number, is how an issue is referred
-     to anywhere else.
+     priority digit, then the first letter of each word of its title,
+     lower cased, with `a`, `an`, `the` and `of` dropped.  Punctuation
+     is dropped and a hyphenated word counts once.  Two titles that
+     collide take a trailing digit.
    * Changing an issue's priority or its title changes its
      identifier.  Updating every reference to the old name in the
      same pass is Claude's job, and is not a reason to leave an issue
      mis-prioritised.
-   * A resolved issue is deleted outright, not archived.  Rejected
-     ones are kept, because their purpose is to stop the same idea
+   * A resolved issue moves to `### Closed Issues` with the date it
+     was closed, and is purged later, once every reference to it is
+     gone.  Rejected ones live in `### Rejected Issues` and are not
+     purged by age, because their purpose is to stop the same idea
      coming back.
 
 ### Why

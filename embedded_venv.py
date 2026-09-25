@@ -165,7 +165,7 @@ class EmbeddedVEnv:
           which means `package` is not the import name.
         """
         # A package already in the cache costs nothing but a path
-        # insert; see the `2aapiia` issue in `LOGBOOK.md`.
+        # insert; see the `2apiia` issue in `LOGBOOK.md`.
         done: subprocess.CompletedProcess[str]
         if not self.contains(package):
             done = subprocess.run(
