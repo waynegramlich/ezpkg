@@ -682,6 +682,31 @@ Not settled here: `http.server` has no TLS, so Step 5.6 will need
 `ssl.SSLContext.wrap_socket` on the listening socket.  No alternative
 above supplies a trusted certificate either.
 
+## Step 5.2: Serve the existing tree over HTTP
+
+`serve_index` in `embedded_venv_test.py` publishes the tree that
+`build_index` already produced, and both test classes now reach it
+through `PIP_INDEX_URL` over a socket instead of over `file://`.  The
+15 existing tests pass unchanged, which was the point: same
+assertions, different transport.
+
+* The handler subclasses `SimpleHTTPRequestHandler` only to silence
+  the request log.  The base class already serves a directory's
+  `index.html`, which is exactly what a PEP 503 tree asks for.
+* Port 0, so the operating system assigns the port and the caller
+  reads it back.  A fixed port would collide with a server left by an
+  interrupted run, and that failure would read as a packaging bug.
+* A daemon thread is what makes control-C clean.  Measured
+  2026-09-25: `SIGINT` to a test process ended it in 0.032 s and the
+  port was refusing connections immediately afterwards.
+* `tearDownClass` calls `shutdown` and `server_close` before the tree
+  is removed, and the server starts last in `setUpClass` so that
+  nothing can fail after it is up.
+
+Not done here: cases 3 and 12 still cannot be tested, because they
+want `/pypi/{PACKAGE}/json` rather than the simple API.  That is Step
+5.3.
+
 ### Leftovers from task 3
 
 Before we close task 5, stuff in this section needs to be either moved

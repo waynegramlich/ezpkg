@@ -8,15 +8,18 @@ local index, fetch it with the bootstrap stub, and import it -- so
 rather than around a table of measurements.
 
 The index is a [PEP 503](https://peps.python.org/pep-0503/) directory
-tree rather than a running web server, which `pip --index-url` accepts
-directly.  Nothing has to be started or stopped.  Testing against a
-real web server is deferred.
+tree, published over HTTP by `serve_index` so that `pip` reaches it
+through a socket rather than reading the files directly.  Step 5.1
+settled that `http.server` is enough for this; a third party package
+server would have cost between 4 and 43 dependencies and given the
+tests nothing they do not already have.
 
-Two builders here do the publishing half, using nothing but the
+Three helpers here do the publishing half, using nothing but the
 standard library.  `build_wheel` turns a single module into a pure
-Python wheel, and `build_index` lays those wheels out as a PEP 503
-tree.  Neither needs `build`, `twine` or `setuptools`, which keeps the
-test suite as dependency free as the thing it tests.
+Python wheel, `build_index` lays those wheels out as a PEP 503 tree,
+and `serve_index` serves that tree.  None of them needs `build`,
+`twine` or `setuptools`, which keeps the test suite as dependency free
+as the thing it tests.
 
 MIT No Attribution
 
@@ -41,8 +44,10 @@ SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 import base64
 import csv
+import functools
 import hashlib
 import html
+import http.server
 import io
 import os
 import re
@@ -50,6 +55,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import threading
 import unittest
 import unittest.mock
 import zipfile
@@ -209,6 +215,74 @@ def build_index(wheels: list[Path],
     return root
 
 
+class _IndexHandler(http.server.SimpleHTTPRequestHandler):
+    """Serve a PEP 503 tree from disk, and say nothing while doing it.
+
+    `SimpleHTTPRequestHandler` already does the whole job: it serves a
+    directory's `index.html` for a path ending in a slash, which is
+    exactly what the two levels of a PEP 503 tree ask for.  The only
+    reason to subclass it is to silence the request log, which would
+    otherwise interleave with the test output on standard error.
+
+    Constructor:
+    * `_IndexHandler(...)`, by `http.server` rather than by hand.  The
+      `directory` argument is bound by `serve_index` beforehand.
+    """
+
+    def log_message(self, format: str, *args: Any) -> None:
+        """Discard a request log line.
+
+        Arguments:
+        * `format` (`str`):
+          A printf style template, named as the base class names it.
+        * `args` (`Any`):
+          Whatever the template interpolates.
+        """
+        # The tests care about responses, not about a request log.
+        return
+
+
+def serve_index(root: Path) -> tuple[http.server.ThreadingHTTPServer, str]:
+    """Serve a PEP 503 tree over HTTP and return the server and its URL.
+
+    The server binds port 0, so the operating system picks a free port
+    and the caller reads back which one.  A fixed port would collide
+    with a server left over from an interrupted run, and the failure
+    that produced would look like a packaging bug rather than a stale
+    process.
+
+    Serving happens on a daemon thread, which is what makes a
+    control-C leave nothing behind: the interpreter does not wait for
+    a daemon thread to finish, so the process exits whether or not
+    `shutdown` was ever reached.
+
+    Arguments:
+    * `root` (`Path`):
+      The root of the tree to serve, as `build_index` returns it.
+
+    Returns:
+    * (`tuple[http.server.ThreadingHTTPServer, str]`): The running
+      server, which the caller shuts down, and the base URL to hand
+      to `PIP_INDEX_URL`.
+    """
+    # Bind port 0 and let the operating system choose.
+    handler: Any = functools.partial(_IndexHandler, directory=str(root))
+    server: http.server.ThreadingHTTPServer = (
+        http.server.ThreadingHTTPServer(("127.0.0.1", 0), handler))
+
+    # Serve on a daemon thread, so a control-C cannot strand it.
+    thread: threading.Thread = threading.Thread(target=server.serve_forever,
+                                                daemon=True)
+    thread.start()
+
+    # The port is only knowable once the bind has happened.  The
+    # standard library types `server_address` loosely, because a
+    # `socketserver` address may be a path or a string, so this reads
+    # the two fields an internet socket actually has.
+    address: Any = server.server_address
+    return server, f"http://{address[0]}:{address[1]}/"
+
+
 class EmbeddedVEnvTest(unittest.TestCase):
     """Build, exercise and discard the Experiment 2 pipeline.
 
@@ -218,10 +292,13 @@ class EmbeddedVEnvTest(unittest.TestCase):
 
     Attributes:
     * `index` (`Path`):
-      The root of the PEP 503 directory tree that stands in for a
-      package server.
+      The root of the PEP 503 directory tree that the server serves.
+    * `index_url` (`str`):
+      That same tree as an HTTP URL, for `PIP_INDEX_URL`.
     * `root` (`Path`):
       The temporary directory holding everything this class builds.
+    * `server` (`http.server.ThreadingHTTPServer`):
+      The server publishing `index`.
     * `wheel` (`Path`):
       The wheel built from `embedded_venv.py`.
 
@@ -231,12 +308,14 @@ class EmbeddedVEnvTest(unittest.TestCase):
 
     # Built once by `setUpClass`, shared by every test below.
     index: Path
+    index_url: str
     root: Path
+    server: http.server.ThreadingHTTPServer
     wheel: Path
 
     @classmethod
     def setUpClass(cls) -> None:
-        """Build the wheel and the index that the tests read."""
+        """Build the wheel and the index, then publish it over HTTP."""
         # Publish this project into a throwaway index.
         cls.root = Path(tempfile.mkdtemp(prefix="embedded_venv-"))
         module: Path = Path(__file__).resolve().parent / f"{MODULE}.py"
@@ -244,9 +323,16 @@ class EmbeddedVEnvTest(unittest.TestCase):
                                 cls.root / "dist")
         cls.index = build_index([cls.wheel], cls.root / "index")
 
+        # Start the server last, so nothing can fail after it is up.
+        cls.server, cls.index_url = serve_index(cls.index)
+
     @classmethod
     def tearDownClass(cls) -> None:
-        """Remove everything the class built."""
+        """Stop the server, then remove everything the class built."""
+        # Stop serving before the tree underneath goes away.
+        cls.server.shutdown()
+        cls.server.server_close()
+
         # One directory holds everything, so one removal suffices.
         shutil.rmtree(cls.root, ignore_errors=True)
 
@@ -257,7 +343,8 @@ class EmbeddedVEnvTest(unittest.TestCase):
         The index is passed through `PIP_INDEX_URL` rather than on the
         command line, because that is how a `bootstrap.py` case will
         be pointed at it: the environment steers `pip` without adding
-        a line to any case body.
+        a line to any case body.  The URL is the HTTP one, so this
+        goes over a socket rather than reading the tree directly.
 
         Arguments:
         * `target` (`Path`):
@@ -270,7 +357,7 @@ class EmbeddedVEnvTest(unittest.TestCase):
         """
         # Steer pip entirely through the environment, then run it.
         environment: dict[str, str] = dict(
-            os.environ, PIP_INDEX_URL=self.index.as_uri())
+            os.environ, PIP_INDEX_URL=self.index_url)
         environment.pop("VIRTUAL_ENV", None)
         return subprocess.run(
             [sys.executable, "-m", "pip", "install", "--quiet", "--no-input",
@@ -379,8 +466,12 @@ class IncludeTest(unittest.TestCase):
       The cache directory that `include` installs into.
     * `index` (`Path`):
       The PEP 503 tree holding the throwaway package.
+    * `index_url` (`str`):
+      That same tree as an HTTP URL, for `PIP_INDEX_URL`.
     * `root` (`Path`):
       The temporary directory holding everything.
+    * `server` (`http.server.ThreadingHTTPServer`):
+      The server publishing `index`.
 
     Constructor:
     * `IncludeTest()`, by `unittest` rather than by hand.
@@ -389,7 +480,9 @@ class IncludeTest(unittest.TestCase):
     # Built once by `setUpClass`, shared by every test below.
     cache: Path
     index: Path
+    index_url: str
     root: Path
+    server: http.server.ThreadingHTTPServer
 
     @classmethod
     def setUpClass(cls) -> None:
@@ -412,9 +505,16 @@ class IncludeTest(unittest.TestCase):
         cls.index = build_index([wheel, two_named], cls.root / "index")
         cls.cache = cls.root / "cache"
 
+        # Start the server last, so nothing can fail after it is up.
+        cls.server, cls.index_url = serve_index(cls.index)
+
     @classmethod
     def tearDownClass(cls) -> None:
-        """Remove everything the class built."""
+        """Stop the server, then remove everything the class built."""
+        # Stop serving before the tree underneath goes away.
+        cls.server.shutdown()
+        cls.server.server_close()
+
         # One directory holds everything, so one removal suffices.
         shutil.rmtree(cls.root, ignore_errors=True)
 
@@ -447,7 +547,7 @@ class IncludeTest(unittest.TestCase):
             f"{distribution!r});"
             "print(m.__name__, m.__version__)")
         environment: dict[str, str] = dict(
-            os.environ, PIP_INDEX_URL=self.index.as_uri(),
+            os.environ, PIP_INDEX_URL=self.index_url,
             PYTHONPATH=str(Path(__file__).resolve().parent),
             HOME=str(self.root / "home"))
         done: subprocess.CompletedProcess[str] = subprocess.run(
