@@ -1,7 +1,7 @@
 """Fetch Python packages that are not preinstalled, from one file.
 
 This module is the second stage of the two stage design described in
-`log_book.md`.  A small bootstrap stub, pasted by hand into a program
+`LOGBOOK.md`.  A small bootstrap stub, pasted by hand into a program
 that needs it, fetches this package and imports it.  Everything that is
 too large to paste lives here.
 
@@ -165,7 +165,7 @@ class EmbeddedVEnv:
           which means `package` is not the import name.
         """
         # A package already in the cache costs nothing but a path
-        # insert; see the `2aapiia` issue in `log_book.md`.
+        # insert; see the `2aapiia` issue in `LOGBOOK.md`.
         done: subprocess.CompletedProcess[str]
         if not self.contains(package):
             done = subprocess.run(

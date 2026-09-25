@@ -60,8 +60,8 @@ the rules stay versioned alongside the work they govern.
    freely and often -- being able to undo is really, really important
    here, and mercurial is the only tool Claude has for it.
 
-6. **In `log_book.md`, do not edit above the `FENCE:` marker.**
-   `log_book.md` is this project's running record -- purpose, problem
+6. **In `LOGBOOK.md`, do not edit above the `FENCE:` marker.**
+   `LOGBOOK.md` is this project's running record -- purpose, problem
    statement, prior art, findings and decisions.  Wayne maintains it,
    with suggestions from Claude.  An HTML comment containing `FENCE:`
    marks how far the settled material reaches; everything above that
@@ -74,7 +74,7 @@ the rules stay versioned alongside the work they govern.
    The point is to stop settled questions from being reopened over and
    over.
 
-7. **Issues live in `log_book.md` under `## Issues`**, and that
+7. **Issues live in `LOGBOOK.md` under `## Issues`**, and that
    section's own preamble is the authority on how they work.  The
    parts that are easy to get wrong:
 
