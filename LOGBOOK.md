@@ -639,6 +639,9 @@ Carried over from Task 3:
 * The server itself, which also makes TLS and the `ca-certificates`
   dependency testable for the first time.
 
+### Task 5 Summary
+
+...
 
 ## Issues
 

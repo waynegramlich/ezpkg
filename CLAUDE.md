@@ -65,11 +65,12 @@ the rules stay versioned alongside the work they govern.
    Claude maintain it jointly.
 
    The file is organised as numbered tasks.  A task whose heading
-   carries `(CLOSED YYYY-MM-DD)` and a summary section is settled: do
+   carries `(CLOSED YYYY-MM-DD)` and a written summary is settled: do
    not edit it, propose the change and let Wayne make the call.  A task
    with neither is open and can be edited normally.  A task with one
-   but not the other is a mistake worth pointing out.  This replaced
-   the `FENCE:` marker on 2026-09-24.
+   but not the other is a mistake worth pointing out.  An empty summary
+   heading is a reminder rather than a summary, and does not close
+   anything.  This replaced the `FENCE:` marker on 2026-09-24.
 
    The point is to stop settled questions from being reopened over and
    over.
