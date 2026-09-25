@@ -220,37 +220,48 @@ The common thread is that **every one of these must itself be installed
 before the user can run the program.**  That single remaining
 requirement is what the rest of this log book is about.
 
-## Phase 1: Initial exploration (2026-09-20)
+## Task 1: Choose the version control arrangement
 
-1. **Decide whether to use `git`, `mercurial`, or both**:
+Claude needs to checkpoint constantly, so that any mistake is one
+command away from being undone.  The git history should record only
+meaningful units of work.  One repository cannot do both: the frequent
+checkpoints bury the history that makes the log worth reading.
 
-   The decision was to use `mercurial` for undo and redo, and `git` for
-   coarser-grained changes of the code.  `CLAUDE.md` records the resulting
-   working agreement.  Only Wayne uses `git` and only Claude uses `mercurial`.
+The task was to decide how to get both, and who operates what.
 
-2. **Experiment 1**: Create the bootstrap code.
-  
-   This experiment assumes that eventually there will be a pip installable
-   package on [PyPI](https://pypi.org) (i.e. the Python Package Index web site)
-   that contains a package that has an `EmbeddedVEnv` class.  The package is
-   named `embedded-venv` on PyPI and imports as `embedded_venv`.
+### Task 1 Summary
 
-   The bootstrap code will live in every program that needs to bootstrap this
-   code into their program.  This bootstrap code will assume that the
-   Python3 distribution being used has a small number of packages like
-   `venv`, `pip`, and `importlib` preinstalled.
+Two version control systems share one working directory.  Mercurial is
+Claude's and git is Wayne's.  Claude checkpoints into `hg` freely and
+never runs `git` at all; Wayne commits to `git` by hand and never runs
+`hg`.  Each repository ignores the other, so `.hgignore` excludes
+`.git/` and `.gitignore` excludes `.hg/`.  `CLAUDE.md` holds the
+detailed working agreement and travels in every git commit, which keeps
+the rules versioned alongside the work they govern.
 
-   The code will create a `~/.embedded_venv` directory and initialize it
-   using the `venv` package.  The bootstrap is to be a pure Python program
-   that does not cheat by directly executing `python3 -m pip install XXX`.
-   Only `venv` and other "standard" Python libraries are to be used.  Finally,
-   the `coverage` package will be imported using the `importlib` package.
+## Task 2: Experiment 1 -- create the bootstrap code
 
-   In general, the bootstrap program should be optimized to be a relatively
-   small number of lines.  Do not do this optimization just yet.
+This experiment assumes that eventually there will be a pip installable
+package on [PyPI](https://pypi.org) (i.e. the Python Package Index web site)
+that contains a package that has an `EmbeddedVEnv` class.  The package is
+named `embedded-venv` on PyPI and imports as `embedded_venv`.
 
-   The twelve mechanisms, measured by `bootstrap.py` itself.  What the
-   columns mean is in its module docstring.
+The bootstrap code will live in every program that needs to bootstrap this
+code into their program.  This bootstrap code will assume that the
+Python3 distribution being used has a small number of packages like
+`venv`, `pip`, and `importlib` preinstalled.
+
+The code will create a `~/.embedded_venv` directory and initialize it
+using the `venv` package.  The bootstrap is to be a pure Python program
+that does not cheat by directly executing `python3 -m pip install XXX`.
+Only `venv` and other "standard" Python libraries are to be used.  Finally,
+the `coverage` package will be imported using the `importlib` package.
+
+In general, the bootstrap program should be optimized to be a relatively
+small number of lines.  Do not do this optimization just yet.
+
+The twelve mechanisms, measured by `bootstrap.py` itself.  What the
+columns mean is in its module docstring.
 
 +------+-----------------+---------+-------+-------+--------+--------+--------+
 | case | mechanism       | imports | lines | paste | cold   | warm   | size   |
@@ -281,222 +292,213 @@ requirement is what the rest of this log book is about.
 |      | stdlib wheel    |         |       |       |        |        |        |
 +------+-----------------+---------+-------+-------+--------+--------+--------+
 
-   Findings:
+Findings:
 
-   1. **`venv.EnvBuilder` does not default to symlinks; the command
-      line does.**  `python3 -m venv` passes `symlinks=True` on POSIX,
-      but `EnvBuilder()`'s own default is `symlinks=False`, which
-      copies the 7.7 MB interpreter into `bin/python`, `bin/python3`
-      and `bin/python3.12`.  That is 35.7 MB against 12.7 MB for an
-      otherwise byte-identical tree of 1013 files; the 23 MB gap is
-      exactly those three copies.  Creation takes ~3.1 s either way,
-      so the cost is purely disk.  Phase 1 never saw this because
-      Phase 1 used the command line.
+1. **`venv.EnvBuilder` does not default to symlinks; the command
+   line does.**  `python3 -m venv` passes `symlinks=True` on POSIX,
+   but `EnvBuilder()`'s own default is `symlinks=False`, which
+   copies the 7.7 MB interpreter into `bin/python`, `bin/python3`
+   and `bin/python3.12`.  That is 35.7 MB against 12.7 MB for an
+   otherwise byte-identical tree of 1013 files; the 23 MB gap is
+   exactly those three copies.  Creation takes ~3.1 s either way,
+   so the cost is purely disk.  Phase 1 never saw this because
+   Phase 1 used the command line.
 
-   2. **`ensurepip` is essentially the entire cost of making a venv.**
-      `EnvBuilder(with_pip=False)` builds one in 0.05 s and 28 KB,
-      against 3.1 s and 12.7 MB with pip.  Nearly everything a venv
-      costs is the pip it installs into itself.
+2. **`ensurepip` is essentially the entire cost of making a venv.**
+   `EnvBuilder(with_pip=False)` builds one in 0.05 s and 28 KB,
+   against 3.1 s and 12.7 MB with pip.  Nearly everything a venv
+   costs is the pip it installs into itself.
 
-   3. **The venv is never load-bearing.**  `pip install --target`
-      needs no virtual environment at all.  Case 6 skips the venv and
-      costs 15 pasted lines and 1762 KB; case 1 builds one and costs
-      24 lines and 16981 KB, for identical observable behaviour.
-      Phase 1 reached this conclusion by argument, from the venv
-      side.  It is now measured from the bootstrap side and the
-      numbers agree.
+3. **The venv is never load-bearing.**  `pip install --target`
+   needs no virtual environment at all.  Case 6 skips the venv and
+   costs 15 pasted lines and 1762 KB; case 1 builds one and costs
+   24 lines and 16981 KB, for identical observable behaviour.
+   Phase 1 reached this conclusion by argument, from the venv
+   side.  It is now measured from the bootstrap side and the
+   numbers agree.
 
-   4. **Running pip in process is not free of the user's program.**
-      After one in-process install, `sys.modules` grows from 99
-      entries to 740, 451 of them pip's, and pip leaves three
-      `RichPipStreamHandler` objects on the *root* logger.  The same
-      `log.warning("hello")` prints bare before the bootstrap runs and
-      `WARNING: hello` through pip's handler afterwards, on a
-      different stream.  Six of the twelve cases do this.  The subprocess
-      cases cannot: that state dies with the child.  This is the
-      strongest argument against the in-process mechanism, and it was
-      not visible until it was measured.
+4. **Running pip in process is not free of the user's program.**
+   After one in-process install, `sys.modules` grows from 99
+   entries to 740, 451 of them pip's, and pip leaves three
+   `RichPipStreamHandler` objects on the *root* logger.  The same
+   `log.warning("hello")` prints bare before the bootstrap runs and
+   `WARNING: hello` through pip's handler afterwards, on a
+   different stream.  Six of the twelve cases do this.  The subprocess
+   cases cannot: that state dies with the child.  This is the
+   strongest argument against the in-process mechanism, and it was
+   not visible until it was measured.
 
-   5. **pip can be imported straight out of its own wheel.**  A wheel
-      is a zip and zips are importable, so
-      `sys.path.insert(0, "<...>/pip-24.0-py3-none-any.whl")` makes
-      pip importable without installing it anywhere -- no venv, no
-      network, and nothing written to disk for pip itself.  Case 8
-      does this in 15 lines.
+5. **pip can be imported straight out of its own wheel.**  A wheel
+   is a zip and zips are importable, so
+   `sys.path.insert(0, "<...>/pip-24.0-py3-none-any.whl")` makes
+   pip importable without installing it anywhere -- no venv, no
+   network, and nothing written to disk for pip itself.  Case 8
+   does this in 15 lines.
 
-   6. **Debian de-vendors `ensurepip`, and misnames the package that
-      carries it.**  There is no `ensurepip/_bundled` directory on
-      this machine; `_WHEEL_PKG_DIR` points at
-      `/usr/share/python-wheels/`, which holds
-      `pip-24.0-py3-none-any.whl` and `setuptools-68.1.2-...whl`.
-      That confirms the de-vendoring the Problem Statement describes.
+6. **Debian de-vendors `ensurepip`, and misnames the package that
+   carries it.**  There is no `ensurepip/_bundled` directory on
+   this machine; `_WHEEL_PKG_DIR` points at
+   `/usr/share/python-wheels/`, which holds
+   `pip-24.0-py3-none-any.whl` and `setuptools-68.1.2-...whl`.
+   That confirms the de-vendoring the Problem Statement describes.
 
-      The package layout is the surprise.  `python3.12-venv` contains
-      `ensurepip` and nothing else -- three files.  The `venv` module
-      itself lives in `libpython3.12-stdlib`, the base package.  So
-      `import venv` succeeds on a machine that does not have
-      `python3-venv` installed, while `python3 -m venv` fails there,
-      because venv calls `ensurepip` to put pip inside the
-      environment it builds.
+   The package layout is the surprise.  `python3.12-venv` contains
+   `ensurepip` and nothing else -- three files.  The `venv` module
+   itself lives in `libpython3.12-stdlib`, the base package.  So
+   `import venv` succeeds on a machine that does not have
+   `python3-venv` installed, while `python3 -m venv` fails there,
+   because venv calls `ensurepip` to put pip inside the
+   environment it builds.
 
-      Whoever designs Experiment 2 should know that `import venv` is
-      therefore not a valid probe for whether a virtual environment
-      can be built; it answers yes on a machine where the answer is
-      no.  The probes that discriminate are `import ensurepip` and
-      `python3 -m venv` itself.  Measured with `dpkg -L` and
-      `dpkg -S` on one Ubuntu 24.04 box.  Debian is believed to be
-      laid out the same way, which is not verified here.
+   Whoever designs Experiment 2 should know that `import venv` is
+   therefore not a valid probe for whether a virtual environment
+   can be built; it answers yes on a machine where the answer is
+   no.  The probes that discriminate are `import ensurepip` and
+   `python3 -m venv` itself.  Measured with `dpkg -L` and
+   `dpkg -S` on one Ubuntu 24.04 box.  Debian is believed to be
+   laid out the same way, which is not verified here.
 
-   7. **Reclaiming pip after the fact works.**  Deleting the venv's
-      `pip`, its `pip-*.dist-info` and `bin/pip*` takes the tree from
-      16981 KB to 1790 KB.  `coverage` still imports afterwards, a
-      second package still installs by the pure-stdlib path, and
-      `ensurepip` can put pip back if it is ever wanted again.  This
-      is the right answer for a machine that has `venv` but no pip --
-      and only for that machine, because `with_pip=False` reaches the
-      same size for 6 fewer pasted lines wherever a system pip exists.
-      Two cases do this reclaim and measure identically: case 4
-      imports the manufactured pip, case 11 runs the venv's own
-      interpreter as a child instead.  Case 11 is the one to ship,
-      because it needs nothing from `pip._internal`.
+7. **Reclaiming pip after the fact works.**  Deleting the venv's
+   `pip`, its `pip-*.dist-info` and `bin/pip*` takes the tree from
+   16981 KB to 1790 KB.  `coverage` still imports afterwards, a
+   second package still installs by the pure-stdlib path, and
+   `ensurepip` can put pip back if it is ever wanted again.  This
+   is the right answer for a machine that has `venv` but no pip --
+   and only for that machine, because `with_pip=False` reaches the
+   same size for 6 fewer pasted lines wherever a system pip exists.
+   Two cases do this reclaim and measure identically: case 4
+   imports the manufactured pip, case 11 runs the venv's own
+   interpreter as a child instead.  Case 11 is the one to ship,
+   because it needs nothing from `pip._internal`.
 
-   8. **`--no-compile` is worth almost nothing.**  60 KB, and 40
-      `.pyc` files against 44, because the bootstrap imports the
-      package two lines later and Python compiles what it imports
-      anyway.  Rounding sizes to `1.7 MB` had made this look like a
-      100 KB saving; reporting kilobytes killed the idea.
+8. **`--no-compile` is worth almost nothing.**  60 KB, and 40
+   `.pyc` files against 44, because the bootstrap imports the
+   package two lines later and Python compiles what it imports
+   anyway.  Rounding sizes to `1.7 MB` had made this look like a
+   100 KB saving; reporting kilobytes killed the idea.
 
-   9. **`.pth` files are inert under `sys.path.insert`.**  Every case
-      installs coverage's `a1_coverage.pth`, its hook for measuring
-      subprocesses, and no case executes it; only `site.addsitedir()`
-      would.  Any package that relies on a `.pth` is quietly
-      half-installed by every mechanism here.
+9. **`.pth` files are inert under `sys.path.insert`.**  Every case
+   installs coverage's `a1_coverage.pth`, its hook for measuring
+   subprocesses, and no case executes it; only `site.addsitedir()`
+   would.  Any package that relies on a `.pth` is quietly
+   half-installed by every mechanism here.
 
-   10. **Independence from pip costs 49 pasted lines against 15.**
-       That is the whole trade, stated in one line.  The hand-rolled
-       wheel-tag matcher agreed with pip's choice for one package on
-       one platform, including the compiled
-       `tracer.cpython-312-x86_64-linux-gnu.so`, and it cannot tell
-       musl from glibc.  Case 3 also produces the smallest tree,
-       1682 KB, because it never generates the three `coverage`
-       console scripts that `pip --target` writes into `bin/`.
+10. **Independence from pip costs 49 pasted lines against 15.**
+    That is the whole trade, stated in one line.  The hand-rolled
+    wheel-tag matcher agreed with pip's choice for one package on
+    one platform, including the compiled
+    `tracer.cpython-312-x86_64-linux-gnu.so`, and it cannot tell
+    musl from glibc.  Case 3 also produces the smallest tree,
+    1682 KB, because it never generates the three `coverage`
+    console scripts that `pip --target` writes into `bin/`.
 
-   **Where this departed from the instructions above.**  The
-   instructions asked for four things: build `~/.embedded_venv` using
-   `venv`, do not cheat by executing `python3 -m pip install`, use
-   only `venv` and other standard libraries, and import through
-   `importlib`.  Every case does the last of those.  No case does the
-   other three at once.
+**Where this departed from the instructions above.**  The
+instructions asked for four things: build `~/.embedded_venv` using
+`venv`, do not cheat by executing `python3 -m pip install`, use
+only `venv` and other standard libraries, and import through
+`importlib`.  Every case does the last of those.  No case does the
+other three at once.
 
-   Cases 1, 4 and 5 build the venv and spawn nothing, but reach into
-   `pip._internal`, which is not a standard library.  Case 3 uses
-   nothing but standard libraries and spawns nothing, at the cost of
-   building no venv at all.  Cases 2, 7, 10 and 11 spawn pip, which
-   the instructions call cheating, and case 11 is the one finding 7
-   recommends.
+Cases 1, 4 and 5 build the venv and spawn nothing, but reach into
+`pip._internal`, which is not a standard library.  Case 3 uses
+nothing but standard libraries and spawns nothing, at the cost of
+building no venv at all.  Cases 2, 7, 10 and 11 spawn pip, which
+the instructions call cheating, and case 11 is the one finding 7
+recommends.
 
-   Case 12 was then written to close that gap, and it is the only
-   one of the twelve that does all four: a venv built with
-   `with_pip=False`, filled by case 3's wheel fetcher.  It costs 55
-   pasted lines against case 3's 49, and 1714 KB against 1682.  So
-   the instructions were satisfiable after all, and the price of
-   satisfying them is 6 lines and 32 KB spent on a virtual
-   environment that nothing subsequently reads.  That is finding 3
-   arriving from the other side: the venv the instructions mandate is
-   not load-bearing, and now that has been measured rather than
-   argued.
+Case 12 was then written to close that gap, and it is the only
+one of the twelve that does all four: a venv built with
+`with_pip=False`, filled by case 3's wheel fetcher.  It costs 55
+pasted lines against case 3's 49, and 1714 KB against 1682.  So
+the instructions were satisfiable after all, and the price of
+satisfying them is 6 lines and 32 KB spent on a virtual
+environment that nothing subsequently reads.  That is finding 3
+arriving from the other side: the venv the instructions mandate is
+not load-bearing, and now that has been measured rather than
+argued.
 
-   **What Experiment 1 did not settle.**  The baseline question that
-   Experiment 2 exists for is untouched.  Every row of that table was
-   measured on one Ubuntu 24.04 machine that has `venv`, `ensurepip`
-   and `pip` all present.
+**What Experiment 1 did not settle.**  The baseline question that
+Experiment 2 exists for is untouched.  Every row of that table was
+measured on one Ubuntu 24.04 machine that has `venv`, `ensurepip`
+and `pip` all present.
 
-   What the experiment did produce is a priced answer for each way
-   that question could come out.  With `pip` importable, 15 pasted
-   lines.  With `pip` gone but `ensurepip` present to manufacture
-   one, 30.  With neither, 49 -- or 55 if a virtual environment is
-   wanted for its own sake.  Finding 6 is why those are phrased
-   around `ensurepip` rather than `venv`: `venv` is in the base
-   standard library and is effectively always present, so it is not
-   the thing that varies.  Which of these the project actually needs
-   is still the thing to measure.
+What the experiment did produce is a priced answer for each way
+that question could come out.  With `pip` importable, 15 pasted
+lines.  With `pip` gone but `ensurepip` present to manufacture
+one, 30.  With neither, 49 -- or 55 if a virtual environment is
+wanted for its own sake.  Finding 6 is why those are phrased
+around `ensurepip` rather than `venv`: `venv` is in the base
+standard library and is effectively always present, so it is not
+the thing that varies.  Which of these the project actually needs
+is still the thing to measure.
 
-   **A defect worth recording.**  Experiment 1 also turned up a bug
-   that all twelve cases share, written up under Open Issues as the
-   already-importable defect.  It affects every case equally, so it
-   does not disturb the comparison above.
+**A defect worth recording.**  Experiment 1 also turned up a bug
+that all twelve cases share, written up under Open Issues as the
+already-importable defect.  It affects every case equally, so it
+does not disturb the comparison above.
 
-<!-- FENCE:
-The material above this fence is basically settled.  Editing it is
-discouraged, though exceptions can be made.  Leaving it alone is what
-keeps decisions that have already been made from being revisited over and
-over.
+## Task 3: Experiment 2 -- master `pip` and `PyPI` compatible servers
 
-Date: Tue Sep 22, 2026
--->
+The ultimate goal is to build a testing framework that allows installing
+the `embedded_venv` (to be developed) package from a `pip` compatible server
+(e.g `pipiserver`) and load it into program via the bootstrap technology
+developed in the previous experiment.
 
-3. **Experiment 2**: Master `pip` and Associated `PyPI` Compatible Servers
+Here is the task list, with what is done struck from it:
 
-   The ultimate goal is to build a testing framework that allows installing
-   the `embedded_venv` (to be developed) package from a `pip` compatible server
-   (e.g `pipiserver`) and load it into program via the bootstrap technology
-   developed in the previous experiment.
+* DONE.  Build a wheel for `embedded_venv.py`, and lay it out as a
+  PEP 503 tree.  Both are in `embedded_venv_test.py` and use
+  nothing but the standard library.
+* DONE.  Let the environment aim `bootstrap.py` at that tree,
+  through `PIP_INDEX_URL` and `BOOTSTRAP_PACKAGE`.
+* Fill in `EmbeddedVEnv` with something worth fetching.
+* End-to-end: run a `bootstrap.py` case against the local tree and
+  check that `embedded_venv` lands in `~/.embedded_venv` and
+  imports.
+* Failure testing: an index missing the package, a truncated wheel,
+  a missing `index.html`.
+* Eventually, a real package server, which is the only way to test
+  cases 3 and 12.
 
-   Here is the task list, with what is done struck from it:
-
-   * DONE.  Build a wheel for `embedded_venv.py`, and lay it out as a
-     PEP 503 tree.  Both are in `embedded_venv_test.py` and use
-     nothing but the standard library.
-   * DONE.  Let the environment aim `bootstrap.py` at that tree,
-     through `PIP_INDEX_URL` and `BOOTSTRAP_PACKAGE`.
-   * Fill in `EmbeddedVEnv` with something worth fetching.
-   * End-to-end: run a `bootstrap.py` case against the local tree and
-     check that `embedded_venv` lands in `~/.embedded_venv` and
-     imports.
-   * Failure testing: an index missing the package, a truncated wheel,
-     a missing `index.html`.
-   * Eventually, a real package server, which is the only way to test
-     cases 3 and 12.
-
-   Some initial conclusions after some research and discussion:
-   * Preinstalled Python environment.  What follows was measured on one
-     Ubuntu 24.04 machine.  We will *eventually* survey Ubuntu, Redhat,
-     Windows, and MacOS systems to turn these assumptions into facts.
-     * Not every Python installation has the whole standard library, but
-       the parts the bootstrap uses -- `importlib`, `pathlib`, `ssl`,
-       `subprocess`, `sysconfig`, `urllib.request`, `venv`, `zipfile`
-       and friends -- are all either compiled into `python3` or in a
-       base package Debian marks `Priority: important`.  Assuming those
-       is effectively assuming Python itself.
-     * Exactly one thing must additionally be preinstalled: `pip`, from
-       the `Priority: optional` package `python3-pip`.  `ensurepip`, in
-       `python3.12-venv`, is the only other optional piece, and is
-       needed only by the cases that manufacture a `pip`.
-     * A working TLS trust store (`ca-certificates`) is also required,
-       since every case fetches over HTTPS.  `python3-pip` depends on
-       it, so requiring `pip` brings it along.
-     * Once `pip` is present, any further Python package can be
-       downloaded as needed.
-   * Package server for the test harness:
-     A standard
-     [PEP 503 directory tree](https://peps.python.org/pep-0503/) is to
-     be used instead of a running full web server.  `pip --index-url`
-     accepts a local directory laid out in that format, which removes
-     any need to start and stop a server.  Later on, testing with an
-     actual web server is necessary.
-   * `bootstrap.py` is not being merged into `embedded_venv_test.py`.
-     This allows `bootstrap.py` to perform end-to-end testing with
-     a real Python package server, whereas `embedded_venv_test.py` can
-     use non server based testing.
-   * While there are tools that can generate a PEP 503 directory tree
-     it easier to just manually generate the tree.
-   * Simulate the Package server to download into the `~/.embedded_venv/`
-     directory:
-     1. Construct a Wheel for `embedded_venv.py`.
-     2. Create the associated PEP 503 tree.
-     3. Set up an environment variable.  ("coverage" => "embedded_venv"?)
-     4. Do an end-to-test.
-     5. Do failure testing (e.g. breaking the wheel, etc.)
+Some initial conclusions after some research and discussion:
+* Preinstalled Python environment.  What follows was measured on one
+  Ubuntu 24.04 machine.  We will *eventually* survey Ubuntu, Redhat,
+  Windows, and MacOS systems to turn these assumptions into facts.
+  * Not every Python installation has the whole standard library, but
+    the parts the bootstrap uses -- `importlib`, `pathlib`, `ssl`,
+    `subprocess`, `sysconfig`, `urllib.request`, `venv`, `zipfile`
+    and friends -- are all either compiled into `python3` or in a
+    base package Debian marks `Priority: important`.  Assuming those
+    is effectively assuming Python itself.
+  * Exactly one thing must additionally be preinstalled: `pip`, from
+    the `Priority: optional` package `python3-pip`.  `ensurepip`, in
+    `python3.12-venv`, is the only other optional piece, and is
+    needed only by the cases that manufacture a `pip`.
+  * A working TLS trust store (`ca-certificates`) is also required,
+    since every case fetches over HTTPS.  `python3-pip` depends on
+    it, so requiring `pip` brings it along.
+  * Once `pip` is present, any further Python package can be
+    downloaded as needed.
+* Package server for the test harness:
+  A standard
+  [PEP 503 directory tree](https://peps.python.org/pep-0503/) is to
+  be used instead of a running full web server.  `pip --index-url`
+  accepts a local directory laid out in that format, which removes
+  any need to start and stop a server.  Later on, testing with an
+  actual web server is necessary.
+* `bootstrap.py` is not being merged into `embedded_venv_test.py`.
+  This allows `bootstrap.py` to perform end-to-end testing with
+  a real Python package server, whereas `embedded_venv_test.py` can
+  use non server based testing.
+* While there are tools that can generate a PEP 503 directory tree
+  it easier to just manually generate the tree.
+* Simulate the Package server to download into the `~/.embedded_venv/`
+  directory:
+  1. Construct a Wheel for `embedded_venv.py`.
+  2. Create the associated PEP 503 tree.
+  3. Set up an environment variable.  ("coverage" => "embedded_venv"?)
+  4. Do an end-to-test.
+  5. Do failure testing (e.g. breaking the wheel, etc.)
 
 ## Misc.
 

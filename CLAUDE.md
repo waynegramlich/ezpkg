@@ -60,16 +60,15 @@ the rules stay versioned alongside the work they govern.
    freely and often -- being able to undo is really, really important
    here, and mercurial is the only tool Claude has for it.
 
-6. **In `LOGBOOK.md`, do not edit above the `FENCE:` marker.**
-   `LOGBOOK.md` is this project's running record -- purpose, problem
-   statement, prior art, findings and decisions.  Wayne maintains it,
-   with suggestions from Claude.  An HTML comment containing `FENCE:`
-   marks how far the settled material reaches; everything above that
-   comment is considered decided.  Editing it is discouraged, so propose
-   the change and let Wayne make the call rather than editing it
-   directly.  Exceptions can be made -- ask.  Text below the fence is
-   ordinary working material and can be edited normally.  The fence
-   moves down the file as more of the document settles.
+6. **`LOGBOOK.md` is this project's running record** -- purpose,
+   problem statement, prior art, findings and decisions.  Wayne
+   maintains it, with suggestions from Claude.
+
+   The `FENCE:` marker that used to protect settled material was
+   removed on 2026-09-24, and nothing replaces it yet.  Until the file
+   is restructured into tasks marked `(CLOSED YYYY-MM-DD)`, propose
+   changes to settled material rather than making them, and ask when
+   unsure.
 
    The point is to stop settled questions from being reopened over and
    over.
@@ -89,8 +88,6 @@ the rules stay versioned alongside the work they govern.
    * A resolved issue is deleted outright, not archived.  Rejected
      ones are kept, because their purpose is to stop the same idea
      coming back.
-   * Frozen text above the `FENCE:` marker must not reference an
-     identifier, since the fixup above would be forbidden there.
 
 ### Why
 
