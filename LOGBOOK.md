@@ -625,7 +625,7 @@ under its own separate version control, and then deleted.
 
 (CLOSED 2026-09-24)
 
-## Task 5: A Real Package Server
+## Task 5: A Real Package Server  (CLOSED 2026-09-25)
 
 The primary purpose of this task is to do end-to-end testing of the bootstrap
 code with a real package server.  A proposed list of steps list belows:
@@ -661,7 +661,6 @@ code with a real package server.  A proposed list of steps list belows:
 * Step 5.7: Test suite coverage, measured with the standard library
   `trace` rather than `coverage`, so that the suite needs nothing
   installed.
-* Step 5.8: (This is an open list that can be added to as needed.)
 
 ### Step 5.1: Select a package server (research only)
 
@@ -898,11 +897,38 @@ tracer cannot reach.
 
 ### Task 5 Summary
 
-Task 5 is open, so this section is a working chart rather than a
-summary.  It is the Task 2 table remeasured against a package server we
-control, and it gets updated in place until the task closes.  The
-original chart stays as it was, because it measured `coverage` from
-PyPI and this one measures `embedded_venv` from `127.0.0.1`.
+All twelve `bootstrap.py` cases now fetch `embedded_venv` from a
+package server this project controls, import it, and do it again on a
+second and third run without fetching anything.  That was the whole
+point of the task.
+
+The server is `http.server` over the PEP 503 tree the test suite
+already built, chosen in Step 5.1 because the alternatives cost between
+4 and 43 dependencies and bought nothing.  It serves the JSON API that
+cases 3 and 12 read, it can be told to misbehave, and it can speak TLS.
+None of that cost a single case a line of pasted code: `JSON_API`, the
+`0cctfd` repair and the whole of TLS are steered from outside the case
+bodies, so every `paste` figure is what Task 2 measured.
+
+Three things were learned rather than assumed.  Pointing the cases at
+the package this project ships, instead of at `coverage`, immediately
+exposed `0cctfd`: the guard every case uses asks whether the package is
+a directory, a single module install is not one, and case 11 deletes
+the `pip` it would need to fetch again.  Every case fails closed on a
+certificate it cannot verify, which nothing had ever checked and which
+would have been a priority 0 defect had it gone the other way.  And
+tracing the suite found that its own server was invisible to the
+tracer, because `trace` follows only the thread it starts in.
+
+What is not settled: Task 3's conclusion that a bootstrap needs
+`python3-pip` plus a TLS trust store is about trusting the public
+certificate authorities well enough to reach the real PyPI, and a
+private certificate tests the opposite.  Confirming it needs a fetch
+from the real index.
+
+The final measurement follows.  The Task 2 chart stays as it was,
+because it measured `coverage` from PyPI and this one measures
+`embedded_venv` from `127.0.0.1`.
 
 ```
 date        : 2026-09-25 19:12
@@ -964,6 +990,43 @@ What the remeasurement says:
   about 20 outside the venv-with-pip cases, because `embedded_venv` is
   one pure Python module where `coverage` ships compiled extensions.
   The 15275 KB of cases 1 and 2 is almost entirely the `pip` they keep.
+
+(CLOSED 2026-09-25)
+
+## Task 6: Flesh out the EmbeddedEnv Class.
+
+The primary purpose of this task is to add features to `embeddey_venv.py`.
+* Task 6.1 - Attempt to find the bootstrap code:
+  This is broken into the following sub-tasks.
+  * 6.1.1 - Find Bootstrap:
+    Python is has huge number of introspection facilities.  
+    Attempt to find the actual file that ran the bootstrap code.
+    It should be one level up from the `EmbeddedVenv.__init__()`.
+    Read the file and match the bootstrap strings.  If found this task
+    is a success.  This gives us a path for complaining about stale
+    bootstrap strings.
+  * 6.1.2 - Versioning:
+    There is a versioning problem when we download modules.  The Wheel
+    information specifies the version number.  It would be great to
+    construct a sub-directory of different versions.  Thus, the
+    `EmbeddedVEnv.import()` function could look at the desired version
+    and see if it was previously downloaded and stashed away and reuse it.
+    There are some serious detail to fill in here.
+  * 6.1.3 - Garbage Collection:
+    Cull modules that have not been accessed for a while by using the
+    file access time.
+  * 6.1.4 - Security:
+    Conceptually, we are downloading files of unknown origin.  Pretty
+    much anybody can put anything up on `PyPI`.  Is there any way we can
+    reduce the chances of installing a malicious file?  Should we inform
+  * 6.1.5 - Messages:
+    When should messages be emitted?  When the directory is created?
+    After each new download?  
+  * 6.1.6 - `README.md`:
+    The text of the `README.md` file that gets downloaded needs to be
+    discussed.
+  * 6.1.7 - And More:
+    This a place holder for additional sub-tasks
 
 ## Issues
 
