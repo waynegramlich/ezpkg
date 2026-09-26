@@ -8,7 +8,7 @@ same criterion that chose `http.server` over `pypiserver` in Step 5.1
 of `LOGBOOK.md`.
 
 Run it with no arguments to measure the suite, or with a directory to
-say where the annotated `.cover` files should go.  `EMBEDDEDVEN_TEST`
+say where the annotated `.cover` files should go.  `ALT_VENV_TEST`
 is honoured by the suite as usual, so `COMPLETE` measures every
 `bootstrap.py` case and costs several minutes.
 
@@ -17,7 +17,7 @@ more than they look:
 
 1. **Threads have to be instrumented separately.**  `trace` follows
    only the thread it starts in.  Every request handler in
-   `embedded_venv_test.py` runs in a `ThreadingHTTPServer` worker, so
+   `alt_venv_test.py` runs in a `ThreadingHTTPServer` worker, so
    without `threading.settrace` the whole server looks dead however
    many requests pass through it.  That one line moved the suite from
    88% to 99%.
@@ -37,7 +37,7 @@ Two blind spots remain, and neither is a defect in the tests:
 * **A frame whose `__file__` is false is not followed.**
   `trace.Trace.globaltrace_lt` decides what to follow by reading
   `frame.f_globals.get("__file__")`.  So the one line of
-  `embedded_venv.py` that runs only when `__file__` is `None`, the
+  `alt_venv.py` that runs only when `__file__` is `None`, the
   frozen interpreter branch of `repair_module_layout`, can never be
   reported as covered.  It is reached by a test that passes; 98% for
   that module means 100%.
@@ -95,9 +95,9 @@ def run_suite() -> None:
     `exit=False` and any `SystemExit` is absorbed as well.
     """
     # Import inside the traced call, so imports are counted too.
-    import embedded_venv_test
+    import alt_venv_test
     try:
-        unittest.main(module=embedded_venv_test, exit=False, argv=[__file__])
+        unittest.main(module=alt_venv_test, exit=False, argv=[__file__])
     except SystemExit:
         pass
 

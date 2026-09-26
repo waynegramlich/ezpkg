@@ -6,11 +6,11 @@ that needs it, fetches this package and imports it.  Everything that is
 too large to paste lives here.
 
 The stub fetches exactly one package, of known name and with no
-dependencies.  `EmbeddedVEnv` then fetches whatever the calling program
+dependencies.  `AltVEnv` then fetches whatever the calling program
 actually declared, which is the general case: version constraints,
 extras, transitive dependencies and compiled wheels.
 
-This file is a placeholder.  `EmbeddedVEnv` is deliberately empty until
+This file is a placeholder.  `AltVEnv` is deliberately empty until
 the shape of the general case fetch has been worked out.
 
 MIT No Attribution
@@ -48,7 +48,7 @@ from types import ModuleType
 __version__: str = "0.0.1"
 
 
-class EmbeddedVEnv:
+class AltVEnv:
     """Fetch and import Python packages that are not preinstalled.
 
     Most of the class is still to come.  What it eventually holds is
@@ -58,7 +58,7 @@ class EmbeddedVEnv:
     `sys.path`.
 
     What works today is the cache directory itself.  Constructing an
-    `EmbeddedVEnv` creates the directory and drops a `README.md` into
+    `AltVEnv` creates the directory and drops a `README.md` into
     it, so that somebody who finds the directory and wonders what it
     is can read the answer without leaving it.
 
@@ -69,7 +69,7 @@ class EmbeddedVEnv:
       The cache directory.  Created if it does not exist.
 
     Constructor:
-    * `EmbeddedVEnv(root=None)`
+    * `AltVEnv(root=None)`
     """
 
     # Set by the constructor; see `Attributes:` above.
@@ -77,7 +77,7 @@ class EmbeddedVEnv:
     root: Path
 
     def __init__(self, root: Path | None = None) -> None:
-        """Embedded Virtual Environment Cache.
+        """AltVEnv Package Cache.
 
         This directory holds Python packages that a program needed but
         that the Python installation did not provide.  A small
@@ -94,21 +94,21 @@ class EmbeddedVEnv:
         Arguments:
         * `root` (`Path | None`):
           The cache directory to use.  `None`, the default, means
-          `~/.embedded_venv`, which is the directory the bootstrap
+          `~/.alt_venv`, which is the directory the bootstrap
           code names.  Tests pass a temporary directory instead.
         """
         # Default to the cache directory that the bootstrap code names.
-        self.root = Path.home() / ".embedded_venv" if root is None else root
+        self.root = Path.home() / ".alt_venv" if root is None else root
         self.root.mkdir(parents=True, exist_ok=True)
 
         # The docstring above is the README; the summary line becomes
         # its title.  Docstrings are absent under `python3 -OO`, so
         # fall back to a title only rather than failing.
-        document: str | None = inspect.getdoc(EmbeddedVEnv.__init__)
+        document: str | None = inspect.getdoc(AltVEnv.__init__)
         title: str
         body: str
         if document is None:
-            title, body = "Embedded Virtual Environment Cache", ""
+            title, body = "AltVEnv Package Cache", ""
         else:
             title, _, body = document.partition("\n")
             title = title.rstrip(".")
@@ -128,7 +128,7 @@ class EmbeddedVEnv:
         Every case in `bootstrap.py` decides whether it has already
         installed the package by asking `(target / PACKAGE).is_dir()`.
         A distribution that installs as a single module puts
-        `embedded_venv.py` there rather than a directory, so the answer
+        `alt_venv.py` there rather than a directory, so the answer
         is no on every run and the fetch is repeated forever.  Case 11
         does worse than waste a download: it deletes the `pip` it
         installed with, so its second run has nothing to install with

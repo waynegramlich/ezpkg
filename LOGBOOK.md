@@ -1,4 +1,4 @@
-# Embedded Virtual Environment Logbook
+# AltVEnv Logbook
 
 <!-- ----------------------------79 characters----------------------------- -->
 
@@ -267,15 +267,15 @@ what the rest of the paragraph assumes.}
 
 This experiment assumes that eventually there will be a pip installable
 package on [PyPI](https://pypi.org) (i.e. the Python Package Index web site)
-that contains a package that has an `EmbeddedVEnv` class.  The package is
-named `embedded-venv` on PyPI and imports as `embedded_venv`.
+that contains a package that has an `AltVEnv` class.  The package is
+named `alt-venv` on PyPI and imports as `alt_venv`.
 
 The bootstrap code will live in every program that needs to bootstrap this
 code into their program.  This bootstrap code will assume that the
 Python3 distribution being used has a small number of packages like
 `venv`, `pip`, and `importlib` preinstalled.
 
-The code will create a `~/.embedded_venv` directory and initialize it
+The code will create a `~/.alt_venv` directory and initialize it
 using the `venv` package.  The bootstrap is to be a pure Python program
 that does not cheat by directly executing `python3 -m pip install XXX`.
 Only `venv` and other "standard" Python libraries are to be used.  Finally,
@@ -423,7 +423,7 @@ traceback, which is the `0whwnn` issue.}
     console scripts that `pip --target` writes into `bin/`.
 
 **Where this departed from the instructions above.**  The
-instructions asked for four things: build `~/.embedded_venv` using
+instructions asked for four things: build `~/.alt_venv` using
 `venv`, do not cheat by executing `python3 -m pip install`, use
 only `venv` and other standard libraries, and import through
 `importlib`.  Every case does the last of those.  No case does the
@@ -498,26 +498,26 @@ by deciding rather than by measuring.
 ## Task 3: Master `pip` and Package Servers  (CLOSED 2026-09-24)
 
 This task was called Experiment 2 while it ran.  The text below, several
-issues, and `embedded_venv_test.py` still use that name.
+issues, and `alt_venv_test.py` still use that name.
 
-{`embedded_venv` was developed during this task, so "to be developed"
+{`alt_venv` was developed during this task, so "to be developed"
 describes only where it started.}
 
 The ultimate goal is to build a testing framework that allows installing
-the `embedded_venv` (to be developed) package from a `pip` compatible
+the `alt_venv` (to be developed) package from a `pip` compatible
 server (e.g. `pypiserver`) and load it into a program via the bootstrap
 technology developed in the previous experiment.
 
 Here is the task list, with what is done struck from it:
 
-* DONE.  Build a wheel for `embedded_venv.py`, and lay it out as a
-  PEP 503 tree.  Both are in `embedded_venv_test.py` and use
+* DONE.  Build a wheel for `alt_venv.py`, and lay it out as a
+  PEP 503 tree.  Both are in `alt_venv_test.py` and use
   nothing but the standard library.
 * DONE.  Let the environment aim `bootstrap.py` at that tree,
   through `PIP_INDEX_URL` and `BOOTSTRAP_PACKAGE`.
-* Fill in `EmbeddedVEnv` with something worth fetching.
+* Fill in `AltVEnv` with something worth fetching.
 * End-to-end: run a `bootstrap.py` case against the local tree and
-  check that `embedded_venv` lands in `~/.embedded_venv` and
+  check that `alt_venv` lands in `~/.alt_venv` and
   imports.
 * Failure testing: an index missing the package, a truncated wheel,
   a missing `index.html`.
@@ -550,9 +550,9 @@ Some initial conclusions after some research and discussion:
   accepts a local directory laid out in that format, which removes
   any need to start and stop a server.  Later on, testing with an
   actual web server is necessary.
-* `bootstrap.py` is not being merged into `embedded_venv_test.py`.
+* `bootstrap.py` is not being merged into `alt_venv_test.py`.
   This allows `bootstrap.py` to perform end-to-end testing with
-  a real Python package server, whereas `embedded_venv_test.py` can
+  a real Python package server, whereas `alt_venv_test.py` can
   use non server based testing.
 * While there are tools that can generate a PEP 503 directory tree
   it easier to just manually generate the tree.
@@ -560,13 +560,13 @@ Some initial conclusions after some research and discussion:
 ### Task 3 Summary
 
 The pipeline works end to end.  A wheel is built from
-`embedded_venv.py`, published into a PEP 503 directory tree, fetched by
+`alt_venv.py`, published into a PEP 503 directory tree, fetched by
 a `bootstrap.py` case pointed there by environment variables alone,
-installed into `~/.embedded_venv`, and imported.  Both builders live in
-`embedded_venv_test.py` and use nothing but the standard library, so no
+installed into `~/.alt_venv`, and imported.  Both builders live in
+`alt_venv_test.py` and use nothing but the standard library, so no
 packaging tool had to be installed to make a package.
 
-`EmbeddedVEnv` stopped being empty.  Constructing one creates the cache
+`AltVEnv` stopped being empty.  Constructing one creates the cache
 directory and writes a `README.md` into it from the constructor's own
 docstring.  `include()` installs a package into the cache with
 `pip install --target` and imports it, taking a separate distribution
@@ -655,7 +655,7 @@ code with a real package server.  A proposed list of steps list belows:
   cheap once a server exists, because a server can be told to misbehave
   where a directory cannot.
 * Step 5.5: Run every `bootstrap.py` case against the server end to end,
-  asserting that `embedded_venv` lands in the cache and imports.  This is
+  asserting that `alt_venv` lands in the cache and imports.  This is
   the test the task exists for.
 * Step 5.6: TLS, which nothing has exercised yet.  Two questions: does a
   case refuse a certificate it cannot verify, and does it succeed once
@@ -670,7 +670,7 @@ code with a real package server.  A proposed list of steps list belows:
 
 ### Step 5.1: Select a package server (research only)
 
-`build_index` in `embedded_venv_test.py` already emits a complete PEP
+`build_index` in `alt_venv_test.py` already emits a complete PEP
 503 tree, so the question was whether any server buys anything that
 `http.server` over that tree does not.  The criterion is that the test
 suite run with nothing installed beyond `python3-pip`, since a suite
@@ -687,7 +687,7 @@ from `pip install --dry-run --report`.
   cases 3 and 12 would need a translating shim and a path rewrite.
 * `http.server` -- **selected**: 0 dependencies, and a
   `ThreadingHTTPServer` on port 0 serving the existing tree installed
-  `embedded_venv` through `PIP_INDEX_URL` with returncode 0.  The
+  `alt_venv` through `PIP_INDEX_URL` with returncode 0.  The
   handler is about 35 lines, including the 12 that synthesize
   `/pypi/{PACKAGE}/json` in the shape case 3 already parses.
 
@@ -697,7 +697,7 @@ above supplies a trusted certificate either.
 
 ### Step 5.2: Serve the existing tree over HTTP
 
-`serve_index` in `embedded_venv_test.py` publishes the tree that
+`serve_index` in `alt_venv_test.py` publishes the tree that
 `build_index` already produced, and both test classes now reach it
 through `PIP_INDEX_URL` over a socket instead of over `file://`.  The
 15 existing tests pass unchanged, which was the point: same
@@ -777,15 +777,15 @@ so that a failing assertion cannot leave the fault in place.
 ### Step 5.5: Every case, end to end
 
 `test_every_case_bootstraps` runs all twelve cases against our own
-server and asserts that each one lands `embedded_venv` in the cache and
+server and asserts that each one lands `alt_venv` in the cache and
 imports it.  All twelve pass.  That is the claim Task 5 was opened to
 establish.
 
 * The case list is read from `bootstrap.MECHANISMS` rather than copied
   into the test, so a thirteenth case cannot quietly go untested.
 * Four assertions per case: `pip` or `urllib` exited zero, the printed
-  module name matches, the version matches `embedded_venv.__version__`,
-  and the file it was imported from lies under `.embedded_venv`.  The
+  module name matches, the version matches `alt_venv.__version__`,
+  and the file it was imported from lies under `.alt_venv`.  The
   last one is what distinguishes a real fetch from an accidental
   import of the copy in this directory.
 * The suite went from 13.8 s to 40.3 s.  The twelve cases cost about
@@ -829,7 +829,7 @@ questions are answered, and the first is the one that mattered.
   `ConnectionError`.  A refused handshake is exactly what the negative
   test provokes, and the base class prints a traceback for it.
 
-`EMBEDDEDVEN_TEST` chooses how much of this runs.  Unset or `FAST`,
+`ALT_VENV_TEST` chooses how much of this runs.  Unset or `FAST`,
 which is the usual way, exercises cases 3, 6, 11 and 12 -- one case per
 distinct mechanism, plus the one whose second run used to fail.
 `COMPLETE` exercises all twelve.  An unrecognised value raises rather
@@ -843,11 +843,11 @@ certificate authorities well enough to reach the real PyPI.  A private
 certificate tests the opposite, that the system trust store can be
 overridden, so nothing here confirms it.  Confirming it needs a fetch
 from the real index, which is a test with a network dependency and
-belongs with the work on `embedded_venv.py` rather than here.
+belongs with the work on `alt_venv.py` rather than here.
 
 ### Step 5.7: Coverage
 
-`embedded_venv_coverage.py` measures the suite with the standard
+`alt_venv_coverage.py` measures the suite with the standard
 library `trace`.  `coverage` would have been a `pip install`, and a
 suite for a project about packages that are not preinstalled should not
 need a package fetched; the same criterion chose `http.server` in Step
@@ -856,15 +856,15 @@ need a package fetched; the same criterion chose `http.server` in Step
 | module                   | lines | before | after |
 | ------------------------ | ----- | ------ | ----- |
 | `bootstrap.py`           |   407 |     7% |    7% |
-| `embedded_venv.py`       |    65 |    60% |   98% |
-| `embedded_venv_test.py`  |   590 |    87% |   99% |
+| `alt_venv.py`       |    65 |    60% |   98% |
+| `alt_venv_test.py`  |   590 |    87% |   99% |
 
 Nine tests were added, taking the suite from 29 to 38 and from 50.9 s
 to 56.5 s.  Tracing itself costs almost nothing, which is its own
 finding: nearly all of the work happens in child processes, where the
 tracer cannot reach.
 
-* **`embedded_venv.py` is effectively complete.**  The gap was that
+* **`alt_venv.py` is effectively complete.**  The gap was that
   `repair_module_layout` and `include` were exercised only through
   child interpreters, so their bodies were never measured.  Calling
   them in process, with `__file__` or `PIP_INDEX_URL` patched, covered
@@ -903,7 +903,7 @@ tracer cannot reach.
 
 ### Task 5 Summary
 
-All twelve `bootstrap.py` cases now fetch `embedded_venv` from a
+All twelve `bootstrap.py` cases now fetch `alt_venv` from a
 package server this project controls, import it, and do it again on a
 second and third run without fetching anything.  That was the whole
 point of the task.
@@ -934,14 +934,14 @@ from the real index.
 
 The final measurement follows.  The Task 2 chart stays as it was,
 because it measured `coverage` from PyPI and this one measures
-`embedded_venv` from `127.0.0.1`.
+`alt_venv` from `127.0.0.1`.
 
 ```
 date        : 2026-09-25 19:12
 python      : 3.12.3 at /usr/bin/python3
 platform    : linux
 inside venv : False
-package     : embedded_venv
+package     : alt_venv
 index       : local, http
 repetitions : 3; cold and warm are medians
 
@@ -985,7 +985,7 @@ traceback, which is the `0whwnn` issue.}
 
 What the remeasurement says:
 
-* All twelve cases fetch `embedded_venv` from our own server and import
+* All twelve cases fetch `alt_venv` from our own server and import
   it, with no failures.  That is the thing Task 5 exists to establish.
 * `imports`, `lines` and `paste` are identical to the Task 2 chart in
   every row.  Neither `JSON_API` nor the `0cctfd` repair cost a case a
@@ -999,16 +999,16 @@ What the remeasurement says:
   constructor did not run at all before, because `bootstrap.py` only
   imported the module.
 * Against the Task 2 chart, sizes are still smaller by a factor of
-  about 20 outside the venv-with-pip cases, because `embedded_venv` is
+  about 20 outside the venv-with-pip cases, because `alt_venv` is
   one pure Python module where `coverage` ships compiled extensions.
   The 15275 KB of cases 1 and 2 is almost entirely the `pip` they keep.
 
 (CLOSED 2026-09-25)
 
-## Task 6: Flesh out the `EmbeddedVEnv` Class
+## Task 6: Flesh out the `AltVEnv` Class
 
 The primary purpose of this task is to add features to
-`embedded_venv.py`.  The steps are sorted by priority with the highest
+`alt_venv.py`.  The steps are sorted by priority with the highest
 **first**, so Step 6.1 is the next thing to do.  Renumbering is
 expected every time the order changes, and is Claude's job.
 
@@ -1043,7 +1043,7 @@ expected every time the order changes, and is Claude's job.
     for a module under `self.root`, so relocating the cache silently
     reopens `0cctfd` and case 11 fails on its second run again.
   * 6.3.3 - Two caches, not one:  stage 1 is pinned to
-    `~/.embedded_venv` by the pasted code, so stage 2 goes in
+    `~/.alt_venv` by the pasted code, so stage 2 goes in
     `root/<key>/` beneath it.  That answers `2wscdl` with a constraint.
   * 6.3.4 - What the key holds:  `sys.implementation.cache_tag`,
     `sysconfig.get_platform()` and the requirement string.  It cannot
@@ -1232,7 +1232,7 @@ Being worked on right now, in priority order.  None at present.
 Not yet started, in priority order.
 
 * **Nothing identifies a cache as valid. (0nicav)**  Every case installs into
-  `~/.embedded_venv` with no version, platform tag or interpreter
+  `~/.alt_venv` with no version, platform tag or interpreter
   version in the path.  Experiment 1 installs
   `tracer.cpython-312-x86_64-linux-gnu.so`, so the same directory
   reached by a different Python, or copied to a different machine,
@@ -1279,7 +1279,7 @@ Not yet started, in priority order.
   Various thoughts:
   * Wayne (2026-09-22): This can be dealt with much later since it is easy to
     fix.
-  * Claude (2026-09-24): Fixed in the second stage.  `EmbeddedVEnv.include`
+  * Claude (2026-09-24): Fixed in the second stage.  `AltVEnv.include`
     asks `contains` first and skips the install when the package is already in
     the cache.  The twelve cases are unchanged, so the measurement in Task 2
     still shows the defect.
@@ -1330,7 +1330,7 @@ Not yet started, in priority order.
   * Wayne (2026-09-22): Sounds like it is worth doing.  The question is when?
 
 * **Where should the cache directory live? (2wscdl)**  `~/.cache/<program>/`
-  per the XDG spec, or beside the program, or the `~/.embedded_venv`
+  per the XDG spec, or beside the program, or the `~/.alt_venv`
   that Experiment 1 assumed without examining?  This interacts with
   `0nicav`: whatever the location, the name has to carry the
   interpreter and platform.
@@ -1351,7 +1351,7 @@ Not yet started, in priority order.
   `pip` demoted cases 3 and 12 from shipping candidates to
   measurement, so the matcher is no longer on the path to a
   stranger's machine unless that decision is revisited.  And the
-  stub's job is to fetch `embedded_venv`, which is pure Python and
+  stub's job is to fetch `alt_venv`, which is pure Python and
   ships as `py3-none-any`, so no tag matching is needed for it at
   all; the matcher exists only because Experiment 1 fetched
   `coverage`, which has compiled wheels.  The 49 pasted lines the
@@ -1430,7 +1430,7 @@ is gone.
     package. We need to at least let the user know that we died because we
     could not get the package.
   * Claude (2026-09-24): The second stage does this now.
-    `EmbeddedVEnv.include` raises `RuntimeError` carrying pip's own standard
+    `AltVEnv.include` raises `RuntimeError` carrying pip's own standard
     error, so a caller is told why rather than left with an import failure.
     The twelve bootstrap cases still do not, and they are the half that runs on
     a stranger's machine.
@@ -1452,7 +1452,7 @@ is gone.
   `if not (target / PACKAGE).is_dir()`.  A distribution that installs
   as a single module puts a `.py` file there, not a directory, so the
   guard is false on every run and the install is repeated forever.
-  `embedded_venv` is exactly such a distribution, so the defect
+  `alt_venv` is exactly such a distribution, so the defect
   applies to the package this project ships.
 
   Two things follow.  Every case re-downloads on every run, which the
@@ -1474,15 +1474,15 @@ is gone.
   * Claude (2026-09-25): Fixed the same day, by Wayne's approach: the
     second stage repairs the layout rather than twelve pasted case
     bodies being edited, so no case gained a line and the `paste`
-    column did not move.  `EmbeddedVEnv.repair_module_layout` rewrites
+    column did not move.  `AltVEnv.repair_module_layout` rewrites
     the module it was imported from as `<name>/__init__.py`, but only
     when that file lies under the cache root, so a checkout is never
     touched.  The cost is one extra fetch, on the first run only.
   * Claude (2026-09-25): Two things were not obvious.  Half the cases
-    install into `~/.embedded_venv` and half into a `site-packages`
+    install into `~/.alt_venv` and half into a `site-packages`
     directory inside it, so the repair has to look anywhere under the
     root rather than at the root itself; and `bootstrap.py` never
-    constructed an `EmbeddedVEnv`, so its epilogue now does what a real
+    constructed an `AltVEnv`, so its epilogue now does what a real
     program does next.  The repair also has to decline to run once the
     module is a package, since `__init__.py` has the stem `__init__`
     and an earlier version buried it one directory deeper on the second

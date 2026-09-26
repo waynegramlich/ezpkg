@@ -25,15 +25,15 @@ no `match` and no `sys.argv` at all, which is why neither
 `mechanism = sys.argv[1]` nor `match mechanism:` is counted in
 `paste`, and neither is the closing `print`.  Every other line in a
 case is counted and is exactly the line a real program would carry --
-`~/.embedded_venv` is named in the code rather than passed in, so that
+`~/.alt_venv` is named in the code rather than passed in, so that
 stays true.
 
 `PACKAGE` is internal in the same way.  A pasted case carries one
-literal line, `PACKAGE = "embedded_venv"`, and that is the line
+literal line, `PACKAGE = "alt_venv"`, and that is the line
 `paste` counts.  Here it defaults to `coverage` and the environment
 can aim the cases at something else through `BOOTSTRAP_PACKAGE`, so
 that the test suite can point them at a locally built
-`embedded_venv` wheel without editing a case body.  The `import os`
+`alt_venv` wheel without editing a case body.  The `import os`
 that makes the lookup possible is harness machinery too, and is
 excluded from the count along with `sys.argv[1]` and the closing
 `print`.
@@ -56,12 +56,12 @@ steer them at a local server.  A pasted case carries the literal
 The substitution costs a case no lines, so the `paste` column is
 unchanged.
 
-Measuring twelve cases against one `~/.embedded_venv` would be wrong: the
+Measuring twelve cases against one `~/.alt_venv` would be wrong: the
 second case onwards would find `coverage` already on disk and report a
 warm time as its cold time.  Each run therefore gets its own `HOME`,
 which `pathlib.Path.home()` honours -- the isolation is in the
 environment, where it belongs, and not in a line of code that no real
-user would type.  The real `~/.embedded_venv` is never touched.
+user would type.  The real `~/.alt_venv` is never touched.
 
 +------+-----------------+---------+-------+-------+--------+--------+--------+
 | case | mechanism       | imports | lines | paste | cold   | warm   | size   |
@@ -135,7 +135,7 @@ What the columns mean, in the order they appear above:
   `sys.path.insert`, and one import.  Cold cost is paid once per
   machine; warm cost is paid on every run of the program, forever.
 
-* **size** -- kilobytes under `~/.embedded_venv` afterwards, counting
+* **size** -- kilobytes under `~/.alt_venv` afterwards, counting
   allocated blocks much as `du -sk` does, landing within about 3 KB of
   it in either direction.  Compare these against each other, not
   against `du`.  Kilobytes rather than
@@ -233,11 +233,11 @@ def main() -> None:
     mechanism = sys.argv[1]
     match mechanism:
         case "1":
-            # Ensure `embedded_venv` is downloaded.
+            # Ensure `alt_venv` is downloaded.
             import os
             import sysconfig
             import venv
-            root = pathlib.Path.home() / ".embedded_venv"
+            root = pathlib.Path.home() / ".alt_venv"
             if not (root / "pyvenv.cfg").exists():
                 venv.EnvBuilder(with_pip=True, symlinks=(os.name != "nt")
                                 ).create(root)
@@ -254,12 +254,12 @@ def main() -> None:
             importlib.invalidate_caches()
             module = importlib.import_module(PACKAGE)
         case "2":
-            # Ensure `embedded_venv` is downloaded.
+            # Ensure `alt_venv` is downloaded.
             import os
             import subprocess
             import sysconfig
             import venv
-            root = pathlib.Path.home() / ".embedded_venv"
+            root = pathlib.Path.home() / ".alt_venv"
             if not (root / "pyvenv.cfg").exists():
                 venv.EnvBuilder(with_pip=True, symlinks=(os.name != "nt")
                                 ).create(root)
@@ -275,13 +275,13 @@ def main() -> None:
             importlib.invalidate_caches()
             module = importlib.import_module(PACKAGE)
         case "3":
-            # Ensure `embedded_venv` is downloaded.
+            # Ensure `alt_venv` is downloaded.
             import io
             import json
             import sysconfig
             import urllib.request
             import zipfile
-            root = pathlib.Path.home() / ".embedded_venv"
+            root = pathlib.Path.home() / ".alt_venv"
             target = root
             target.mkdir(parents=True, exist_ok=True)
             if not (target / PACKAGE).is_dir():
@@ -321,12 +321,12 @@ def main() -> None:
             importlib.invalidate_caches()
             module = importlib.import_module(PACKAGE)
         case "4":
-            # Ensure `embedded_venv` is downloaded.
+            # Ensure `alt_venv` is downloaded.
             import os
             import shutil
             import sysconfig
             import venv
-            root = pathlib.Path.home() / ".embedded_venv"
+            root = pathlib.Path.home() / ".alt_venv"
             if not (root / "pyvenv.cfg").exists():
                 venv.EnvBuilder(with_pip=True, symlinks=(os.name != "nt")
                                 ).create(root)
@@ -348,11 +348,11 @@ def main() -> None:
             importlib.invalidate_caches()
             module = importlib.import_module(PACKAGE)
         case "5":
-            # Ensure `embedded_venv` is downloaded.
+            # Ensure `alt_venv` is downloaded.
             import os
             import sysconfig
             import venv
-            root = pathlib.Path.home() / ".embedded_venv"
+            root = pathlib.Path.home() / ".alt_venv"
             if not (root / "pyvenv.cfg").exists():
                 venv.EnvBuilder(with_pip=False, symlinks=(os.name != "nt")
                                 ).create(root)
@@ -369,8 +369,8 @@ def main() -> None:
             importlib.invalidate_caches()
             module = importlib.import_module(PACKAGE)
         case "6":
-            # Ensure `embedded_venv` is downloaded.
-            target = pathlib.Path.home() / ".embedded_venv"
+            # Ensure `alt_venv` is downloaded.
+            target = pathlib.Path.home() / ".alt_venv"
             if not (target / PACKAGE).is_dir():
                 from pip._internal.cli.main import main as pip_main
                 if pip_main(["install", "--quiet", "--no-input",
@@ -381,9 +381,9 @@ def main() -> None:
             importlib.invalidate_caches()
             module = importlib.import_module(PACKAGE)
         case "7":
-            # Ensure `embedded_venv` is downloaded.
+            # Ensure `alt_venv` is downloaded.
             import subprocess
-            target = pathlib.Path.home() / ".embedded_venv"
+            target = pathlib.Path.home() / ".alt_venv"
             if not (target / PACKAGE).is_dir():
                 subprocess.run([sys.executable, "-m", "pip", "install",
                                 "--quiet", "--no-input",
@@ -393,9 +393,9 @@ def main() -> None:
             importlib.invalidate_caches()
             module = importlib.import_module(PACKAGE)
         case "8":
-            # Ensure `embedded_venv` is downloaded.
+            # Ensure `alt_venv` is downloaded.
             import ensurepip
-            target = pathlib.Path.home() / ".embedded_venv"
+            target = pathlib.Path.home() / ".alt_venv"
             if not (target / PACKAGE).is_dir():
                 shipped = ensurepip._WHEEL_PKG_DIR  # type: ignore
                 sys.path.insert(0, str(next(
@@ -409,8 +409,8 @@ def main() -> None:
             importlib.invalidate_caches()
             module = importlib.import_module(PACKAGE)
         case "9":
-            # Ensure `embedded_venv` is downloaded.
-            target = pathlib.Path.home() / ".embedded_venv"
+            # Ensure `alt_venv` is downloaded.
+            target = pathlib.Path.home() / ".alt_venv"
             if not (target / PACKAGE).is_dir():
                 from pip._internal.cli.main import main as pip_main
                 if pip_main(["install", "--quiet", "--no-input",
@@ -421,9 +421,9 @@ def main() -> None:
             importlib.invalidate_caches()
             module = importlib.import_module(PACKAGE)
         case "10":
-            # Ensure `embedded_venv` is downloaded.
+            # Ensure `alt_venv` is downloaded.
             import subprocess
-            target = pathlib.Path.home() / ".embedded_venv"
+            target = pathlib.Path.home() / ".alt_venv"
             if not (target / PACKAGE).is_dir():
                 subprocess.run([sys.executable, "-m", "pip", "install",
                                 "--quiet", "--no-input", "--no-compile",
@@ -433,13 +433,13 @@ def main() -> None:
             importlib.invalidate_caches()
             module = importlib.import_module(PACKAGE)
         case "11":
-            # Ensure `embedded_venv` is downloaded.
+            # Ensure `alt_venv` is downloaded.
             import os
             import shutil
             import subprocess
             import sysconfig
             import venv
-            root = pathlib.Path.home() / ".embedded_venv"
+            root = pathlib.Path.home() / ".alt_venv"
             if not (root / "pyvenv.cfg").exists():
                 venv.EnvBuilder(with_pip=True, symlinks=(os.name != "nt")
                                 ).create(root)
@@ -460,7 +460,7 @@ def main() -> None:
             importlib.invalidate_caches()
             module = importlib.import_module(PACKAGE)
         case "12":
-            # Ensure `embedded_venv` is downloaded.
+            # Ensure `alt_venv` is downloaded.
             import io
             import json
             import os
@@ -468,7 +468,7 @@ def main() -> None:
             import urllib.request
             import venv
             import zipfile
-            root = pathlib.Path.home() / ".embedded_venv"
+            root = pathlib.Path.home() / ".alt_venv"
             if not (root / "pyvenv.cfg").exists():
                 venv.EnvBuilder(with_pip=False, symlinks=(os.name != "nt")
                                 ).create(root)
@@ -519,8 +519,8 @@ def main() -> None:
     # the constructor repairs a single module install so that this
     # case's own `is_dir()` guard recognises it on the following run.
     # See `0cctfd`.  Harness machinery, so `paste` does not count it.
-    if hasattr(module, "EmbeddedVEnv"):
-        module.EmbeddedVEnv()
+    if hasattr(module, "AltVEnv"):
+        module.AltVEnv()
 
     print(f"{PACKAGE}: module {module.__name__} "
           f"version {module.__version__} from {module.__file__}")
@@ -663,11 +663,11 @@ def format_table(rows: list[list]) -> str:
 def run_tests() -> None:
     """Run every case in a throwaway `HOME` and print the report.
 
-    Each case installs into `~/.embedded_venv`, so every run is given
+    Each case installs into `~/.alt_venv`, so every run is given
     its own temporary `HOME`, which `pathlib.Path.home()` honours.
     Without that, the second case onwards would find the package
     already on disk and report a warm time as its cold time.  The real
-    `~/.embedded_venv` is never touched, and each temporary tree is
+    `~/.alt_venv` is never touched, and each temporary tree is
     removed once it has been measured.
 
     Every case is run `REPETITIONS` times, cold and then warm, and the
@@ -704,7 +704,7 @@ def run_tests() -> None:
                 if done.returncode or PACKAGE not in done.stdout:
                     failures.append((label, done.stderr.strip()[-300:]))
             if repetition == 0:
-                size = directory_size(pathlib.Path(home) / ".embedded_venv")
+                size = directory_size(pathlib.Path(home) / ".alt_venv")
             shutil.rmtree(home, ignore_errors=True)
         cold, warm = statistics.median(colds), statistics.median(warms)
         imports, lines = counts[label]

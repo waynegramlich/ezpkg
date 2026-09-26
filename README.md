@@ -1,6 +1,5 @@
 # AltVEnv: Alternative to Virtual Environments
 
-<!-- Claude a rename from EmbeddedVenv to AltEnv is coming. -->
 <!-- Claude: I expect we the code to eventually land on github.
      The [gh-md-to-html](https://pypi.org/project/gh-md-to-html/)
      is the probable format for interior hyper links.-->
@@ -30,7 +29,7 @@ directory to the [Scavenger Hunt](scavenger-hunt).
 Usually by the time your have reached this paragraph, you are confronting
 some text that looks like:
 ```
-Something called the AltEnv Python module downloaded a bunch of Python modules
+Something called the AltVEnv Python module downloaded a bunch of Python modules
 into a holding area and needs you to manually approve each one for security
 purposes.  Remember the program author decided to put you through this tedium
 rather the alternate tedium of setting up something called a Python virtual

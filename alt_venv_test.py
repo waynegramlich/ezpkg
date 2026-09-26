@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Test framework for `embedded_venv.py`.
+"""Test framework for `alt_venv.py`.
 
 This module is the test half of Experiment 2.  The experiment is a
 pipeline rather than a set of alternatives -- publish a package to a
 local index, fetch it with the bootstrap stub, and import it -- so
-`EmbeddedVEnvTest` is shaped around building and discarding that index
+`AltVEnvTest` is shaped around building and discarding that index
 rather than around a table of measurements.
 
 The index is a [PEP 503](https://peps.python.org/pep-0503/) directory
@@ -69,13 +69,13 @@ from pathlib import Path
 from types import ModuleType
 from typing import Any, cast
 
+import alt_venv
 import bootstrap
-import embedded_venv
 
 # The version comes from the module, so it is written down once.
-DISTRIBUTION: str = "embedded-venv"
-MODULE: str = "embedded_venv"
-VERSION: str = embedded_venv.__version__
+DISTRIBUTION: str = "alt-venv"
+MODULE: str = "alt_venv"
+VERSION: str = alt_venv.__version__
 SUMMARY: str = "Fetch Python packages that are not preinstalled."
 
 # Which cases the all-case tests exercise.  The full dozen costs most of
@@ -94,7 +94,7 @@ HANG_SECONDS: float = 3.0
 def cases() -> tuple[str, ...]:
     """Return the case labels the all-case tests should exercise.
 
-    `EMBEDDEDVEN_TEST` chooses.  Unset or `FAST`, which is the usual
+    `ALT_VENV_TEST` chooses.  Unset or `FAST`, which is the usual
     way to run, gives `FAST_CASES`.  `COMPLETE` gives every case
     `bootstrap.py` defines, which is thorough and slow.
 
@@ -103,14 +103,14 @@ def cases() -> tuple[str, ...]:
 
     Raises:
     * `ValueError`:
-      If `EMBEDDEDVEN_TEST` holds something else, because a typo that
+      If `ALT_VENV_TEST` holds something else, because a typo that
       silently ran the fast tests would be worse than a refusal.
     """
     # An unrecognised value is a mistake rather than a default.
-    choice: str = os.environ.get("EMBEDDEDVEN_TEST", "FAST").upper()
+    choice: str = os.environ.get("ALT_VENV_TEST", "FAST").upper()
     if choice not in ("FAST", "COMPLETE"):
         raise ValueError(
-            f"EMBEDDEDVEN_TEST is {choice!r}; use FAST or COMPLETE")
+            f"ALT_VENV_TEST is {choice!r}; use FAST or COMPLETE")
     if choice == "COMPLETE":
         return tuple(bootstrap.MECHANISMS)
     return FAST_CASES
@@ -125,7 +125,7 @@ def run_bootstrap_case(label: str, home: Path, index_url: str,
     which is what `bootstrap.py` documents that `BOOTSTRAP_PACKAGE` and
     `BOOTSTRAP_JSON_API` are for, so no case body is edited to make it
     testable.  `HOME` is given because every case installs into
-    `~/.embedded_venv`, and a fresh `HOME` is what makes a run cold.
+    `~/.alt_venv`, and a fresh `HOME` is what makes a run cold.
 
     Arguments:
     * `label` (`str`):
@@ -211,7 +211,7 @@ def build_wheel(module: Path, distribution: str, version: str,
             f"Metadata-Version: 2.1\nName: {distribution}\n"
             f"Version: {version}\nSummary: {summary}\n").encode(),
         f"{info}/WHEEL": (b"Wheel-Version: 1.0\n"
-                          b"Generator: embedded_venv_test\n"
+                          b"Generator: alt_venv_test\n"
                           b"Root-Is-Purelib: true\nTag: py3-none-any\n"),
     }
 
@@ -444,7 +444,7 @@ class _IndexHandler(http.server.SimpleHTTPRequestHandler):
         * `project` (`str`):
           The project name as the request spelled it.  It is
           normalized the way PEP 503 and `build_index` normalize it,
-          so that `embedded-venv` and `embedded_venv` both arrive.
+          so that `alt-venv` and `alt_venv` both arrive.
         """
         # Find the project's wheels, which are the whole of the answer.
         normalized: str = re.sub(r"[-_.]+", "-", project).lower()
@@ -590,7 +590,7 @@ def serve_index(root: Path,
     return server, f"{server.scheme}://{address[0]}:{address[1]}/"
 
 
-class EmbeddedVEnvTest(unittest.TestCase):
+class AltVEnvTest(unittest.TestCase):
     """Build, exercise and discard the Experiment 2 pipeline.
 
     The wheel and the index are built once for the whole class, in a
@@ -607,10 +607,10 @@ class EmbeddedVEnvTest(unittest.TestCase):
     * `server` (`_IndexServer`):
       The server publishing `index`.
     * `wheel` (`Path`):
-      The wheel built from `embedded_venv.py`.
+      The wheel built from `alt_venv.py`.
 
     Constructor:
-    * `EmbeddedVEnvTest()`, by `unittest` rather than by hand.
+    * `AltVEnvTest()`, by `unittest` rather than by hand.
     """
 
     # Built once by `setUpClass`, shared by every test below.
@@ -624,7 +624,7 @@ class EmbeddedVEnvTest(unittest.TestCase):
     def setUpClass(cls) -> None:
         """Build the wheel and the index, then publish it over HTTP."""
         # Publish this project into a throwaway index.
-        cls.root = Path(tempfile.mkdtemp(prefix="embedded_venv-"))
+        cls.root = Path(tempfile.mkdtemp(prefix="alt_venv-"))
         module: Path = Path(__file__).resolve().parent / f"{MODULE}.py"
         cls.wheel = build_wheel(module, DISTRIBUTION, VERSION, SUMMARY,
                                 cls.root / "dist")
@@ -693,7 +693,7 @@ class EmbeddedVEnvTest(unittest.TestCase):
 
     def test_wheel_is_named_correctly(self) -> None:
         """The wheel filename escapes the hyphen and carries the tag."""
-        # The hyphen of `embedded-venv` becomes an underscore here.
+        # The hyphen of `alt-venv` becomes an underscore here.
         self.assertEqual(self.wheel.name,
                          f"{MODULE}-{VERSION}-py3-none-any.whl")
 
@@ -727,7 +727,7 @@ class EmbeddedVEnvTest(unittest.TestCase):
         environment, which is what `bootstrap.py` documents that
         `BOOTSTRAP_PACKAGE` and `BOOTSTRAP_JSON_API` are for, so no
         case body is edited to make it testable.  `HOME` is faked
-        because every case installs into `~/.embedded_venv`.
+        because every case installs into `~/.alt_venv`.
 
         Arguments:
         * `label` (`str`):
@@ -873,8 +873,8 @@ class EmbeddedVEnvTest(unittest.TestCase):
                 done = self.run_case(label)
                 self.assertEqual(done.returncode, 0, done.stderr[-400:])
                 self.assertIn(f"module {MODULE}", done.stdout)
-                self.assertIn(embedded_venv.__version__, done.stdout)
-                self.assertIn(".embedded_venv", done.stdout)
+                self.assertIn(alt_venv.__version__, done.stdout)
+                self.assertIn(".alt_venv", done.stdout)
 
     def test_every_case_bootstraps_repeatedly(self) -> None:
         """Three runs in one cache all succeed.
@@ -883,7 +883,7 @@ class EmbeddedVEnvTest(unittest.TestCase):
         where `0cctfd` lived: the guard every case uses asks whether
         the package is a directory, a single module install is not
         one, and case 11 deletes the `pip` it would need for the
-        second fetch.  `EmbeddedVEnv.repair_module_layout` is what
+        second fetch.  `AltVEnv.repair_module_layout` is what
         makes this pass.
 
         Three runs rather than two, because the repair has to be
@@ -910,7 +910,7 @@ class EmbeddedVEnvTest(unittest.TestCase):
         """A module outside the cache is never rewritten."""
         # This file's own directory must survive constructing one.
         source: Path = Path(__file__).resolve().parent / f"{MODULE}.py"
-        embedded_venv.EmbeddedVEnv(self.root / "elsewhere")
+        alt_venv.AltVEnv(self.root / "elsewhere")
         self.assertTrue(source.is_file())
 
     def test_json_api_cases_bootstrap_end_to_end(self) -> None:
@@ -923,7 +923,7 @@ class EmbeddedVEnvTest(unittest.TestCase):
                 done = self.run_case(label)
                 self.assertEqual(done.returncode, 0, done.stderr)
                 self.assertIn(f"module {MODULE}", done.stdout)
-                self.assertIn(embedded_venv.__version__, done.stdout)
+                self.assertIn(alt_venv.__version__, done.stdout)
 
     def cached_module(self, name: str) -> tuple[Path, Path]:
         """Plant a copy of this module where a case would install it.
@@ -934,7 +934,7 @@ class EmbeddedVEnvTest(unittest.TestCase):
 
         Returns:
         * (`tuple[Path, Path]`): The cache root, and the planted
-          `embedded_venv.py` inside it.  The path is the deep one that
+          `alt_venv.py` inside it.  The path is the deep one that
           the six virtual environment cases install into, because that
           is the harder of the two for the repair to find.
         """
@@ -957,9 +957,9 @@ class EmbeddedVEnvTest(unittest.TestCase):
         root: Path
         stray: Path
         root, stray = self.cached_module("repair")
-        cache: embedded_venv.EmbeddedVEnv = embedded_venv.EmbeddedVEnv(root)
+        cache: alt_venv.AltVEnv = alt_venv.AltVEnv(root)
         package: Path | None
-        with unittest.mock.patch.object(embedded_venv, "__file__",
+        with unittest.mock.patch.object(alt_venv, "__file__",
                                         str(stray)):
             package = cache.repair_module_layout()
         self.assertEqual(package, stray.parent / MODULE)
@@ -972,8 +972,8 @@ class EmbeddedVEnvTest(unittest.TestCase):
         root: Path
         stray: Path
         root, stray = self.cached_module("already")
-        cache: embedded_venv.EmbeddedVEnv = embedded_venv.EmbeddedVEnv(root)
-        with unittest.mock.patch.object(embedded_venv, "__path__",
+        cache: alt_venv.AltVEnv = alt_venv.AltVEnv(root)
+        with unittest.mock.patch.object(alt_venv, "__path__",
                                         [str(stray.parent)], create=True):
             self.assertIsNone(cache.repair_module_layout())
         self.assertTrue(stray.is_file())
@@ -983,28 +983,28 @@ class EmbeddedVEnvTest(unittest.TestCase):
         # A frozen or unusual `__file__` must not be moved.
         root: Path
         root, _ = self.cached_module("odd")
-        cache: embedded_venv.EmbeddedVEnv = embedded_venv.EmbeddedVEnv(root)
+        cache: alt_venv.AltVEnv = alt_venv.AltVEnv(root)
         other: Path = root / "not_python.txt"
         other.write_text("not a module\n")
-        with unittest.mock.patch.object(embedded_venv, "__file__",
+        with unittest.mock.patch.object(alt_venv, "__file__",
                                         str(other)):
             self.assertIsNone(cache.repair_module_layout())
-        with unittest.mock.patch.object(embedded_venv, "__file__", None):
+        with unittest.mock.patch.object(alt_venv, "__file__", None):
             self.assertIsNone(cache.repair_module_layout())
         self.assertTrue(other.is_file())
 
     def test_cases_refuses_an_unknown_choice(self) -> None:
-        """A typo in `EMBEDDEDVEN_TEST` is refused, not ignored."""
+        """A typo in `ALT_VENV_TEST` is refused, not ignored."""
         # Silently running the fast tests would be worse than a refusal.
         with (unittest.mock.patch.dict(
-                  os.environ, {"EMBEDDEDVEN_TEST": "COMPLEET"}),
+                  os.environ, {"ALT_VENV_TEST": "COMPLEET"}),
               self.assertRaises(ValueError) as caught):
             cases()
         self.assertIn("COMPLEET", str(caught.exception))
 
         # And the slow choice really does mean every case.
         with unittest.mock.patch.dict(
-                os.environ, {"EMBEDDEDVEN_TEST": "COMPLETE"}):
+                os.environ, {"ALT_VENV_TEST": "COMPLETE"}):
             self.assertEqual(cases(), tuple(bootstrap.MECHANISMS))
 
     def test_make_certificate_without_openssl(self) -> None:
@@ -1033,36 +1033,36 @@ class EmbeddedVEnvTest(unittest.TestCase):
         """Under `python3 -OO` the README keeps its title."""
         # `-OO` strips docstrings, so `inspect.getdoc` returns None.
         root: Path = self.root / "no-docstring"
-        cache: embedded_venv.EmbeddedVEnv
-        with unittest.mock.patch.object(embedded_venv.inspect, "getdoc",
+        cache: alt_venv.AltVEnv
+        with unittest.mock.patch.object(alt_venv.inspect, "getdoc",
                                         return_value=None):
-            cache = embedded_venv.EmbeddedVEnv(root)
+            cache = alt_venv.AltVEnv(root)
         self.assertEqual(cache.readme.read_text().splitlines()[0],
-                         "# Embedded Virtual Environment Cache")
+                         "# AltVEnv Package Cache")
 
     def test_installed_package_imports(self) -> None:
-        """The installed copy imports and exposes `EmbeddedVEnv`."""
+        """The installed copy imports and exposes `AltVEnv`."""
         # Import in a fresh interpreter, so nothing here can help it.
-        # HOME is faked because constructing an `EmbeddedVEnv` with no
-        # argument writes into `~/.embedded_venv` for real.
+        # HOME is faked because constructing an `AltVEnv` with no
+        # argument writes into `~/.alt_venv` for real.
         target: Path = self.root / "importable"
         (self.root / "fake_home").mkdir(exist_ok=True)
         self.assertEqual(self.pip_install(target, DISTRIBUTION).returncode, 0)
         done: subprocess.CompletedProcess[str] = subprocess.run(
             [sys.executable, "-c",
-             f"import {MODULE}; print({MODULE}.EmbeddedVEnv())"],
+             f"import {MODULE}; print({MODULE}.AltVEnv())"],
             env=dict(os.environ, PYTHONPATH=str(target),
                      HOME=str(self.root / "fake_home")),
             capture_output=True, text=True, check=False)
         self.assertEqual(done.returncode, 0, done.stderr)
-        self.assertIn("EmbeddedVEnv object", done.stdout)
+        self.assertIn("AltVEnv object", done.stdout)
 
-    def test_embedded_venv_constructs(self) -> None:
+    def test_alt_venv_constructs(self) -> None:
         """Constructing one makes the cache directory and a README."""
         # Never construct without a root: the default is the real
-        # `~/.embedded_venv`, and a test must not write there.
+        # `~/.alt_venv`, and a test must not write there.
         cache: Path = self.root / "cache"
-        venv: embedded_venv.EmbeddedVEnv = embedded_venv.EmbeddedVEnv(cache)
+        venv: alt_venv.AltVEnv = alt_venv.AltVEnv(cache)
         self.assertTrue(cache.is_dir())
         self.assertEqual(venv.readme, cache / "README.md")
 
@@ -1070,9 +1070,9 @@ class EmbeddedVEnvTest(unittest.TestCase):
         """The README is the constructor docstring, retitled."""
         # The summary line becomes the title; `Arguments:` is dropped.
         cache: Path = self.root / "readme"
-        text: str = embedded_venv.EmbeddedVEnv(cache).readme.read_text()
+        text: str = alt_venv.AltVEnv(cache).readme.read_text()
         self.assertTrue(
-            text.startswith("# Embedded Virtual Environment Cache\n"))
+            text.startswith("# AltVEnv Package Cache\n"))
         self.assertIn("Deleting this directory is safe.", text)
         self.assertNotIn("Arguments:", text)
 
@@ -1082,9 +1082,9 @@ class EmbeddedVEnvTest(unittest.TestCase):
         home: Path = self.root / "home"
         home.mkdir(exist_ok=True)
         with unittest.mock.patch.dict(os.environ, {"HOME": str(home)}):
-            venv: embedded_venv.EmbeddedVEnv = embedded_venv.EmbeddedVEnv()
-        self.assertEqual(venv.root, home / ".embedded_venv")
-        self.assertTrue((home / ".embedded_venv" / "README.md").is_file())
+            venv: alt_venv.AltVEnv = alt_venv.AltVEnv()
+        self.assertEqual(venv.root, home / ".alt_venv")
+        self.assertTrue((home / ".alt_venv" / "README.md").is_file())
 
 
 class TlsTest(unittest.TestCase):
@@ -1212,7 +1212,7 @@ class TlsTest(unittest.TestCase):
 
 
 class IncludeTest(unittest.TestCase):
-    """Exercise `EmbeddedVEnv.include` against a local index.
+    """Exercise `AltVEnv.include` against a local index.
 
     A throwaway package is built and published for these tests, so
     that nothing here depends on PyPI or on the network.
@@ -1296,9 +1296,9 @@ class IncludeTest(unittest.TestCase):
         """
         # Point pip at the local index and run the whole thing remotely.
         script: str = (
-            "import sys, embedded_venv;"
+            "import sys, alt_venv;"
             "from pathlib import Path;"
-            f"v = embedded_venv.EmbeddedVEnv(Path({str(target)!r}));"
+            f"v = alt_venv.AltVEnv(Path({str(target)!r}));"
             f"m = v.include({package!r}, {list(argv)!r}, "
             f"{distribution!r});"
             "print(m.__name__, m.__version__)")
@@ -1337,7 +1337,7 @@ class IncludeTest(unittest.TestCase):
         # Register the cleanup before anything is inserted or imported.
         cache: Path = self.root / "in-process"
         self.addCleanup(self.forget, str(cache), "widget")
-        venv: embedded_venv.EmbeddedVEnv = embedded_venv.EmbeddedVEnv(cache)
+        venv: alt_venv.AltVEnv = alt_venv.AltVEnv(cache)
         module: ModuleType
         with unittest.mock.patch.dict(
                 os.environ, {"PIP_INDEX_URL": self.index_url}):
@@ -1351,7 +1351,7 @@ class IncludeTest(unittest.TestCase):
         # This is the no network case, which a caller must be told about.
         cache: Path = self.root / "in-process-missing"
         self.addCleanup(self.forget, str(cache), "nosuchwidget")
-        venv: embedded_venv.EmbeddedVEnv = embedded_venv.EmbeddedVEnv(cache)
+        venv: alt_venv.AltVEnv = alt_venv.AltVEnv(cache)
         with (unittest.mock.patch.dict(
                   os.environ, {"PIP_INDEX_URL": self.index_url}),
               self.assertRaises(RuntimeError) as caught):
@@ -1405,18 +1405,18 @@ class IncludeTest(unittest.TestCase):
         """`contains` is False before an include and True after."""
         # A single module counts, not only a package directory.
         target: Path = self.root / "contains"
-        venv: embedded_venv.EmbeddedVEnv = embedded_venv.EmbeddedVEnv(target)
+        venv: alt_venv.AltVEnv = alt_venv.AltVEnv(target)
         self.assertFalse(venv.contains("widget"))
         self.include(target, "widget")
         self.assertTrue(venv.contains("widget"))
 
 
 def main() -> None:
-    """Run the `embedded_venv` test suite.
+    """Run the `alt_venv` test suite.
 
     This is the entry point used when the file is executed directly.
     It hands control to `unittest`, which discovers the test methods
-    of `EmbeddedVEnvTest` and reports on them.
+    of `AltVEnvTest` and reports on them.
     """
     # unittest reads sys.argv itself and exits when it is done.
     unittest.main()
