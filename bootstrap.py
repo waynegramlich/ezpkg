@@ -38,6 +38,14 @@ that makes the lookup possible is harness machinery too, and is
 excluded from the count along with `sys.argv[1]` and the closing
 `print`.
 
+`JSON_API` is the same arrangement for the same reason.  Cases 3 and
+12 read PyPI's JSON API with `urllib`, which knows nothing of
+`PIP_INDEX_URL`, so there is no environment variable already able to
+steer them at a local server.  A pasted case carries the literal
+`https://pypi.org/pypi`; here `BOOTSTRAP_JSON_API` can replace it.
+The substitution costs a case no lines, so the `paste` column is
+unchanged.
+
 Measuring twelve cases against one `~/.embedded_venv` would be wrong: the
 second case onwards would find `coverage` already on disk and report a
 warm time as its cold time.  Each run therefore gets its own `HOME`,
@@ -194,6 +202,10 @@ import sys
 # case carries a literal, while the harness steers this one instead.
 PACKAGE: str = os.environ.get("BOOTSTRAP_PACKAGE", "coverage")
 
+# Where cases 3 and 12 look for the JSON API, steered the same way.
+JSON_API: str = os.environ.get("BOOTSTRAP_JSON_API",
+                               "https://pypi.org/pypi")
+
 
 def main() -> None:
     """Run the single bootstrap mechanism named by `sys.argv[1]`.
@@ -264,7 +276,7 @@ def main() -> None:
             target.mkdir(parents=True, exist_ok=True)
             if not (target / PACKAGE).is_dir():
                 with urllib.request.urlopen(
-                        f"https://pypi.org/pypi/{PACKAGE}/json",
+                        f"{JSON_API}/{PACKAGE}/json",
                         timeout=30) as r:
                     metadata = json.load(r)
                 impl = "cp" if sys.implementation.name == "cpython" else "py"
@@ -455,7 +467,7 @@ def main() -> None:
                 "platbase": str(root), "installed_base": str(root)}))
             if not (target / PACKAGE).is_dir():
                 with urllib.request.urlopen(
-                        f"https://pypi.org/pypi/{PACKAGE}/json",
+                        f"{JSON_API}/{PACKAGE}/json",
                         timeout=30) as r:
                     metadata = json.load(r)
                 impl = "cp" if sys.implementation.name == "cpython" else "py"

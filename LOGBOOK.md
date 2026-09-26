@@ -254,6 +254,8 @@ never runs `git` at all; Wayne commits to `git` by hand and never runs
 detailed working agreement and travels in every git commit, which keeps
 the rules versioned alongside the work they govern.
 
+(CLOSED 2026-09-20)
+
 ## Task 2: Create the Bootstrap Code  (CLOSED 2026-09-22)
 
 This task was called Experiment 1 while it ran.  The text below, and
@@ -485,6 +487,8 @@ What this task did not settle is which mechanism to ship, because that
 depended on what a stock machine actually provides.  Task 3 settled it
 by deciding rather than by measuring.
 
+(CLOSED 2026-09-22)
+
 ## Task 3: Master `pip` and Package Servers  (CLOSED 2026-09-24)
 
 This task was called Experiment 2 while it ran.  The text below, several
@@ -577,6 +581,8 @@ Three items did not get done and carry over to Task 5: an automated end
 to end test through `bootstrap.py`, the remaining failure cases, and
 the real package server that cases 3 and 12 require.
 
+(CLOSED 2026-09-24)
+
 ## Task 4: Convert the Logbook to the New Format  (CLOSED 2026-09-24)
 
 `log_book.md` grew as a running narrative with a `FENCE:` marker
@@ -616,6 +622,8 @@ The issue tracker changed shape:
 Decisions about the logbook format were collected in `LOGBOOK_NOTES.md`,
 propagated into `claude_notes.md`, which resides in another directory
 under its own separate version control, and then deleted.
+
+(CLOSED 2026-09-24)
 
 ## Task 5: A Real Package Server
 
@@ -749,7 +757,80 @@ Carried over from Task 3:
 
 ### Task 5 Summary
 
-...
+Task 5 is open, so this section is a working chart rather than a
+summary.  It is the Task 2 table remeasured against a package server
+we control, and it gets updated in place until the task closes.  The
+original chart stays as it was, because it measured `coverage` from
+PyPI and this one measures `embedded_venv` from `127.0.0.1`.
+
+```
+date        : 2026-09-25 16:10
+python      : 3.12.3 at /usr/bin/python3
+platform    : linux
+inside venv : False
+package     : embedded_venv
+index       : local, http
+repetitions : 3; cold and warm are medians
+
++------+-----------------+---------+-------+-------+--------+--------+--------+
+| case | mechanism       | imports | lines | paste | cold   | warm   | size   |
++------+-----------------+---------+-------+-------+--------+--------+--------+
+| 1    | venv(pip), pip  | 4       | 20    | 24    | 4.35 s | 1.21 s | 15259  |
+|      | in process      |         |       |       |        |        |        |
+| 2    | venv(pip), pip  | 4       | 20    | 24    | 4.45 s | 1.31 s | 15259  |
+|      | subprocess      |         |       |       |        |        |        |
+| 3    | no venv, stdlib | 5       | 45    | 49    | 0.16 s | 0.16 s | 36     |
+|      | wheel           |         |       |       |        |        |        |
+| 4    | venv(pip), then | 5       | 26    | 30    | 4.55 s | 1.23 s | 68     |
+|      | delete pip      |         |       |       |        |        |        |
+| 5    | venv(no pip),   | 4       | 20    | 24    | 1.23 s | 1.20 s | 68     |
+|      | pip in proc     |         |       |       |        |        |        |
+| 6    | no venv, pip in | 1       | 11    | 15    | 1.20 s | 1.22 s | 40     |
+|      | process         |         |       |       |        |        |        |
+| 7    | no venv, pip    | 1       | 11    | 15    | 1.30 s | 1.30 s | 40     |
+|      | subprocess      |         |       |       |        |        |        |
+| 8    | no venv, pip    | 2       | 15    | 19    | 2.75 s | 2.76 s | 40     |
+|      | from wheel      |         |       |       |        |        |        |
+| 9    | as 6 plus --no- | 1       | 11    | 15    | 1.22 s | 1.21 s | 40     |
+|      | compile         |         |       |       |        |        |        |
+| 10   | as 7 plus --no- | 1       | 11    | 15    | 1.31 s | 1.31 s | 40     |
+|      | compile         |         |       |       |        |        |        |
+| 11   | as 4 but        | 5       | 26    | 30    | 3.77 s | 0.18 s | 68     |
+|      | subprocess      |         |       |       |        |        |        |
+| 12   | venv(no pip),   | 7       | 51    | 55    | 0.15 s | 0.14 s | 64     |
+|      | stdlib wheel    |         |       |       |        |        |        |
++------+-----------------+---------+-------+-------+--------+--------+--------+
+
+3 FAILURES: case 11, once per repetition, on the warm run only.
+```
+
+What the remeasurement says:
+
+* Eleven of the twelve cases fetch `embedded_venv` from our own server
+  and import it.  That is the thing Task 5 exists to establish, and it
+  is now established for everything but case 11.
+* `imports`, `lines` and `paste` are identical to the Task 2 chart in
+  every row, which confirms that `JSON_API` cost no case a line.
+* **Case 11 fails on the warm run, every repetition.**  It installs
+  with the venv's own `pip` and then deletes that `pip`, so the second
+  run has nothing to install with.  It survived the Task 2 chart only
+  because `coverage` installs as a directory: the guard is
+  `if not (target / PACKAGE).is_dir()`, which was true once and false
+  afterwards.  `embedded_venv` installs as a single `.py` file, so
+  `is_dir()` is false forever, every run re-installs, and case 11
+  re-installs with a `pip` it has removed.  This is a real defect in
+  the case rather than an artefact of the harness, and it is the first
+  thing the chart caught.
+* Warm no longer differs much from cold, for the same reason: with the
+  guard never tripping, a warm run repeats the whole install.  Cases
+  1, 2 and 4 still show a warm gain because they skip rebuilding the
+  virtual environment, not because they skip the download.
+* Sizes fell by roughly a factor of 25, from 1682-1790 KB to 36-68 KB
+  outside the venv-with-pip cases.  `embedded_venv` is one pure Python
+  module where `coverage` ships compiled extensions.  The 15259 KB of
+  cases 1 and 2 is almost entirely the `pip` they keep.
+
+
 
 ## Issues
 
@@ -790,6 +871,36 @@ Being worked on right now, in priority order.  None at present.
 ### Pending Issues
 
 Not yet started, in priority order.
+
+* **The cache check tests for a directory. (0cctfd)**  Every one of the
+  twelve cases guards its install with
+  `if not (target / PACKAGE).is_dir()`.  A distribution that installs
+  as a single module puts a `.py` file there, not a directory, so the
+  guard is false on every run and the install is repeated forever.
+  `embedded_venv` is exactly such a distribution, so the defect
+  applies to the package this project ships.
+
+  Two things follow.  Every case re-downloads on every run, which the
+  Task 5 chart shows as warm times that match cold times.  And case 11
+  does not merely repeat work, it fails: it installs with the venv's
+  own `pip`, deletes that `pip`, and then on the second run tries to
+  install with it again, exiting non-zero three times out of three.
+  The Task 2 chart missed all of this because `coverage` installs as a
+  directory, which made the guard behave correctly by accident.
+
+  A possible solution is to ask whether the package imports rather
+  than whether a path exists, which is also what `2apiia` asks for; a
+  narrower one is to test for the module file as well as the
+  directory.  The two issues are distinct.  `2apiia` is about skipping
+  an install that is not needed, and this one is about a cache hit
+  that is never detected at all.
+
+  Various thoughts:
+  * Claude (2026-09-25): Priority 0 because it escapes.  A pasted case
+    carries the defect into somebody else's program, where the symptom
+    is a silent re-download on every single run, and for case 11 a
+    hard failure on the second.  Found by Step 5.3, which pointed the
+    cases at `embedded_venv` instead of `coverage` for the first time.
 
 * **Nothing identifies a cache as valid. (0nicav)**  Every case installs into
   `~/.embedded_venv` with no version, platform tag or interpreter

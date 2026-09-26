@@ -64,13 +64,35 @@ the rules stay versioned alongside the work they govern.
    problem statement, prior art, findings and decisions.  Wayne and
    Claude maintain it jointly.
 
-   The file is organised as numbered tasks.  A task whose heading
-   carries `(CLOSED YYYY-MM-DD)` and a written summary is settled: do
-   not edit it, propose the change and let Wayne make the call.  A task
-   with neither is open and can be edited normally.  A task with one
-   but not the other is a mistake worth pointing out.  An empty summary
-   heading is a reminder rather than a summary, and does not close
-   anything.  This replaced the `FENCE:` marker on 2026-09-24.
+   The file is organised as numbered tasks, and a closed task is marked
+   twice.  A marker is the text `(CLOSED ` followed by a real date and
+   a closing parenthesis; the template spelled out as letters is prose
+   about the convention rather than a marker, which is what lets Task 4
+   quote it without failing its own test.  A task is closed when all
+   three of these hold:
+
+   * The heading carries a marker.
+   * The last non-blank line of the task is that same marker, carrying
+     the same date.
+   * The summary section holds at least one line of text besides that
+     closing line.  A `...` placeholder does not count.
+
+   So a task holds either no markers or exactly two with matching
+   dates, and anything else is a mistake to point out.  The usual one
+   is a dated heading with no closing line, where the heading claims
+   what the rest of the task does not support.
+
+   A closed task is settled: do not edit it, propose the change and let
+   Wayne make the call.  An annotation goes above the closing line,
+   never after it, so that the line stays last.
+
+   An open task can be edited normally, and may put its summary heading
+   in early and accumulate working material underneath it -- a chart
+   that gets updated in place, a running list of findings.  That is not
+   a mistake.  The material is provisional, and writing it closes
+   nothing.  This arrangement replaced the `FENCE:` marker on
+   2026-09-24, and the two-marker rule replaced a one-marker version of
+   it on 2026-09-25.
 
    The point is to stop settled questions from being reopened over and
    over.
