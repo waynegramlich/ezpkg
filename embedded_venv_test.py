@@ -48,6 +48,7 @@ import functools
 import hashlib
 import html
 import http.server
+import importlib
 import io
 import json
 import os
@@ -65,6 +66,7 @@ import urllib.error
 import urllib.request
 import zipfile
 from pathlib import Path
+from types import ModuleType
 from typing import Any, cast
 
 import bootstrap
@@ -896,6 +898,121 @@ class EmbeddedVEnvTest(unittest.TestCase):
                 self.assertIn(f"module {MODULE}", done.stdout)
                 self.assertIn(embedded_venv.__version__, done.stdout)
 
+    def cached_module(self, name: str) -> tuple[Path, Path]:
+        """Plant a copy of this module where a case would install it.
+
+        Arguments:
+        * `name` (`str`):
+          A directory name to keep one test's cache from another's.
+
+        Returns:
+        * (`tuple[Path, Path]`): The cache root, and the planted
+          `embedded_venv.py` inside it.  The path is the deep one that
+          the six virtual environment cases install into, because that
+          is the harder of the two for the repair to find.
+        """
+        # Plant it deep, where `sysconfig` puts a venv's purelib.
+        root: Path = self.root / name
+        deep: Path = root / "lib" / "python3.12" / "site-packages"
+        deep.mkdir(parents=True, exist_ok=True)
+        stray: Path = deep / f"{MODULE}.py"
+        shutil.copy(Path(__file__).resolve().parent / f"{MODULE}.py", stray)
+        return root, stray
+
+    def test_repair_rewrites_a_cached_module(self) -> None:
+        """A module in the cache becomes a package directory.
+
+        The repair only ever fires inside a bootstrap child, so
+        `__file__` is patched to say this module came from the cache.
+        That is what the child sees for real.
+        """
+        # Plant the module, then make the repair believe it is ours.
+        root: Path
+        stray: Path
+        root, stray = self.cached_module("repair")
+        cache: embedded_venv.EmbeddedVEnv = embedded_venv.EmbeddedVEnv(root)
+        package: Path | None
+        with unittest.mock.patch.object(embedded_venv, "__file__",
+                                        str(stray)):
+            package = cache.repair_module_layout()
+        self.assertEqual(package, stray.parent / MODULE)
+        self.assertTrue((stray.parent / MODULE / "__init__.py").is_file())
+        self.assertFalse(stray.exists())
+
+    def test_repair_declines_a_package(self) -> None:
+        """Once the module is a package the repair does nothing."""
+        # A package has a `__path__`, and nesting would eat `__init__.py`.
+        root: Path
+        stray: Path
+        root, stray = self.cached_module("already")
+        cache: embedded_venv.EmbeddedVEnv = embedded_venv.EmbeddedVEnv(root)
+        with unittest.mock.patch.object(embedded_venv, "__path__",
+                                        [str(stray.parent)], create=True):
+            self.assertIsNone(cache.repair_module_layout())
+        self.assertTrue(stray.is_file())
+
+    def test_repair_declines_what_is_not_a_module(self) -> None:
+        """Anything but a `.py` file in the cache is left alone."""
+        # A frozen or unusual `__file__` must not be moved.
+        root: Path
+        root, _ = self.cached_module("odd")
+        cache: embedded_venv.EmbeddedVEnv = embedded_venv.EmbeddedVEnv(root)
+        other: Path = root / "not_python.txt"
+        other.write_text("not a module\n")
+        with unittest.mock.patch.object(embedded_venv, "__file__",
+                                        str(other)):
+            self.assertIsNone(cache.repair_module_layout())
+        with unittest.mock.patch.object(embedded_venv, "__file__", None):
+            self.assertIsNone(cache.repair_module_layout())
+        self.assertTrue(other.is_file())
+
+    def test_cases_refuses_an_unknown_choice(self) -> None:
+        """A typo in `EMBEDDEDVEN_TEST` is refused, not ignored."""
+        # Silently running the fast tests would be worse than a refusal.
+        with (unittest.mock.patch.dict(
+                  os.environ, {"EMBEDDEDVEN_TEST": "COMPLEET"}),
+              self.assertRaises(ValueError) as caught):
+            cases()
+        self.assertIn("COMPLEET", str(caught.exception))
+
+        # And the slow choice really does mean every case.
+        with unittest.mock.patch.dict(
+                os.environ, {"EMBEDDEDVEN_TEST": "COMPLETE"}):
+            self.assertEqual(cases(), tuple(bootstrap.MECHANISMS))
+
+    def test_make_certificate_without_openssl(self) -> None:
+        """A machine with no `openssl` gets `None`, not an exception.
+
+        This is the path that runs where the TLS tests have to skip,
+        which is the one machine where a failure here would be hardest
+        to work out.  It is untestable except by pretending.
+        """
+        # Hide `openssl` and check nothing is raised or left behind.
+        directory: Path = self.root / "no-openssl"
+        with unittest.mock.patch.object(shutil, "which", return_value=None):
+            self.assertIsNone(make_certificate(directory))
+        self.assertFalse(directory.exists())
+
+    def test_make_certificate_when_openssl_fails(self) -> None:
+        """An `openssl` that exits non-zero also gives `None`."""
+        # `/bin/false` is a program that is present and always fails,
+        # so this needs no mocking of `subprocess` itself.
+        directory: Path = self.root / "bad-openssl"
+        with unittest.mock.patch.object(shutil, "which",
+                                        return_value="/bin/false"):
+            self.assertIsNone(make_certificate(directory))
+
+    def test_readme_survives_a_missing_docstring(self) -> None:
+        """Under `python3 -OO` the README keeps its title."""
+        # `-OO` strips docstrings, so `inspect.getdoc` returns None.
+        root: Path = self.root / "no-docstring"
+        cache: embedded_venv.EmbeddedVEnv
+        with unittest.mock.patch.object(embedded_venv.inspect, "getdoc",
+                                        return_value=None):
+            cache = embedded_venv.EmbeddedVEnv(root)
+        self.assertEqual(cache.readme.read_text().splitlines()[0],
+                         "# Embedded Virtual Environment Cache")
+
     def test_installed_package_imports(self) -> None:
         """The installed copy imports and exposes `EmbeddedVEnv`."""
         # Import in a fresh interpreter, so nothing here can help it.
@@ -1166,6 +1283,53 @@ class IncludeTest(unittest.TestCase):
             [sys.executable, "-c", script], env=environment,
             capture_output=True, text=True, check=False)
         return done.stdout.strip() if done.returncode == 0 else done.stderr
+
+    def forget(self, entry: str, name: str) -> None:
+        """Undo what an in-process `include` did to this interpreter.
+
+        Arguments:
+        * `entry` (`str`):
+          The `sys.path` entry to take out again.
+        * `name` (`str`):
+          The module to drop from `sys.modules`.
+        """
+        # `include` inserts and imports; both have to be undone.
+        while entry in sys.path:
+            sys.path.remove(entry)
+        sys.modules.pop(name, None)
+        importlib.invalidate_caches()
+
+    def test_include_works_in_this_interpreter(self) -> None:
+        """`include` fetches and imports without a child process.
+
+        Every other test here drives `include` through a child, which
+        keeps `sys.path` clean but means the method's own lines are
+        never measured.  This one runs it directly and puts the
+        interpreter back afterwards.
+        """
+        # Register the cleanup before anything is inserted or imported.
+        cache: Path = self.root / "in-process"
+        self.addCleanup(self.forget, str(cache), "widget")
+        venv: embedded_venv.EmbeddedVEnv = embedded_venv.EmbeddedVEnv(cache)
+        module: ModuleType
+        with unittest.mock.patch.dict(
+                os.environ, {"PIP_INDEX_URL": self.index_url}):
+            module = venv.include("widget")
+        self.assertEqual(module.__name__, "widget")
+        self.assertEqual(module.__version__, "1.2.3")
+        self.assertTrue(venv.contains("widget"))
+
+    def test_include_in_process_reports_a_failure(self) -> None:
+        """A package the index lacks raises with pip's own reason."""
+        # This is the no network case, which a caller must be told about.
+        cache: Path = self.root / "in-process-missing"
+        self.addCleanup(self.forget, str(cache), "nosuchwidget")
+        venv: embedded_venv.EmbeddedVEnv = embedded_venv.EmbeddedVEnv(cache)
+        with (unittest.mock.patch.dict(
+                  os.environ, {"PIP_INDEX_URL": self.index_url}),
+              self.assertRaises(RuntimeError) as caught):
+            venv.include("nosuchwidget")
+        self.assertIn("could not fetch", str(caught.exception))
 
     def test_include_fetches_and_imports(self) -> None:
         """A missing package is fetched and handed back imported."""

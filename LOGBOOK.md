@@ -658,8 +658,9 @@ code with a real package server.  A proposed list of steps list belows:
   This does not settle the `ca-certificates` dependency from Task 3,
   which is about trusting the public authorities well enough to reach
   the real PyPI; a private certificate tests the opposite.
-* Step 5.7: (Optional) Do some test suite code coverage testing and try
-  to beef up code coverage.
+* Step 5.7: Test suite coverage, measured with the standard library
+  `trace` rather than `coverage`, so that the suite needs nothing
+  installed.
 * Step 5.8: (This is an open list that can be added to as needed.)
 
 ### Step 5.1: Select a package server (research only)
@@ -838,6 +839,62 @@ certificate tests the opposite, that the system trust store can be
 overridden, so nothing here confirms it.  Confirming it needs a fetch
 from the real index, which is a test with a network dependency and
 belongs with the work on `embedded_venv.py` rather than here.
+
+### Step 5.7: Coverage
+
+`embedded_venv_coverage.py` measures the suite with the standard
+library `trace`.  `coverage` would have been a `pip install`, and a
+suite for a project about packages that are not preinstalled should not
+need a package fetched; the same criterion chose `http.server` in Step
+5.1.  Where it ended up, on the fast suite:
+
+| module                   | lines | before | after |
+| ------------------------ | ----- | ------ | ----- |
+| `bootstrap.py`           |   407 |     7% |    7% |
+| `embedded_venv.py`       |    65 |    60% |   98% |
+| `embedded_venv_test.py`  |   590 |    87% |   99% |
+
+Nine tests were added, taking the suite from 29 to 38 and from 50.9 s
+to 56.5 s.  Tracing itself costs almost nothing, which is its own
+finding: nearly all of the work happens in child processes, where the
+tracer cannot reach.
+
+* **`embedded_venv.py` is effectively complete.**  The gap was that
+  `repair_module_layout` and `include` were exercised only through
+  child interpreters, so their bodies were never measured.  Calling
+  them in process, with `__file__` or `PIP_INDEX_URL` patched, covered
+  both.  The last uncovered line can never be reported: it runs only
+  when `__file__` is `None`, and `trace.Trace.globaltrace_lt` decides
+  what to follow by reading `frame.f_globals.get("__file__")`, so the
+  state that reaches the line is the state that turns tracing off.
+  98% here means 100%.
+* **Threads have to be instrumented separately**, and this was the
+  single biggest correction.  `trace` follows only the thread it starts
+  in, so every request handler looked dead however many requests went
+  through it.  `threading.settrace` moved the harness from 88% to 99%.
+* **The one real gap tracing found** was `make_certificate`'s two
+  failure returns and the skip they trigger: the path that runs on a
+  machine with no `openssl`, where a fault would make the TLS tests
+  error instead of skip, and where it would be hardest to diagnose.
+  Three tests cover it now, one of them using `/bin/false` as a
+  stand-in for a failing `openssl` so that nothing mocks `subprocess`.
+* **Hit counts said more than percentages.**  `do_GET` ran 54 times,
+  `fault` returned a fault 5 times and `None` 49, `send_fault` covered
+  `missing`, `error` and `hang` once each and `truncate` twice, and
+  `send_json` answered ten times and 404ed once.  That `hang` alone
+  falls through to a correct answer is visible in the counts: the
+  post-fault `return` fires four times, not five.
+* **`bootstrap.py`'s 7% is an artefact** of the twelve cases running as
+  children, and measures only the module level code that an import
+  executes.  The cases are covered by Steps 5.5 and the repeat test.
+  Driving `main()` in process would mean twelve cases mutating
+  `sys.path`, `HOME` and `sys.modules` inside the runner, which is why
+  they are children in the first place.
+* Five uncovered lines remain in the harness, all accounted for and
+  none worth closing: `super().handle_error`, which never firing is
+  the healthy state; the `openssl` absent skip, untestable while
+  `openssl` is present; and `main` with its `unittest.main`, which the
+  coverage runner bypasses by calling `unittest.main(module=...)`.
 
 ### Task 5 Summary
 
