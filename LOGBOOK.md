@@ -647,8 +647,7 @@ code with a real package server.  A proposed list of steps list belows:
 * Step 5.4: The failure cases carried over from Task 3.  A truncated
   wheel, a missing `index.html`, and a 500 from the index.  All three are
   cheap once a server exists, because a server can be told to misbehave
-  where a directory cannot.  Whether a hung connection is in scope is
-  still open.
+  where a directory cannot.
 * Step 5.5: Run every `bootstrap.py` case against the server end to end,
   asserting that `embedded_venv` lands in the cache and imports.  This is
   the test the task exists for.
@@ -737,6 +736,35 @@ converting them would have thrown away.
 * Both cases now run end to end: three new tests take the suite to 18,
   and pointing `BOOTSTRAP_JSON_API` at a dead port fails them, so they
   are measuring the fetch and not passing vacuously.
+
+### Step 5.4: The failure cases
+
+A directory index cannot misbehave, which is why these went untested
+through Tasks 2 and 3.  `_IndexServer` now carries a `faults` table
+that maps a path suffix to what should go wrong, and a test adds an
+entry through `inject`, which registers the removal as a cleanup first
+so that a failing assertion cannot leave the fault in place.
+
+* Four faults exist.  `missing` answers 404, `error` answers 500,
+  `hang` waits three seconds and then answers correctly, and
+  `truncate` sends the first half of the file with a `Content-Length`
+  that agrees with the half.
+* `truncate` is the one worth having.  The download looks complete at
+  every layer below the archive, so nothing but unzipping catches it.
+  `pip` refuses the install, and case 3, which unzips the wheel
+  itself, fails inside `zipfile`.
+* Five tests take the suite to 23.  Neutering `inject` makes all five
+  fail, so they measure the faults rather than passing for free.
+* A hung connection turned out to be in scope after all, for `pip`:
+  `PIP_TIMEOUT` and `PIP_RETRIES` bound the wait, so the test costs a
+  second rather than a minute.  It stays out of scope for cases 3 and
+  12, whose `urlopen` timeouts are literals of 30 and 60 seconds
+  inside counted case bodies.  Steering those would want a third
+  harness constant beside `PACKAGE` and `JSON_API`.
+* `_IndexServer.handle_error` swallows `ConnectionError` and nothing
+  else.  A client that times out hangs up mid-answer, and the base
+  class prints a traceback for that, which looked like a failure in
+  the middle of a passing run.
 
 ### Leftovers from task 3
 

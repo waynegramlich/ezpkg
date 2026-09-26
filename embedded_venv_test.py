@@ -57,13 +57,14 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
 import unittest
 import unittest.mock
 import urllib.error
 import urllib.request
 import zipfile
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import embedded_venv
 
@@ -72,6 +73,10 @@ DISTRIBUTION: str = "embedded-venv"
 MODULE: str = "embedded_venv"
 VERSION: str = embedded_venv.__version__
 SUMMARY: str = "Fetch Python packages that are not preinstalled."
+
+# How long the `hang` fault waits.  Longer than the client timeouts the
+# failure tests set, and short enough not to slow the suite down.
+HANG_SECONDS: float = 3.0
 
 
 def escaped_name(distribution: str) -> str:
@@ -218,6 +223,53 @@ def build_index(wheels: list[Path],
     return root
 
 
+class _IndexServer(http.server.ThreadingHTTPServer):
+    """A `ThreadingHTTPServer` that can be told to serve badly.
+
+    A directory index cannot misbehave, which is why the failure cases
+    carried over from Task 3 went untested for so long.  A server can,
+    so this one carries a table of faults that `_IndexHandler` reads
+    before answering.  Tests add an entry, make a request, and take the
+    entry out again.
+
+    Attributes:
+    * `faults` (`dict[str, str]`):
+      Maps a path suffix to what should go wrong for a request whose
+      path ends that way.  The fault names are `truncate`, which sends
+      half the file and a `Content-Length` that agrees with the half,
+      `missing`, which answers 404, `error`, which answers 500, and
+      `hang`, which waits `HANG_SECONDS` and then answers normally.
+      An empty table, which is the default, serves everything
+      correctly.
+
+    Constructor:
+    * `_IndexServer(address, handler)`, as `ThreadingHTTPServer`.
+    """
+
+    # Assigned per instance by `serve_index`, never shared between them.
+    faults: dict[str, str]
+
+    def handle_error(self, request: Any, client_address: Any) -> None:
+        """Stay quiet when a client hangs up, report anything else.
+
+        A client that times out closes its socket while the answer is
+        still being written, which the `hang` fault provokes on
+        purpose.  The base class prints a traceback for that, which
+        would look like a test failure in the middle of a passing run.
+        Every other error still gets reported.
+
+        Arguments:
+        * `request` (`Any`):
+          The socket the failure happened on.
+        * `client_address` (`Any`):
+          Where it came from.
+        """
+        # Only a hung up connection is expected; everything else is news.
+        if isinstance(sys.exc_info()[1], ConnectionError):
+            return
+        super().handle_error(request, client_address)
+
+
 class _IndexHandler(http.server.SimpleHTTPRequestHandler):
     """Serve a PEP 503 tree from disk, plus PyPI's JSON API.
 
@@ -242,12 +294,72 @@ class _IndexHandler(http.server.SimpleHTTPRequestHandler):
 
     def do_GET(self) -> None:
         """Answer the JSON API here, and everything else from disk."""
+        # A configured fault takes precedence over answering properly.
+        fault: str | None = self.fault()
+        if fault is not None and self.send_fault(fault):
+            return
+
         # `/pypi/<project>/json` is the only synthesized path.
         parts: list[str] = self.path.strip("/").split("/")
         if len(parts) == 3 and parts[0] == "pypi" and parts[2] == "json":
             self.send_json(parts[1])
             return
         super().do_GET()
+
+    def fault(self) -> str | None:
+        """Return the fault configured for this request, if any.
+
+        Returns:
+        * (`str | None`): The fault name, or `None` when this request
+          should be answered properly.
+        """
+        # The table is keyed by path suffix, so `.whl` picks any wheel.
+        server: _IndexServer = cast(_IndexServer, self.server)
+        suffix: str
+        name: str
+        for suffix, name in server.faults.items():
+            if self.path.endswith(suffix):
+                return name
+        return None
+
+    def send_fault(self, fault: str) -> bool:
+        """Answer this request badly, in the manner `fault` names.
+
+        Arguments:
+        * `fault` (`str`):
+          One of `truncate`, `missing`, `error` or `hang`.  See
+          `_IndexServer.faults`.
+
+        Returns:
+        * (`bool`): True when the request has been answered and the
+          caller should stop.  `hang` returns False, because it delays
+          a correct answer rather than replacing it.
+        """
+        # Two of the faults are nothing but a status code.
+        if fault == "missing":
+            self.send_error(404, "fault: missing")
+            return True
+        if fault == "error":
+            self.send_error(500, "fault: error")
+            return True
+
+        # A hang delays the real answer rather than replacing it.
+        if fault == "hang":
+            time.sleep(HANG_SECONDS)
+            return False
+
+        # A truncated file is the interesting one: the download looks
+        # complete, because the length agrees with the bytes sent, and
+        # the bytes are half a wheel.  Nothing but unzipping catches it.
+        whole: bytes = (Path(self.directory)
+                        / self.path.lstrip("/")).read_bytes()
+        half: bytes = whole[:len(whole) // 2]
+        self.send_response(200)
+        self.send_header("Content-Type", "application/octet-stream")
+        self.send_header("Content-Length", str(len(half)))
+        self.end_headers()
+        self.wfile.write(half)
+        return True
 
     def send_json(self, project: str) -> None:
         """Answer one JSON API request for `project`.
@@ -297,7 +409,7 @@ class _IndexHandler(http.server.SimpleHTTPRequestHandler):
         return
 
 
-def serve_index(root: Path) -> tuple[http.server.ThreadingHTTPServer, str]:
+def serve_index(root: Path) -> tuple[_IndexServer, str]:
     """Serve a PEP 503 tree over HTTP and return the server and its URL.
 
     The server binds port 0, so the operating system picks a free port
@@ -316,14 +428,14 @@ def serve_index(root: Path) -> tuple[http.server.ThreadingHTTPServer, str]:
       The root of the tree to serve, as `build_index` returns it.
 
     Returns:
-    * (`tuple[http.server.ThreadingHTTPServer, str]`): The running
-      server, which the caller shuts down, and the base URL to hand
-      to `PIP_INDEX_URL`.
+    * (`tuple[_IndexServer, str]`): The running server, which the
+      caller shuts down and which carries the fault table, and the
+      base URL to hand to `PIP_INDEX_URL`.
     """
     # Bind port 0 and let the operating system choose.
     handler: Any = functools.partial(_IndexHandler, directory=str(root))
-    server: http.server.ThreadingHTTPServer = (
-        http.server.ThreadingHTTPServer(("127.0.0.1", 0), handler))
+    server: _IndexServer = _IndexServer(("127.0.0.1", 0), handler)
+    server.faults = {}
 
     # Serve on a daemon thread, so a control-C cannot strand it.
     thread: threading.Thread = threading.Thread(target=server.serve_forever,
@@ -352,7 +464,7 @@ class EmbeddedVEnvTest(unittest.TestCase):
       That same tree as an HTTP URL, for `PIP_INDEX_URL`.
     * `root` (`Path`):
       The temporary directory holding everything this class builds.
-    * `server` (`http.server.ThreadingHTTPServer`):
+    * `server` (`_IndexServer`):
       The server publishing `index`.
     * `wheel` (`Path`):
       The wheel built from `embedded_venv.py`.
@@ -365,7 +477,7 @@ class EmbeddedVEnvTest(unittest.TestCase):
     index: Path
     index_url: str
     root: Path
-    server: http.server.ThreadingHTTPServer
+    server: _IndexServer
     wheel: Path
 
     @classmethod
@@ -391,8 +503,9 @@ class EmbeddedVEnvTest(unittest.TestCase):
         # One directory holds everything, so one removal suffices.
         shutil.rmtree(cls.root, ignore_errors=True)
 
-    def pip_install(self, target: Path,
-                    requirement: str) -> subprocess.CompletedProcess[str]:
+    def pip_install(self, target: Path, requirement: str,
+                    extra: dict[str, str] | None = None
+                    ) -> subprocess.CompletedProcess[str]:
         """Install a requirement from the local index into `target`.
 
         The index is passed through `PIP_INDEX_URL` rather than on the
@@ -406,13 +519,16 @@ class EmbeddedVEnvTest(unittest.TestCase):
           The directory to install into.
         * `requirement` (`str`):
           What to ask `pip` for.
+        * `extra` (`dict[str, str] | None`):
+          More environment for the child, such as the shorter timeout
+          and the disabled retries that the failure tests want.
 
         Returns:
         * (`subprocess.CompletedProcess[str]`): The finished child.
         """
         # Steer pip entirely through the environment, then run it.
         environment: dict[str, str] = dict(
-            os.environ, PIP_INDEX_URL=self.index_url)
+            os.environ, PIP_INDEX_URL=self.index_url, **(extra or {}))
         environment.pop("VIRTUAL_ENV", None)
         return subprocess.run(
             [sys.executable, "-m", "pip", "install", "--quiet", "--no-input",
@@ -493,6 +609,71 @@ class EmbeddedVEnvTest(unittest.TestCase):
         return subprocess.run(
             [sys.executable, str(script), label],
             env=environment, capture_output=True, text=True, check=False)
+
+    def inject(self, suffix: str, fault: str) -> None:
+        """Make the server misbehave for the rest of one test only.
+
+        The entry is removed by a cleanup rather than by the test, so a
+        failing assertion cannot leave the fault in place for whatever
+        test `unittest` runs next.
+
+        Arguments:
+        * `suffix` (`str`):
+          The path suffix to afflict, such as `.whl`.
+        * `fault` (`str`):
+          The fault name.  See `_IndexServer.faults`.
+        """
+        # Register the removal first, so an exception cannot skip it.
+        self.addCleanup(self.server.faults.pop, suffix, None)
+        self.server.faults[suffix] = fault
+
+    def test_a_truncated_wheel_fails_the_install(self) -> None:
+        """Half a wheel is refused rather than half installed."""
+        # The download looks complete, so only unzipping can catch it.
+        self.inject(".whl", "truncate")
+        target: Path = self.root / "truncated"
+        done: subprocess.CompletedProcess[str] = self.pip_install(
+            target, DISTRIBUTION)
+        self.assertNotEqual(done.returncode, 0)
+        self.assertFalse((target / f"{MODULE}.py").exists())
+
+    def test_a_truncated_wheel_fails_case_3(self) -> None:
+        """Case 3 unzips the wheel itself, so it must fail too."""
+        # `zipfile` is what notices, since the fetch itself succeeded.
+        self.inject(".whl", "truncate")
+        done: subprocess.CompletedProcess[str] = self.run_case("3")
+        self.assertNotEqual(done.returncode, 0)
+        self.assertIn("zipfile", done.stderr)
+
+    def test_a_missing_project_page_fails_the_install(self) -> None:
+        """A 404 for the project page is reported, not worked around."""
+        # This is the missing `index.html` case carried over from Task 3.
+        self.inject(f"/{DISTRIBUTION}/", "missing")
+        target: Path = self.root / "no-page"
+        done: subprocess.CompletedProcess[str] = self.pip_install(
+            target, DISTRIBUTION)
+        self.assertNotEqual(done.returncode, 0)
+        self.assertFalse((target / f"{MODULE}.py").exists())
+
+    def test_an_index_error_fails_the_install(self) -> None:
+        """A 500 from the index is reported rather than retried forever."""
+        # Retries are off, so this measures the first failure.
+        self.inject(f"/{DISTRIBUTION}/", "error")
+        target: Path = self.root / "index-error"
+        done: subprocess.CompletedProcess[str] = self.pip_install(
+            target, DISTRIBUTION, {"PIP_RETRIES": "0"})
+        self.assertNotEqual(done.returncode, 0)
+        self.assertFalse((target / f"{MODULE}.py").exists())
+
+    def test_a_hanging_index_times_out(self) -> None:
+        """A server that stops answering ends as a timeout, not a hang."""
+        # The fault waits longer than the timeout this passes to pip.
+        self.inject(f"/{DISTRIBUTION}/", "hang")
+        target: Path = self.root / "hanging"
+        done: subprocess.CompletedProcess[str] = self.pip_install(
+            target, DISTRIBUTION, {"PIP_TIMEOUT": "1", "PIP_RETRIES": "0"})
+        self.assertNotEqual(done.returncode, 0)
+        self.assertFalse((target / f"{MODULE}.py").exists())
 
     def test_json_api_lists_the_wheel(self) -> None:
         """The synthesized JSON API answers in the shape case 3 reads."""
@@ -589,7 +770,7 @@ class IncludeTest(unittest.TestCase):
       That same tree as an HTTP URL, for `PIP_INDEX_URL`.
     * `root` (`Path`):
       The temporary directory holding everything.
-    * `server` (`http.server.ThreadingHTTPServer`):
+    * `server` (`_IndexServer`):
       The server publishing `index`.
 
     Constructor:
@@ -601,7 +782,7 @@ class IncludeTest(unittest.TestCase):
     index: Path
     index_url: str
     root: Path
-    server: http.server.ThreadingHTTPServer
+    server: _IndexServer
 
     @classmethod
     def setUpClass(cls) -> None:
