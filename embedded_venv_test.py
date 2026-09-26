@@ -53,6 +53,7 @@ import json
 import os
 import re
 import shutil
+import ssl
 import subprocess
 import sys
 import tempfile
@@ -75,9 +76,78 @@ MODULE: str = "embedded_venv"
 VERSION: str = embedded_venv.__version__
 SUMMARY: str = "Fetch Python packages that are not preinstalled."
 
+# Which cases the all-case tests exercise.  The full dozen costs most of
+# a minute in virtual environment building, so the default is a subset
+# that still covers every distinct mechanism: case 3 fetches with
+# `urllib` and no virtual environment, case 6 with `pip` in process,
+# case 12 with `urllib` inside one, and case 11 is the one whose second
+# run used to fail.
+FAST_CASES: tuple[str, ...] = ("3", "6", "11", "12")
+
 # How long the `hang` fault waits.  Longer than the client timeouts the
 # failure tests set, and short enough not to slow the suite down.
 HANG_SECONDS: float = 3.0
+
+
+def cases() -> tuple[str, ...]:
+    """Return the case labels the all-case tests should exercise.
+
+    `EMBEDDEDVEN_TEST` chooses.  Unset or `FAST`, which is the usual
+    way to run, gives `FAST_CASES`.  `COMPLETE` gives every case
+    `bootstrap.py` defines, which is thorough and slow.
+
+    Returns:
+    * (`tuple[str, ...]`): The labels, in `bootstrap.py` order.
+
+    Raises:
+    * `ValueError`:
+      If `EMBEDDEDVEN_TEST` holds something else, because a typo that
+      silently ran the fast tests would be worse than a refusal.
+    """
+    # An unrecognised value is a mistake rather than a default.
+    choice: str = os.environ.get("EMBEDDEDVEN_TEST", "FAST").upper()
+    if choice not in ("FAST", "COMPLETE"):
+        raise ValueError(
+            f"EMBEDDEDVEN_TEST is {choice!r}; use FAST or COMPLETE")
+    if choice == "COMPLETE":
+        return tuple(bootstrap.MECHANISMS)
+    return FAST_CASES
+
+
+def run_bootstrap_case(label: str, home: Path, index_url: str,
+                       extra: dict[str, str] | None = None
+                       ) -> subprocess.CompletedProcess[str]:
+    """Run one `bootstrap.py` case against a local index.
+
+    The case is aimed at the index entirely through the environment,
+    which is what `bootstrap.py` documents that `BOOTSTRAP_PACKAGE` and
+    `BOOTSTRAP_JSON_API` are for, so no case body is edited to make it
+    testable.  `HOME` is given because every case installs into
+    `~/.embedded_venv`, and a fresh `HOME` is what makes a run cold.
+
+    Arguments:
+    * `label` (`str`):
+      The case label, as `bootstrap.py` spells it in `MECHANISMS`.
+    * `home` (`Path`):
+      The `HOME` for the child.  Reusing one makes a warm run.
+    * `index_url` (`str`):
+      The base URL of the index, ending in a slash.
+    * `extra` (`dict[str, str] | None`):
+      More environment, such as the trust store the TLS tests set.
+
+    Returns:
+    * (`subprocess.CompletedProcess[str]`): The finished child.
+    """
+    # Aim it at the index, for `pip` and for the JSON API alike.
+    script: Path = Path(__file__).resolve().parent / "bootstrap.py"
+    environment: dict[str, str] = dict(
+        os.environ, HOME=str(home), PIP_INDEX_URL=index_url,
+        BOOTSTRAP_PACKAGE=MODULE, BOOTSTRAP_JSON_API=f"{index_url}pypi",
+        **(extra or {}))
+    environment.pop("VIRTUAL_ENV", None)
+    return subprocess.run(
+        [sys.executable, str(script), label],
+        env=environment, capture_output=True, text=True, check=False)
 
 
 def escaped_name(distribution: str) -> str:
@@ -250,6 +320,9 @@ class _IndexServer(http.server.ThreadingHTTPServer):
     # Assigned per instance by `serve_index`, never shared between them.
     faults: dict[str, str]
 
+    # `http` or `https`, so that `send_json` can build a URL that works.
+    scheme: str
+
     def handle_error(self, request: Any, client_address: Any) -> None:
         """Stay quiet when a client hangs up, report anything else.
 
@@ -265,8 +338,8 @@ class _IndexServer(http.server.ThreadingHTTPServer):
         * `client_address` (`Any`):
           Where it came from.
         """
-        # Only a hung up connection is expected; everything else is news.
-        if isinstance(sys.exc_info()[1], ConnectionError):
+        # A hangup or a refused handshake is expected; the rest is news.
+        if isinstance(sys.exc_info()[1], (ConnectionError, ssl.SSLError)):
             return
         super().handle_error(request, client_address)
 
@@ -386,7 +459,8 @@ class _IndexHandler(http.server.SimpleHTTPRequestHandler):
         payload: dict[str, Any] = {"urls": [
             {"filename": wheel.name, "yanked": False,
              "packagetype": "bdist_wheel",
-             "url": f"http://{host}/{normalized}/{wheel.name}"}
+             "url": f"{cast(_IndexServer, self.server).scheme}"
+                    f"://{host}/{normalized}/{wheel.name}"}
             for wheel in wheels]}
         body: bytes = json.dumps(payload).encode()
 
@@ -410,7 +484,57 @@ class _IndexHandler(http.server.SimpleHTTPRequestHandler):
         return
 
 
-def serve_index(root: Path) -> tuple[_IndexServer, str]:
+def make_certificate(directory: Path) -> tuple[Path, Path] | None:
+    """Make a throwaway self signed certificate for `127.0.0.1`.
+
+    The standard library can consume a certificate but cannot create
+    one, so this shells out to `openssl`.  That is a program rather
+    than a Python package, so it does not cost the test suite a
+    dependency, and a machine without it skips the TLS tests instead
+    of failing them.
+
+    The certificate is its own issuer, so the same file that the
+    server presents is the trust anchor a client is given.  It carries
+    `subjectAltName=IP:127.0.0.1`, because Python has ignored
+    `commonName` since 3.7 and would otherwise refuse the connection
+    it is supposed to accept.
+
+    Arguments:
+    * `directory` (`Path`):
+      Where to write the files.  Created if it does not exist.
+
+    Returns:
+    * (`tuple[Path, Path] | None`): The chain file holding both the
+      certificate and its private key, for the server, and the
+      certificate alone, for a client trust store.  `None` when
+      `openssl` is missing or fails.
+    """
+    # Without `openssl` there is no certificate and no TLS test.
+    program: str | None = shutil.which("openssl")
+    if program is None:
+        return None
+
+    # Ten years, so that a stored expectation cannot rot into a failure.
+    directory.mkdir(parents=True, exist_ok=True)
+    certificate: Path = directory / "certificate.pem"
+    key: Path = directory / "key.pem"
+    done: subprocess.CompletedProcess[str] = subprocess.run(
+        [program, "req", "-x509", "-newkey", "rsa:2048", "-nodes",
+         "-keyout", str(key), "-out", str(certificate),
+         "-days", "3650", "-subj", "/CN=127.0.0.1",
+         "-addext", "subjectAltName=IP:127.0.0.1"],
+        capture_output=True, text=True, check=False)
+    if done.returncode != 0:
+        return None
+
+    # The server wants one file holding both halves.
+    chain: Path = directory / "chain.pem"
+    chain.write_text(certificate.read_text() + key.read_text())
+    return chain, certificate
+
+
+def serve_index(root: Path,
+                chain: Path | None = None) -> tuple[_IndexServer, str]:
     """Serve a PEP 503 tree over HTTP and return the server and its URL.
 
     The server binds port 0, so the operating system picks a free port
@@ -427,6 +551,10 @@ def serve_index(root: Path) -> tuple[_IndexServer, str]:
     Arguments:
     * `root` (`Path`):
       The root of the tree to serve, as `build_index` returns it.
+    * `chain` (`Path | None`):
+      A certificate and key, as `make_certificate` returns first, to
+      serve HTTPS instead of HTTP.  `None`, the default, is plain
+      HTTP.
 
     Returns:
     * (`tuple[_IndexServer, str]`): The running server, which the
@@ -437,6 +565,15 @@ def serve_index(root: Path) -> tuple[_IndexServer, str]:
     handler: Any = functools.partial(_IndexHandler, directory=str(root))
     server: _IndexServer = _IndexServer(("127.0.0.1", 0), handler)
     server.faults = {}
+    server.scheme = "http"
+
+    # Wrap the listening socket before anything is accepted on it.
+    context: ssl.SSLContext
+    if chain is not None:
+        context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        context.load_cert_chain(chain)
+        server.socket = context.wrap_socket(server.socket, server_side=True)
+        server.scheme = "https"
 
     # Serve on a daemon thread, so a control-C cannot strand it.
     thread: threading.Thread = threading.Thread(target=server.serve_forever,
@@ -448,7 +585,7 @@ def serve_index(root: Path) -> tuple[_IndexServer, str]:
     # `socketserver` address may be a path or a string, so this reads
     # the two fields an internet socket actually has.
     address: Any = server.server_address
-    return server, f"http://{address[0]}:{address[1]}/"
+    return server, f"{server.scheme}://{address[0]}:{address[1]}/"
 
 
 class EmbeddedVEnvTest(unittest.TestCase):
@@ -604,17 +741,7 @@ class EmbeddedVEnvTest(unittest.TestCase):
         if home is None:
             home = Path(tempfile.mkdtemp(prefix=f"case-{label}-",
                                          dir=self.root))
-        script: Path = Path(__file__).resolve().parent / "bootstrap.py"
-
-        # Aim it at the local server, both for pip and for the JSON API.
-        environment: dict[str, str] = dict(
-            os.environ, HOME=str(home), PIP_INDEX_URL=self.index_url,
-            BOOTSTRAP_PACKAGE=MODULE,
-            BOOTSTRAP_JSON_API=f"{self.index_url}pypi")
-        environment.pop("VIRTUAL_ENV", None)
-        return subprocess.run(
-            [sys.executable, str(script), label],
-            env=environment, capture_output=True, text=True, check=False)
+        return run_bootstrap_case(label, home, self.index_url)
 
     def inject(self, suffix: str, fault: str) -> None:
         """Make the server misbehave for the rest of one test only.
@@ -712,7 +839,7 @@ class EmbeddedVEnvTest(unittest.TestCase):
         # Each case gets a fresh HOME, so every run here is a cold one.
         label: str
         done: subprocess.CompletedProcess[str]
-        for label in bootstrap.MECHANISMS:
+        for label in cases():
             with self.subTest(case=label):
                 done = self.run_case(label)
                 self.assertEqual(done.returncode, 0, done.stderr[-400:])
@@ -740,7 +867,7 @@ class EmbeddedVEnvTest(unittest.TestCase):
         home: Path
         run: int
         done: subprocess.CompletedProcess[str]
-        for label in bootstrap.MECHANISMS:
+        for label in cases():
             with self.subTest(case=label):
                 home = Path(tempfile.mkdtemp(prefix=f"warm-{label}-",
                                              dir=self.root))
@@ -814,6 +941,130 @@ class EmbeddedVEnvTest(unittest.TestCase):
             venv: embedded_venv.EmbeddedVEnv = embedded_venv.EmbeddedVEnv()
         self.assertEqual(venv.root, home / ".embedded_venv")
         self.assertTrue((home / ".embedded_venv" / "README.md").is_file())
+
+
+class TlsTest(unittest.TestCase):
+    """Serve the index over HTTPS and see what the cases make of it.
+
+    This is the one thing a directory index could never test.  Two
+    questions are asked, and the first matters more.  Does a case
+    refuse a certificate it cannot verify?  A pasted bootstrap that
+    accepted any certificate, or quietly fell back to plain HTTP,
+    would hand whoever controls the network the contents of somebody
+    else's program, with nobody around to notice.  And does a case
+    succeed once the certificate is trusted, so that the refusal is a
+    real check rather than TLS being broken outright?
+
+    Note what is not tested here.  Task 3 concluded that a bootstrap
+    needs `python3-pip` plus a TLS trust store, and that conclusion is
+    about trusting the public certificate authorities well enough to
+    reach the real PyPI.  A private certificate tests the opposite:
+    that the system trust store can be overridden.  The dependency
+    claim needs a fetch from the real index and is not settled here.
+
+    Attributes:
+    * `certificate` (`Path`):
+      The certificate alone, for a client trust store.
+    * `chain` (`Path`):
+      The certificate and its key, which the server presents.
+    * `index` (`Path`):
+      The PEP 503 tree being served.
+    * `index_url` (`Path`):
+      That tree as an `https` URL.
+    * `root` (`Path`):
+      The temporary directory holding everything.
+    * `server` (`_IndexServer`):
+      The server publishing `index` over TLS.
+
+    Constructor:
+    * `TlsTest()`, by `unittest` rather than by hand.
+    """
+
+    # Built once by `setUpClass`, shared by every test below.
+    certificate: Path
+    chain: Path
+    index: Path
+    index_url: str
+    root: Path
+    server: _IndexServer
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        """Publish the wheel and serve it over HTTPS."""
+        # No `openssl` means no certificate, which means no test.
+        cls.root = Path(tempfile.mkdtemp(prefix="tls-"))
+        made: tuple[Path, Path] | None = make_certificate(cls.root / "tls")
+        if made is None:
+            shutil.rmtree(cls.root, ignore_errors=True)
+            raise unittest.SkipTest("openssl is not available")
+        cls.chain, cls.certificate = made
+
+        # Publish as the other classes do, then serve it with TLS.
+        module: Path = Path(__file__).resolve().parent / f"{MODULE}.py"
+        wheel: Path = build_wheel(module, DISTRIBUTION, VERSION, SUMMARY,
+                                  cls.root / "dist")
+        cls.index = build_index([wheel], cls.root / "index")
+        cls.server, cls.index_url = serve_index(cls.index, cls.chain)
+
+    @classmethod
+    def tearDownClass(cls) -> None:
+        """Stop the server, then remove everything the class built."""
+        # The class may have skipped before there was a server.
+        if hasattr(cls, "server"):
+            cls.server.shutdown()
+            cls.server.server_close()
+        shutil.rmtree(cls.root, ignore_errors=True)
+
+    def test_the_url_is_https(self) -> None:
+        """The index really is being served over TLS."""
+        # Cheap, and it stops the two tests below passing for the
+        # wrong reason if the wrapping were ever dropped.
+        self.assertTrue(self.index_url.startswith("https://"),
+                        self.index_url)
+        self.assertEqual(self.server.scheme, "https")
+
+    def test_an_untrusted_certificate_is_refused(self) -> None:
+        """No case accepts a certificate it cannot verify."""
+        # Nothing tells the child about the certificate, so every case
+        # meets an issuer it has never heard of.
+        label: str
+        home: Path
+        done: subprocess.CompletedProcess[str]
+        output: str
+        for label in cases():
+            with self.subTest(case=label):
+                home = Path(tempfile.mkdtemp(prefix=f"untrusted-{label}-",
+                                             dir=self.root))
+                done = run_bootstrap_case(label, home, self.index_url)
+                self.assertNotEqual(done.returncode, 0, done.stdout)
+
+                # Failing is not enough; it has to fail over the
+                # certificate rather than for some unrelated reason.
+                output = (done.stderr + done.stdout).lower()
+                self.assertIn("certificate", output, output[-400:])
+
+    def test_a_trusted_certificate_is_accepted(self) -> None:
+        """Every case succeeds once the certificate is trusted.
+
+        `SSL_CERT_FILE` is what `urllib` honours, through OpenSSL's own
+        default verify paths, and `PIP_CERT` is what `pip` honours.
+        Both are environment variables, so cases 3 and 12 need no
+        `ssl` context written into them and no case gains a line.
+        """
+        # One trust store, two spellings, because two clients read it.
+        trust: dict[str, str] = {"SSL_CERT_FILE": str(self.certificate),
+                                 "PIP_CERT": str(self.certificate)}
+        label: str
+        home: Path
+        done: subprocess.CompletedProcess[str]
+        for label in cases():
+            with self.subTest(case=label):
+                home = Path(tempfile.mkdtemp(prefix=f"trusted-{label}-",
+                                             dir=self.root))
+                done = run_bootstrap_case(label, home, self.index_url,
+                                          trust)
+                self.assertEqual(done.returncode, 0, done.stderr[-400:])
+                self.assertIn(f"module {MODULE}", done.stdout)
 
 
 class IncludeTest(unittest.TestCase):

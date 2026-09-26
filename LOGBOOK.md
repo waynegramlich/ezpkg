@@ -651,11 +651,13 @@ code with a real package server.  A proposed list of steps list belows:
 * Step 5.5: Run every `bootstrap.py` case against the server end to end,
   asserting that `embedded_venv` lands in the cache and imports.  This is
   the test the task exists for.
-* Step 5.6: (Optional) TLS and the `ca-certificates` dependency, which
-  nothing has exercised yet.  A self-signed certificate has to be trusted
-  by the client, and `pip` reads `PIP_CERT` while `urllib` reads
-  `SSL_CERT_FILE`.  Cases 3 and 12 may have nowhere to put either, which
-  would itself be a finding.
+* Step 5.6: TLS, which nothing has exercised yet.  Two questions: does a
+  case refuse a certificate it cannot verify, and does it succeed once
+  the certificate is trusted?  `pip` reads `PIP_CERT` and `urllib` reads
+  `SSL_CERT_FILE`, both environment variables, so no case body changes.
+  This does not settle the `ca-certificates` dependency from Task 3,
+  which is about trusting the public authorities well enough to reach
+  the real PyPI; a private certificate tests the opposite.
 * Step 5.7: (Optional) Do some test suite code coverage testing and try
   to beef up code coverage.
 * Step 5.8: (This is an open list that can be added to as needed.)
@@ -790,22 +792,52 @@ establish.
   earlier version of it passed two runs and broke the cache on the
   third.  `0cctfd` is closed.
 
-### Leftovers from task 3
+### Step 5.6: TLS
 
-Before we close task 5, stuff in this section needs to be either moved
-to another section or deleted.
+The one thing a directory index could never test.  `make_certificate`
+shells out to `openssl` for a throwaway self signed certificate, and
+`serve_index` wraps the listening socket when it is handed one.  Both
+questions are answered, and the first is the one that mattered.
 
-Carried over from Task 3:
+* **Every case refuses a certificate it cannot verify**, and fails over
+  the certificate rather than for some unrelated reason.  Case 3, which
+  uses `urllib`, reports
+  `[SSL: CERTIFICATE_VERIFY_FAILED] ... self-signed certificate`; case
+  6, which uses `pip`, reports `SSLCertVerificationError`.  Nothing
+  falls back to plain HTTP and nothing accepts an unknown issuer.  Had
+  one done so, it would have been a priority 0 issue: pasted code on a
+  stranger's machine handing their program's contents to whoever
+  controls the network.
+* Every case succeeds once the certificate is trusted, which is what
+  makes the refusal a real check rather than TLS being broken outright.
+  `SSL_CERT_FILE` is what `urllib` honours, through OpenSSL's own
+  default verify paths, and `PIP_CERT` is what `pip` honours.  Both are
+  environment variables, so no case gained a line and the `paste`
+  column did not move.
+* `openssl` is a program rather than a Python package, so it costs the
+  suite no dependency under the Step 5.1 criterion.  A machine without
+  it skips these tests rather than failing them.  The certificate lasts
+  ten years and carries `subjectAltName=IP:127.0.0.1`, because Python
+  has ignored `commonName` since 3.7.
+* `handle_error` now swallows `ssl.SSLError` as well as
+  `ConnectionError`.  A refused handshake is exactly what the negative
+  test provokes, and the base class prints a traceback for it.
 
-* An automated end to end test: run each `pip` based `bootstrap.py` case
-  against a local index and assert that `embedded_venv` lands in the
-  cache and imports.  This needs no server and is the cheapest of the
-  three.
-* The failure cases that are still untested: a truncated wheel and a
-  missing `index.html`.  An index that does not hold the requested
-  package is already covered.
-* The server itself, which also makes TLS and the `ca-certificates`
-  dependency testable for the first time.
+`EMBEDDEDVEN_TEST` chooses how much of this runs.  Unset or `FAST`,
+which is the usual way, exercises cases 3, 6, 11 and 12 -- one case per
+distinct mechanism, plus the one whose second run used to fail.
+`COMPLETE` exercises all twelve.  An unrecognised value raises rather
+than quietly running the fast tests.  Measured 2026-09-25: 29 tests in
+50.9 s fast, 193.3 s complete, both passing.
+
+One thing is still unsettled, and it is the last of the Task 3
+leftovers.  Task 3 concluded that a bootstrap needs `python3-pip` plus
+a TLS trust store, and that conclusion is about trusting the public
+certificate authorities well enough to reach the real PyPI.  A private
+certificate tests the opposite, that the system trust store can be
+overridden, so nothing here confirms it.  Confirming it needs a fetch
+from the real index, which is a test with a network dependency and
+belongs with the work on `embedded_venv.py` rather than here.
 
 ### Task 5 Summary
 
