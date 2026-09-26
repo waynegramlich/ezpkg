@@ -993,40 +993,99 @@ What the remeasurement says:
 
 (CLOSED 2026-09-25)
 
-## Task 6: Flesh out the EmbeddedEnv Class.
+## Task 6: Flesh out the `EmbeddedVEnv` Class
 
-The primary purpose of this task is to add features to `embeddey_venv.py`.
-* Task 6.1 - Attempt to find the bootstrap code:
-  This is broken into the following sub-tasks.
-  * 6.1.1 - Find Bootstrap:
-    Python is has huge number of introspection facilities.  
-    Attempt to find the actual file that ran the bootstrap code.
-    It should be one level up from the `EmbeddedVenv.__init__()`.
-    Read the file and match the bootstrap strings.  If found this task
-    is a success.  This gives us a path for complaining about stale
-    bootstrap strings.
-  * 6.1.2 - Versioning:
-    There is a versioning problem when we download modules.  The Wheel
-    information specifies the version number.  It would be great to
-    construct a sub-directory of different versions.  Thus, the
-    `EmbeddedVEnv.import()` function could look at the desired version
-    and see if it was previously downloaded and stashed away and reuse it.
-    There are some serious detail to fill in here.
-  * 6.1.3 - Garbage Collection:
-    Cull modules that have not been accessed for a while by using the
-    file access time.
-  * 6.1.4 - Security:
-    Conceptually, we are downloading files of unknown origin.  Pretty
-    much anybody can put anything up on `PyPI`.  Is there any way we can
-    reduce the chances of installing a malicious file?  Should we inform
-  * 6.1.5 - Messages:
-    When should messages be emitted?  When the directory is created?
-    After each new download?  
-  * 6.1.6 - `README.md`:
-    The text of the `README.md` file that gets downloaded needs to be
-    discussed.
-  * 6.1.7 - And More:
-    This a place holder for additional sub-tasks
+The primary purpose of this task is to add features to
+`embedded_venv.py`.  The sub-tasks below are ordered so that the ones
+that decide the cache layout come first, since most of the others
+depend on it, and so that the priority 0 issue is dealt with early.
+They can be reordered freely.
+
+* Step 6.1: A versioned cache.  This is the fix for `0nicav`, which is
+  priority 0 because the cache path carries no version, interpreter or
+  platform, so the same directory reached by a different Python would
+  load whatever the last one installed.  `include` should install into
+  a subdirectory naming all three and reuse it when it is already
+  there.  The awkward detail is that the version has to be known
+  before deciding to skip the install, so it must be encoded in the
+  directory name; `importlib.metadata` can only report it afterwards.
+  Also settles where the cache lives, which is `2wscdl`.
+* Step 6.2: Concurrent installs.  Two copies of one program starting
+  at once both find the cache empty and both run `pip install
+  --target` into the same directory, and an interleaved pair can leave
+  a half written package that imports and then fails.  Install into a
+  temporary directory and `rename` it into place, which is atomic
+  within one filesystem, or take an `O_EXCL` lock.  No issue covers
+  this yet.
+* Step 6.3: Security.  We are fetching files of unknown origin from an
+  index anybody can publish to, and we cannot vet their contents; the
+  write up should say so plainly rather than imply otherwise.  One
+  lever is worth more than the rest combined: `--only-binary :all:`.
+  An sdist runs arbitrary code at install time through `setup.py`
+  while a wheel does not, so refusing sdists removes install time
+  execution entirely.  Beyond that, PEP 503 indexes publish `#sha256=`
+  fragments, so hashes can be pinned; and the gap between the
+  distribution name and the import name in `include` is exactly where
+  typosquatting bites, because `pip install` takes the name nobody
+  reads.
+* Step 6.4: Find the bootstrap, and notice when it is stale.  Python
+  has a great many introspection facilities, and the direct one is
+  `sys.modules["__main__"].__file__` rather than walking frames with
+  `inspect`.  Read that file and look for the bootstrap.  It has to
+  degrade silently for `python3 -c`, the REPL and a frozen
+  interpreter, none of which have a `__file__`.
+
+  Deciding what stale means is the harder half.  One approach: hash
+  each case body and keep a table of known hashes here.  A hash in the
+  table but not the current one is stale and can be reported
+  precisely; an unknown hash is somebody's edited copy and should be
+  passed over in silence.  That costs the pasted code no lines, which
+  matters after the trouble Task 5 took to hold the `paste` column
+  still.  What to do about a stale bootstrap -- warn, refuse, or offer
+  to rewrite the file -- is a separate decision.
+* Step 6.5: Messages.  When should anything be said: on creating the
+  directory, on each download, on a stale bootstrap?  One constraint
+  is hard.  A library must never write to standard output, because the
+  host program's output may be piped or parsed.  `logging` with a
+  `NullHandler` lets the host decide.  One line on standard error when
+  a download actually starts is still worth it, because several
+  seconds of silence looks like a hang.
+* Step 6.6: Several packages in one call.  `include` takes one package
+  and spends a whole `pip` invocation on it.  A list would cost one
+  invocation and let `pip` resolve the set together.
+* Step 6.7: Declared requirements, which is `2hsrpbd`.  Read the
+  calling script's PEP 723 `# /// script` block instead of a package
+  name written into the bootstrap.  It builds on Step 6.6, and it
+  makes the same file work under `uv run` for nothing, which is worth
+  a great deal given that prior art is why this project has to justify
+  itself at all.
+* Step 6.8: Garbage collection.  Cull packages that have not been used
+  for a while.  Not by access time: nearly every Linux filesystem
+  mounts `relatime`, so `atime` updates at most once a day and not on
+  ordinary reads, and `noatime` switches it off altogether, so culling
+  on it would delete packages in daily use.  `include` is the only
+  thing that reads the cache, so have it record use in a sidecar file
+  and cull on that.
+* Step 6.9: `.pth` files, which is `3pfaibne`.  `include` uses
+  `sys.path.insert`, which never executes a `.pth` file, so a package
+  relying on one is quietly half installed.  `site.addsitedir` is the
+  experiment.
+* Step 6.10: The `README.md` text.  What it should say needs
+  discussing, and it has to describe the versioned layout once Step
+  6.1 lands.  Note the current behaviour: it is rewritten on every
+  construction rather than only when absent, which makes writing a
+  file a side effect of making an object and will surprise somebody.
+* Step 6.11: A fetch from the real PyPI, carried over from Task 5.  It
+  is the only thing that can settle Task 3's conclusion that a
+  bootstrap needs `python3-pip` plus a TLS trust store, since that
+  claim is about trusting the public certificate authorities and a
+  private certificate tests the opposite.  It is also just `include`
+  against the real index.
+* Step 6.12: And more.  A place holder for additional sub-tasks.
+
+### Task 6 Summary
+
+...
 
 ## Issues
 
