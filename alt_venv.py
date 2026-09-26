@@ -36,16 +36,60 @@ SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 import importlib
 import inspect
+import re
 import subprocess
 import sys
 from collections.abc import Sequence
 from pathlib import Path
 from types import ModuleType
+from typing import overload
 
 # The one place the version is written down.  `bootstrap.py`
 # prints it after importing, and the test suite stamps it into
 # the wheel it builds.
 __version__: str = "0.0.1"
+
+
+# Where a requirement stops naming a package and starts constraining
+# it: a version specifier, an extras list or an environment marker.
+SPECIFIER = re.compile(r"[<>=!~\[;\s]")
+
+
+def requirement_name(requirement: str) -> str:
+    """Return the part of a requirement that names the distribution.
+
+    Arguments:
+    * `requirement` (`str`):
+      A requirement as `pip` spells it.
+
+    Returns:
+    * (`str`): Everything before the first specifier, extra or marker.
+    """
+    # Everything from the first constraint onwards is about versions.
+    return SPECIFIER.split(requirement, maxsplit=1)[0].strip()
+
+
+def import_name(requirement: str) -> str:
+    """Guess the import name that a requirement string will provide.
+
+    The guess is the distribution name with punctuation turned into
+    underscores, which is right for most packages and wrong for the
+    ones that deliberately differ: `python-dateutil` imports as
+    `dateutil`, not `python_dateutil`.  Those need the pair form of
+    `AltVEnv.install`, and a wrong guess shows up immediately as a
+    `ModuleNotFoundError` rather than as anything subtle.
+
+    Arguments:
+    * `requirement` (`str`):
+      A requirement as `pip` spells it, with any version constraint,
+      extras or environment marker attached.
+
+    Returns:
+    * (`str`): The import name to try.
+    """
+    # Everything from the first constraint, extra or marker onwards is
+    # about which version to fetch, not about what to import.
+    return re.sub(r"[-.]+", "_", requirement_name(requirement))
 
 
 class AltVEnv:
@@ -184,74 +228,154 @@ class AltVEnv:
         module.unlink()
         return package
 
-    def include(self, package: str, argv: Sequence[str] = (),
-                distribution: str | None = None) -> ModuleType:
-        """Make a package importable, fetching it if it is missing.
+    # What `install` accepts: a requirement as `pip` spells it, or a
+    # `(import_name, requirement)` pair for the packages whose two
+    # names differ.  The plural form is spelled `list` and `tuple`
+    # rather than `Sequence`, because a `str` is itself a
+    # `Sequence[str]` and the two overloads below would then overlap.
+    Requirement = str | tuple[str, str]
+    Requirements = list[Requirement] | tuple[Requirement, ...]
 
-        The package is installed into the cache directory with
-        `pip install --target`, which needs no virtual environment,
-        and the cache directory is then put on `sys.path` so that the
-        import succeeds.  A package already in the cache is not
-        fetched again.
+    @overload
+    def install(self, requirements: str,
+                argv: Sequence[str] = ()) -> ModuleType: ...
+
+    @overload
+    def install(self, requirements: Requirements,
+                argv: Sequence[str] = ()) -> list[ModuleType]: ...
+
+    def install(self, requirements: str | Requirements,
+                argv: Sequence[str] = ()
+                ) -> ModuleType | list[ModuleType]:
+        """Install packages if they are missing, and import them.
+
+        Whatever is missing is installed into the cache directory with
+        `pip install --target`, which needs no virtual environment, and
+        the cache directory is put on `sys.path` so that the imports
+        succeed.  Anything already in the cache is not fetched again.
+        One `pip` is run for the whole set rather than one per package,
+        so `pip` resolves them together and can notice a conflict that
+        installing them separately would hide.
+
+        The name says `install` rather than something friendlier
+        because that is what happens: `pip install`, against an index
+        anybody can publish to.  See `README.md`.
 
         `pip` runs as a child process rather than through
         `pip._internal`, which is not a public interface, and which
         leaves its logging handlers on the root logger of whatever
         imports it.
 
+        A requirement is spelled the way `pip` spells it, so a version
+        constraint needs no special support:
+        `install(["coverage", "pytest>=7.0,<8"])`.  The one thing a
+        requirement string cannot carry is an import name that differs
+        from the distribution name, and a pair supplies that:
+        `install([("dateutil", "python-dateutil>=2.8")])`.
+
         Arguments:
-        * `package` (`str`):
-          The import name: what `import` is given afterwards, and
-          what the cache is checked for.
+        * `requirements` (`str | Requirements`):
+          One requirement, or several.  Each is either a string that
+          `pip` accepts, whose import name is taken to be the name with
+          any punctuation turned into underscores, or a
+          `(import_name, requirement)` pair for when the two differ.
         * `argv` (`Sequence[str]`):
-          Extra arguments for `pip install`, such as a version
-          specifier or `--no-deps`.  They follow this method's own
-          arguments, so `pip` lets them win where it takes the last
-          of a repeated option.
-        * `distribution` (`str | None`):
-          What to ask `pip` for, when that differs from the import
-          name.  `None`, the default, means they are the same, which
-          covers most packages and all of the ones this project
-          builds.  They part company often enough to matter, though:
-          `python-dateutil` imports as `dateutil`, and
-          `typing-extensions` as `typing_extensions`.  `pip`
-          normalizes punctuation, so only a real difference needs
-          this.
+          Extra arguments for `pip install`, such as `--no-deps` or
+          `--only-binary`.  They apply to the whole invocation rather
+          than to one requirement, and they follow this method's own
+          arguments, so `pip` lets them win where it takes the last of
+          a repeated option.
 
         Returns:
-        * (`ModuleType`): The imported module.
+        * (`ModuleType | list[ModuleType]`): The imported module when
+          `requirements` was a single string, so that
+          `cov = v.install("coverage")` reads properly; otherwise one
+          module per requirement, in the order given, so that
+          `cov, pt = v.install(["coverage", "pytest"])` does.
 
         Raises:
+        * `ValueError`:
+          If a requirement reads as an option, or repeats another's
+          import name, both checked before `pip` runs; or if `pip`
+          exits 2, which means the command line was wrong rather than
+          the index.  A malformed requirement is `pip`'s to report.
         * `RuntimeError`:
-          If `pip` fails.  Its standard error is included, because
-          the usual cause is no network and the caller deserves to
-          be told that rather than left with an import error.
+          If `pip` fails.  Its standard error is included, because the
+          usual cause is no network and the caller deserves to be told
+          that rather than left with an import error.
         * `ModuleNotFoundError`:
-          If `pip` succeeds but the package still will not import,
-          which means `package` is not the import name.
+          If `pip` succeeds but a package still will not import, which
+          means its import name was guessed wrongly and wants the pair
+          form.
         """
-        # A package already in the cache costs nothing but a path
-        # insert; see the `2apiia` issue in `LOGBOOK.md`.
+        # One string is the simple case, and it returns one module.
+        single: bool = isinstance(requirements, str)
+        wanted: list[str | tuple[str, str]] = (
+            [requirements] if isinstance(requirements, str)
+            else list(requirements))
+
+        # Split each requirement into the name to import and the string
+        # to hand `pip`.  A bare requirement supplies both.
+        names: list[str] = []
+        asking: list[str] = []
+        entry: str | tuple[str, str]
+        for entry in wanted:
+            if isinstance(entry, tuple):
+                names.append(entry[0])
+                asking.append(entry[1])
+            else:
+                names.append(import_name(entry))
+                asking.append(entry)
+
+        # Refuse the one thing `pip` would accept and should not: a
+        # leading dash reads as an option, so `install("--index-url=")`
+        # could aim the fetch at somebody else's index.  Requirement
+        # syntax is not checked here, because `pip` owns PEP 508 and
+        # rejects a malformed one locally in half a second without
+        # touching the network.  See Step 6.2.4 in `LOGBOOK.md`.
+        requirement: str
+        for requirement in asking:
+            if requirement.startswith("-"):
+                raise ValueError(
+                    f"requirement reads as an option: {requirement!r}")
+
+        # Two entries claiming one import name would return a module
+        # twice and never mention the other.
+        repeated: set[str] = {name for name in names
+                              if names.count(name) > 1}
+        if repeated:
+            raise ValueError("repeated import name: "
+                             + ", ".join(sorted(repeated)))
+
+        # Fetch only what is missing, in one `pip` for the whole set;
+        # see the `2apiia` issue in `LOGBOOK.md`.
+        missing: list[str] = [requirement for name, requirement
+                              in zip(names, asking, strict=True)
+                              if not self.contains(name)]
         done: subprocess.CompletedProcess[str]
-        if not self.contains(package):
+        if missing:
             done = subprocess.run(
                 [sys.executable, "-m", "pip", "install", "--quiet",
                  "--no-input", "--disable-pip-version-check",
-                 *argv, "--target", str(self.root),
-                 package if distribution is None else distribution],
+                 *argv, "--target", str(self.root), *missing],
                 capture_output=True, text=True, check=False)
+            if done.returncode == 2:
+                raise ValueError(
+                    f"pip rejected the command line: "
+                    f"{done.stderr.strip() or 'pip gave no reason'}")
             if done.returncode != 0:
                 raise RuntimeError(
-                    f"could not fetch "
-                    f"{package if distribution is None else distribution!r}"
-                    f" into {self.root}: "
+                    f"could not fetch {', '.join(missing)} into "
+                    f"{self.root}: "
                     f"{done.stderr.strip() or 'pip gave no reason'}")
 
         # Put the cache on `sys.path` before importing out of it.
         if str(self.root) not in sys.path:
             sys.path.insert(0, str(self.root))
         importlib.invalidate_caches()
-        return importlib.import_module(package)
+        modules: list[ModuleType] = [importlib.import_module(name)
+                                     for name in names]
+        return modules[0] if single else modules
 
     def contains(self, package: str) -> bool:
         """Report whether a package is already in the cache.

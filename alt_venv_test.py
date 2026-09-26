@@ -65,6 +65,7 @@ import unittest.mock
 import urllib.error
 import urllib.request
 import zipfile
+from collections.abc import Sequence
 from pathlib import Path
 from types import ModuleType
 from typing import Any, cast
@@ -1211,15 +1212,15 @@ class TlsTest(unittest.TestCase):
                 self.assertIn(f"module {MODULE}", done.stdout)
 
 
-class IncludeTest(unittest.TestCase):
-    """Exercise `AltVEnv.include` against a local index.
+class InstallTest(unittest.TestCase):
+    """Exercise `AltVEnv.install` against a local index.
 
     A throwaway package is built and published for these tests, so
     that nothing here depends on PyPI or on the network.
 
     Attributes:
     * `cache` (`Path`):
-      The cache directory that `include` installs into.
+      The cache directory that `install` installs into.
     * `index` (`Path`):
       The PEP 503 tree holding the throwaway package.
     * `index_url` (`str`):
@@ -1230,7 +1231,7 @@ class IncludeTest(unittest.TestCase):
       The server publishing `index`.
 
     Constructor:
-    * `IncludeTest()`, by `unittest` rather than by hand.
+    * `InstallTest()`, by `unittest` rather than by hand.
     """
 
     # Built once by `setUpClass`, shared by every test below.
@@ -1244,7 +1245,7 @@ class IncludeTest(unittest.TestCase):
     def setUpClass(cls) -> None:
         """Publish a throwaway package into a throwaway index."""
         # A module of its own, so no test can pass by accident.
-        cls.root = Path(tempfile.mkdtemp(prefix="include-"))
+        cls.root = Path(tempfile.mkdtemp(prefix="install-"))
         module: Path = cls.root / "widget.py"
         module.write_text('"""A throwaway."""\n__version__ = "1.2.3"\n')
         wheel: Path = build_wheel(module, "widget", "1.2.3",
@@ -1258,7 +1259,22 @@ class IncludeTest(unittest.TestCase):
         two_named: Path = build_wheel(other, "python-gadget", "4.5.6",
                                       "A second throwaway.",
                                       cls.root / "dist")
-        cls.index = build_index([wheel, two_named], cls.root / "index")
+        # A third package published twice, so that there is something
+        # for `pip` to choose between.  One version per project makes
+        # every constraint pass trivially, which tests nothing.
+        versions: list[Path] = []
+        release: str
+        for release in ("1.0.0", "2.0.0"):
+            source: Path = cls.root / release / "sprocket.py"
+            source.parent.mkdir(parents=True, exist_ok=True)
+            source.write_text('"""A versioned throwaway."""\n'
+                              f'__version__ = "{release}"\n')
+            versions.append(build_wheel(source, "sprocket", release,
+                                        "A versioned throwaway.",
+                                        cls.root / "dist"))
+
+        cls.index = build_index([wheel, two_named, *versions],
+                                cls.root / "index")
         cls.cache = cls.root / "cache"
 
         # Start the server last, so nothing can fail after it is up.
@@ -1274,34 +1290,35 @@ class IncludeTest(unittest.TestCase):
         # One directory holds everything, so one removal suffices.
         shutil.rmtree(cls.root, ignore_errors=True)
 
-    def include(self, target: Path, package: str, *argv: str,
-                distribution: str | None = None) -> str:
-        """Run `include` in a child interpreter and return its output.
+    def install(self, target: Path, requirements: object,
+                *argv: str) -> str:
+        """Run `install` in a child interpreter and return its output.
 
-        A child is used because `include` inserts into `sys.path` and
+        A child is used because `install` inserts into `sys.path` and
         imports, neither of which should leak between tests.
 
         Arguments:
         * `target` (`Path`):
           The cache directory to install into.
-        * `package` (`str`):
-          What to include.
+        * `requirements` (`object`):
+          Whatever to hand `install`: one string, or a list of strings
+          and `(import_name, requirement)` pairs.  It is passed through
+          `repr`, so it has to be something a literal can express.
         * `argv` (`str`):
           Extra arguments for `pip install`.
-        * `distribution` (`str | None`):
-          The PyPI name, when it differs from the import name.
 
         Returns:
-        * (`str`): Standard output, or standard error if it failed.
+        * (`str`): The name and version of each module installed, one
+          per line, or standard error if it failed.
         """
         # Point pip at the local index and run the whole thing remotely.
         script: str = (
-            "import sys, alt_venv;"
-            "from pathlib import Path;"
-            f"v = alt_venv.AltVEnv(Path({str(target)!r}));"
-            f"m = v.include({package!r}, {list(argv)!r}, "
-            f"{distribution!r});"
-            "print(m.__name__, m.__version__)")
+            "import sys, alt_venv\n"
+            "from pathlib import Path\n"
+            f"v = alt_venv.AltVEnv(Path({str(target)!r}))\n"
+            f"m = v.install({requirements!r}, {list(argv)!r})\n"
+            "for one in (m if isinstance(m, list) else [m]):\n"
+            "    print(one.__name__, one.__version__)")
         environment: dict[str, str] = dict(
             os.environ, PIP_INDEX_URL=self.index_url,
             PYTHONPATH=str(Path(__file__).resolve().parent),
@@ -1312,7 +1329,7 @@ class IncludeTest(unittest.TestCase):
         return done.stdout.strip() if done.returncode == 0 else done.stderr
 
     def forget(self, entry: str, name: str) -> None:
-        """Undo what an in-process `include` did to this interpreter.
+        """Undo what an in-process `install` did to this interpreter.
 
         Arguments:
         * `entry` (`str`):
@@ -1320,16 +1337,16 @@ class IncludeTest(unittest.TestCase):
         * `name` (`str`):
           The module to drop from `sys.modules`.
         """
-        # `include` inserts and imports; both have to be undone.
+        # `install` inserts and imports; both have to be undone.
         while entry in sys.path:
             sys.path.remove(entry)
         sys.modules.pop(name, None)
         importlib.invalidate_caches()
 
-    def test_include_works_in_this_interpreter(self) -> None:
-        """`include` fetches and imports without a child process.
+    def test_install_works_in_this_interpreter(self) -> None:
+        """`install` fetches and imports without a child process.
 
-        Every other test here drives `include` through a child, which
+        Every other test here drives `install` through a child, which
         keeps `sys.path` clean but means the method's own lines are
         never measured.  This one runs it directly and puts the
         interpreter back afterwards.
@@ -1341,12 +1358,12 @@ class IncludeTest(unittest.TestCase):
         module: ModuleType
         with unittest.mock.patch.dict(
                 os.environ, {"PIP_INDEX_URL": self.index_url}):
-            module = venv.include("widget")
+            module = venv.install("widget")
         self.assertEqual(module.__name__, "widget")
         self.assertEqual(module.__version__, "1.2.3")
         self.assertTrue(venv.contains("widget"))
 
-    def test_include_in_process_reports_a_failure(self) -> None:
+    def test_install_in_process_reports_a_failure(self) -> None:
         """A package the index lacks raises with pip's own reason."""
         # This is the no network case, which a caller must be told about.
         cache: Path = self.root / "in-process-missing"
@@ -1355,59 +1372,196 @@ class IncludeTest(unittest.TestCase):
         with (unittest.mock.patch.dict(
                   os.environ, {"PIP_INDEX_URL": self.index_url}),
               self.assertRaises(RuntimeError) as caught):
-            venv.include("nosuchwidget")
+            venv.install("nosuchwidget")
         self.assertIn("could not fetch", str(caught.exception))
 
-    def test_include_fetches_and_imports(self) -> None:
+    def test_install_fetches_and_imports(self) -> None:
         """A missing package is fetched and handed back imported."""
         # The package does not exist anywhere but the local index.
-        self.assertEqual(self.include(self.cache, "widget"), "widget 1.2.3")
+        self.assertEqual(self.install(self.cache, "widget"), "widget 1.2.3")
         self.assertTrue((self.cache / "widget.py").is_file())
 
-    def test_include_passes_argv_to_pip(self) -> None:
+    def test_install_passes_argv_to_pip(self) -> None:
         """Extra arguments reach `pip install`."""
         # `--no-deps` is harmless here, so success proves it parsed.
         target: Path = self.root / "argv"
-        self.assertEqual(self.include(target, "widget", "--no-deps"),
+        self.assertEqual(self.install(target, "widget", "--no-deps"),
                          "widget 1.2.3")
 
-    def test_include_rejects_bad_argv(self) -> None:
-        """A bad argument fails loudly rather than silently."""
-        # pip exits non-zero, and `include` turns that into an error.
-        target: Path = self.root / "bad"
-        self.assertIn("could not fetch",
-                      self.include(target, "widget", "--no-such-option"))
+    def test_install_rejects_bad_argv(self) -> None:
+        """A bad argument is our mistake, not the index's.
 
-    def test_include_reports_a_missing_package(self) -> None:
+        `pip` exits 2 for a command line it cannot parse and 1 for
+        anything the index is responsible for, which is the one bit of
+        discrimination its exit codes offer.  See Step 6.2.2.
+        """
+        # A `ValueError` on exit code 2, not the `RuntimeError` that a
+        # missing package gets.
+        target: Path = self.root / "bad"
+        self.assertIn("pip rejected the command line",
+                      self.install(target, "widget", "--no-such-option"))
+
+    def test_install_refuses_an_option_as_a_requirement(self) -> None:
+        """A requirement starting with a dash is refused before `pip` runs.
+
+        This is the one `pip` would accept and should not:
+        `--index-url=...` as a requirement would aim the fetch at
+        somebody else's index.  See Step 6.2.4.
+        """
+        # Nothing is fetched, so this needs no index at all.
+        venv: alt_venv.AltVEnv = alt_venv.AltVEnv(self.root / "option")
+        bad: str
+        for bad in ("--index-url=http://127.0.0.1:1/", "-e."):
+            with self.subTest(requirement=bad):
+                with self.assertRaises(ValueError) as caught:
+                    venv.install([bad])
+                self.assertIn("reads as an option", str(caught.exception))
+
+    def test_install_refuses_a_repeated_import_name(self) -> None:
+        """Two entries cannot claim one import name."""
+        # `pip` cannot catch this: it never sees our import names, and
+        # one module would be returned twice while the other went
+        # unmentioned.
+        venv: alt_venv.AltVEnv = alt_venv.AltVEnv(self.root / "repeat")
+        with self.assertRaises(ValueError) as caught:
+            venv.install(["widget", "widget"])
+        self.assertIn("repeated import name: widget", str(caught.exception))
+
+    def test_pip_owns_requirement_syntax(self) -> None:
+        """A malformed requirement is `pip`'s to reject.
+
+        This pins the measurement Step 6.2.4 rests on: `pip` refuses
+        bad syntax itself, so reimplementing PEP 508 here would only
+        add a way to disagree with it.  Were a future `pip` to stop
+        doing so, this test would say so.
+        """
+        # `pip` answers this without consulting any index.
+        target: Path = self.root / "malformed"
+        self.assertIn("Invalid requirement",
+                      self.install(target, ["bad name with spaces"]))
+
+    def test_install_reports_a_missing_package(self) -> None:
         """A package the index does not have raises a clear error."""
         # This is the `0whwnn` shape: say why, do not just fail to import.
         target: Path = self.root / "missing"
-        output: str = self.include(target, "nosuchwidget")
-        self.assertIn("could not fetch 'nosuchwidget'", output)
+        output: str = self.install(target, "nosuchwidget")
+        self.assertIn("could not fetch nosuchwidget", output)
 
-    def test_include_takes_two_names(self) -> None:
+    def test_install_takes_several_at_once(self) -> None:
+        """A list installs every requirement and returns them in order."""
+        # Both throwaway packages, in one `pip`, unpacked positionally.
+        target: Path = self.root / "several"
+        self.assertEqual(
+            self.install(target, ["widget", ("gadgetlib", "python-gadget")]),
+            "widget 1.2.3\ngadgetlib 4.5.6")
+        self.assertTrue((target / "widget.py").is_file())
+        self.assertTrue((target / "gadgetlib.py").is_file())
+
+    def test_install_accepts_a_version_constraint(self) -> None:
+        """A requirement carries its own constraint, as `pip` spells it."""
+        # No extra API is needed for a version: PEP 508 already has one.
+        target: Path = self.root / "constrained"
+        self.assertEqual(self.install(target, ["widget>=1.0,<2"]),
+                         "widget 1.2.3")
+        self.assertIn("could not fetch widget==9.9.9",
+                      self.install(self.root / "impossible",
+                                   ["widget==9.9.9"]))
+
+    def test_install_takes_the_newest_version_by_default(self) -> None:
+        """With no constraint, `pip` picks the highest version published."""
+        # `sprocket` is published twice, so this is a real choice.
+        self.assertEqual(self.install(self.root / "newest", ["sprocket"]),
+                         "sprocket 2.0.0")
+
+    def test_a_constraint_chooses_among_versions(self) -> None:
+        """A constraint picks an older version over a newer one.
+
+        This is what one version per project could never test: the
+        constraint has to be what decides, rather than there being
+        nothing else to decide between.
+        """
+        # Each of these has both 1.0.0 and 2.0.0 available to it.
+        expectations: dict[str, str] = {
+            "sprocket<2": "sprocket 1.0.0",
+            "sprocket==1.0.0": "sprocket 1.0.0",
+            "sprocket>=2": "sprocket 2.0.0",
+            "sprocket!=2.0.0": "sprocket 1.0.0",
+        }
+        requirement: str
+        expected: str
+        for requirement, expected in expectations.items():
+            with self.subTest(requirement=requirement):
+                target: Path = self.root / requirement.replace("<", "_lt_")
+                self.assertEqual(self.install(target, [requirement]),
+                                 expected)
+
+    def test_an_impossible_constraint_fails(self) -> None:
+        """A constraint no published version satisfies is reported."""
+        # Both versions exist; neither is 3.0.0.
+        self.assertIn("could not fetch sprocket>=3",
+                      self.install(self.root / "unsatisfiable",
+                                   ["sprocket>=3"]))
+
+    def test_install_runs_pip_once_for_the_set(self) -> None:
+        """Several requirements cost one `pip`, not one each.
+
+        This is the point of Step 6.2: `pip` resolves the set together,
+        and one invocation is what makes Step 6.3's freshness check
+        affordable.  Counted rather than inferred, by wrapping
+        `subprocess.run` and letting the real one do the work.
+        """
+        # Run it in process, so the call being counted is the real one.
+        cache: Path = self.root / "once"
+        self.addCleanup(self.forget, str(cache), "widget")
+        self.addCleanup(self.forget, str(cache), "gadgetlib")
+        venv: alt_venv.AltVEnv = alt_venv.AltVEnv(cache)
+
+        # Count the invocations without replacing what they do.
+        calls: list[Sequence[str]] = []
+        genuine = subprocess.run
+
+        def counted(*args: Any, **kwargs: Any) -> Any:
+            """Record one `pip` invocation and then perform it."""
+            calls.append(args[0])
+            return genuine(*args, **kwargs)
+
+        widget: ModuleType
+        gadget: ModuleType
+        with (unittest.mock.patch.dict(
+                  os.environ, {"PIP_INDEX_URL": self.index_url}),
+              unittest.mock.patch.object(alt_venv.subprocess, "run",
+                                         counted)):
+            widget, gadget = venv.install(
+                ["widget", ("gadgetlib", "python-gadget")])
+        self.assertEqual(len(calls), 1, calls)
+        self.assertIn("widget", calls[0])
+        self.assertIn("python-gadget", calls[0])
+        self.assertEqual(widget.__version__, "1.2.3")
+        self.assertEqual(gadget.__version__, "4.5.6")
+
+    def test_install_takes_a_pair_of_names(self) -> None:
         """A distribution named apart from its module still works."""
         # `pip` is asked for `python-gadget`; `import` gets `gadgetlib`.
         target: Path = self.root / "two_names"
         self.assertEqual(
-            self.include(target, "gadgetlib", distribution="python-gadget"),
+            self.install(target, [("gadgetlib", "python-gadget")]),
             "gadgetlib 4.5.6")
         self.assertTrue((target / "gadgetlib.py").is_file())
 
     def test_one_name_is_not_enough(self) -> None:
         """Asking by import name alone fails when the names differ."""
-        # This is why `distribution` exists rather than being inferred.
+        # This is why the pair form exists rather than being inferred.
         target: Path = self.root / "one_name"
-        self.assertIn("could not fetch 'gadgetlib'",
-                      self.include(target, "gadgetlib"))
+        self.assertIn("could not fetch gadgetlib",
+                      self.install(target, "gadgetlib"))
 
     def test_contains_reports_what_is_cached(self) -> None:
-        """`contains` is False before an include and True after."""
+        """`contains` is False before an install and True after."""
         # A single module counts, not only a package directory.
         target: Path = self.root / "contains"
         venv: alt_venv.AltVEnv = alt_venv.AltVEnv(target)
         self.assertFalse(venv.contains("widget"))
-        self.include(target, "widget")
+        self.install(target, "widget")
         self.assertTrue(venv.contains("widget"))
 
 

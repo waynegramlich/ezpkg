@@ -568,7 +568,7 @@ packaging tool had to be installed to make a package.
 
 `AltVEnv` stopped being empty.  Constructing one creates the cache
 directory and writes a `README.md` into it from the constructor's own
-docstring.  `include()` installs a package into the cache with
+docstring.  `install()` installs a package into the cache with
 `pip install --target` and imports it, taking a separate distribution
 name for the packages whose PyPI name and import name differ, and
 raising `RuntimeError` carrying pip's standard error when the fetch
@@ -865,7 +865,7 @@ finding: nearly all of the work happens in child processes, where the
 tracer cannot reach.
 
 * **`alt_venv.py` is effectively complete.**  The gap was that
-  `repair_module_layout` and `include` were exercised only through
+  `repair_module_layout` and `install` were exercised only through
   child interpreters, so their bodies were never measured.  Calling
   them in process, with `__file__` or `PIP_INDEX_URL` patched, covered
   both.  The last uncovered line can never be reported: it runs only
@@ -1025,19 +1025,52 @@ expected every time the order changes, and is Claude's job.
     would be shorter and is rejected: the bootstrap sits at the top of
     somebody else's program and must not leave a global hook mangling
     their tracebacks.
-* Step 6.2: Several packages in one call.  `include` takes one package
-  and spends a whole `pip` invocation on it.  A list costs one
-  invocation, lets `pip` resolve the set together, and is what makes
-  Step 6.3's freshness check affordable, since a single dry-run covers
-  every package at once.
+* Step 6.2: Several packages in one call, and what to do about bad
+  requirements.  `install` takes one requirement or a list, costs one
+  `pip` invocation for the set so that `pip` resolves them together,
+  and is what makes Step 6.3's freshness check affordable.
+  * 6.2.1 - `pip._internal` buys nothing here, measured 2026-09-26.
+    `pip._internal.cli.main.main` **returns 1** for a missing package
+    and raises nothing: it catches its own exceptions and converts them
+    to exit codes exactly as the command line does.  The thirteen typed
+    exceptions exist, but catching them means driving the resolver
+    directly, which is far deeper into private API than the cases that
+    got `0pinpa` filed, for the same stderr text we already have.
+  * 6.2.2 - Exit codes carry one useful bit.  A missing package, an
+    impossible version, a malformed requirement and a dead index all
+    exit 1; only a bad option exits 2.  So 2 means we handed `pip` a
+    bad command line, which is our bug or the caller's `argv`, and
+    deserves a different exception.  `NO_MATCHES_FOUND = 23` exists in
+    pip's status codes but `install` never returns it.
+  * 6.2.3 - Parse pip's text for the message, never for the behaviour.
+    Matching `No matching distribution found` to add "check the
+    spelling?" is fine, because a rephrasing costs a hint and nothing
+    else.  Branching control flow on it breaks on a pip upgrade, which
+    is `0pinpa`'s failure mode reached through text instead of imports.
+  * 6.2.4 - Validate locally what can be validated locally.  A
+    requirement beginning with `-` is the one that matters: it would be
+    read as an option, so `install("--index-url=...")` could repoint
+    the fetch at somebody else's index, which belongs with Step 6.5.
+    Requirement syntax is not ours to check: measured 2026-09-26, `pip`
+    rejects `bad name with spaces` in 0.59 s with
+    `ERROR: Invalid requirement`, locally, without touching the
+    network, so reimplementing PEP 508 would only add a way to
+    disagree with it.  What is left is that two entries must not claim
+    the same import name, since `pip` cannot know our import names and
+    one module would be returned twice.
+  * 6.2.5 - What cannot be checked locally is whether `reqeusts`
+    exists; only the index knows, so that error has to come from `pip`
+    and is surfaced with pip's own words.  The one discrimination that
+    really matters, first fetch versus staleness check in 6.3.8, comes
+    from whether the cache is populated, which is known locally.
 * Step 6.3: A versioned cache.  This is the fix for `0nicav`, which is
   priority 0 because the cache path carries no version, interpreter or
   platform, so the same directory reached by a different Python would
-  load whatever the last one installed.  `include` should install into a
+  load whatever the last one installed.  `install` should install into a
   subdirectory naming all three and reuse it when it is already there.
   Also settles where the cache lives, which is `2wscdl`.
-  * 6.3.1 - Key on the request, not the resolution:  `include("x")` and
-    `include("x", ["x>=7"])` want different slots, and the version pip
+  * 6.3.1 - Key on the request, not the resolution:  `install("x")` and
+    `install("x", ["x>=7"])` want different slots, and the version pip
     resolves is only recorded inside one afterwards.
   * 6.3.2 - Do not move the root:  `repair_module_layout` fires only
     for a module under `self.root`, so relocating the cache silently
@@ -1126,7 +1159,7 @@ expected every time the order changes, and is Claude's job.
     options, but it should be a stated decision rather than an
     oversight.
   * 6.5.10 - Typosquatting lands in the gap between the distribution
-    name and the import name in `include`, because `pip install` takes
+    name and the import name in `install`, because `pip install` takes
     the name nobody reads.  PEP 503 indexes publish `#sha256=`
     fragments, so hashes can be pinned as well.
   * 6.5.11 - `README.md` still has `## Security Issues of Executing
@@ -1168,10 +1201,10 @@ expected every time the order changes, and is Claude's job.
   for a while.  Not by access time: nearly every Linux filesystem
   mounts `relatime`, so `atime` updates at most once a day and not on
   ordinary reads, and `noatime` switches it off altogether, so culling
-  on it would delete packages in daily use.  `include` is the only
+  on it would delete packages in daily use.  `install` is the only
   thing that reads the cache, so have it record use in a sidecar file
   and cull on that.
-* Step 6.10: `.pth` files, which is `3pfaibne`.  `include` uses
+* Step 6.10: `.pth` files, which is `3pfaibne`.  `install` uses
   `sys.path.insert`, which never executes a `.pth` file, so a package
   relying on one is quietly half installed.  `site.addsitedir` is the
   experiment.
@@ -1184,7 +1217,7 @@ expected every time the order changes, and is Claude's job.
   the only thing that can settle Task 3's conclusion that a bootstrap
   needs `python3-pip` plus a TLS trust store, since that claim is about
   trusting the public certificate authorities and a private certificate
-  tests the opposite.  It is also just `include` against the real index.
+  tests the opposite.  It is also just `install` against the real index.
 * Step 6.13: And more.  A place holder for additional steps.
 
 ### Task 6 Summary
@@ -1279,7 +1312,7 @@ Not yet started, in priority order.
   Various thoughts:
   * Wayne (2026-09-22): This can be dealt with much later since it is easy to
     fix.
-  * Claude (2026-09-24): Fixed in the second stage.  `AltVEnv.include`
+  * Claude (2026-09-24): Fixed in the second stage.  `AltVEnv.install`
     asks `contains` first and skips the install when the package is already in
     the cache.  The twelve cases are unchanged, so the measurement in Task 2
     still shows the defect.
@@ -1430,7 +1463,7 @@ is gone.
     package. We need to at least let the user know that we died because we
     could not get the package.
   * Claude (2026-09-24): The second stage does this now.
-    `AltVEnv.include` raises `RuntimeError` carrying pip's own standard
+    `AltVEnv.install` raises `RuntimeError` carrying pip's own standard
     error, so a caller is told why rather than left with an import failure.
     The twelve bootstrap cases still do not, and they are the half that runs on
     a stranger's machine.
