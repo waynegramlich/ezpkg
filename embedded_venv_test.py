@@ -66,6 +66,7 @@ import zipfile
 from pathlib import Path
 from typing import Any, cast
 
+import bootstrap
 import embedded_venv
 
 # The version comes from the module, so it is written down once.
@@ -579,7 +580,8 @@ class EmbeddedVEnvTest(unittest.TestCase):
         info: Path = target / f"{escaped}-{VERSION}.dist-info"
         self.assertTrue((info / "METADATA").is_file())
 
-    def run_case(self, label: str) -> subprocess.CompletedProcess[str]:
+    def run_case(self, label: str, home: Path | None = None
+                 ) -> subprocess.CompletedProcess[str]:
         """Run one `bootstrap.py` case against the local server.
 
         The case is aimed at the local index entirely through the
@@ -591,13 +593,17 @@ class EmbeddedVEnvTest(unittest.TestCase):
         Arguments:
         * `label` (`str`):
           The case label, as `bootstrap.py` spells it in `MECHANISMS`.
+        * `home` (`Path | None`):
+          A `HOME` to reuse, which makes this a warm run.  `None`, the
+          default, makes a fresh one and so a cold run.
 
         Returns:
         * (`subprocess.CompletedProcess[str]`): The finished child.
         """
-        # Give the case its own HOME, so it cannot find a warm cache.
-        home: Path = Path(tempfile.mkdtemp(prefix=f"case-{label}-",
-                                           dir=self.root))
+        # A fresh HOME cannot hold a warm cache; a reused one can.
+        if home is None:
+            home = Path(tempfile.mkdtemp(prefix=f"case-{label}-",
+                                         dir=self.root))
         script: Path = Path(__file__).resolve().parent / "bootstrap.py"
 
         # Aim it at the local server, both for pip and for the JSON API.
@@ -695,6 +701,61 @@ class EmbeddedVEnvTest(unittest.TestCase):
             urllib.request.urlopen(url, timeout=30)
         error = caught.exception
         self.assertEqual(error.code, 404)
+
+    def test_every_case_bootstraps(self) -> None:
+        """Every `bootstrap.py` case fetches and imports from our server.
+
+        This is what Task 5 exists to establish.  The case list comes
+        from `bootstrap.py` rather than from a copy here, so a case
+        added there cannot quietly go untested.
+        """
+        # Each case gets a fresh HOME, so every run here is a cold one.
+        label: str
+        done: subprocess.CompletedProcess[str]
+        for label in bootstrap.MECHANISMS:
+            with self.subTest(case=label):
+                done = self.run_case(label)
+                self.assertEqual(done.returncode, 0, done.stderr[-400:])
+                self.assertIn(f"module {MODULE}", done.stdout)
+                self.assertIn(embedded_venv.__version__, done.stdout)
+                self.assertIn(".embedded_venv", done.stdout)
+
+    def test_every_case_bootstraps_repeatedly(self) -> None:
+        """Three runs in one cache all succeed.
+
+        This is the warm path, which nothing tested before.  It is
+        where `0cctfd` lived: the guard every case uses asks whether
+        the package is a directory, a single module install is not
+        one, and case 11 deletes the `pip` it would need for the
+        second fetch.  `EmbeddedVEnv.repair_module_layout` is what
+        makes this pass.
+
+        Three runs rather than two, because the repair has to be
+        idempotent.  An earlier version of it passed two runs and broke
+        the cache on the third, by treating the `__init__.py` it had
+        just written as another single module to move.
+        """
+        # One HOME per case, used three times: cold, then warm twice.
+        label: str
+        home: Path
+        run: int
+        done: subprocess.CompletedProcess[str]
+        for label in bootstrap.MECHANISMS:
+            with self.subTest(case=label):
+                home = Path(tempfile.mkdtemp(prefix=f"warm-{label}-",
+                                             dir=self.root))
+                for run in (1, 2, 3):
+                    done = self.run_case(label, home)
+                    self.assertEqual(done.returncode, 0,
+                                     f"run {run}: {done.stderr[-400:]}")
+                    self.assertIn(f"module {MODULE}", done.stdout)
+
+    def test_repair_module_layout_leaves_a_checkout_alone(self) -> None:
+        """A module outside the cache is never rewritten."""
+        # This file's own directory must survive constructing one.
+        source: Path = Path(__file__).resolve().parent / f"{MODULE}.py"
+        embedded_venv.EmbeddedVEnv(self.root / "elsewhere")
+        self.assertTrue(source.is_file())
 
     def test_json_api_cases_bootstrap_end_to_end(self) -> None:
         """Cases 3 and 12 fetch and import through the JSON API."""

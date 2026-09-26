@@ -766,6 +766,30 @@ so that a failing assertion cannot leave the fault in place.
   class prints a traceback for that, which looked like a failure in
   the middle of a passing run.
 
+### Step 5.5: Every case, end to end
+
+`test_every_case_bootstraps` runs all twelve cases against our own
+server and asserts that each one lands `embedded_venv` in the cache and
+imports it.  All twelve pass.  That is the claim Task 5 was opened to
+establish.
+
+* The case list is read from `bootstrap.MECHANISMS` rather than copied
+  into the test, so a thirteenth case cannot quietly go untested.
+* Four assertions per case: `pip` or `urllib` exited zero, the printed
+  module name matches, the version matches `embedded_venv.__version__`,
+  and the file it was imported from lies under `.embedded_venv`.  The
+  last one is what distinguishes a real fetch from an accidental
+  import of the copy in this directory.
+* The suite went from 13.8 s to 40.3 s.  The twelve cases cost about
+  26 s of that, nearly all of it building virtual environments.
+* Every run in that test is cold, because each case gets a fresh
+  `HOME`, so the warm path needed a test of its own.
+  `test_every_case_bootstraps_repeatedly` is it: one cache per case,
+  three runs through it, all twelve passing.  Three rather than two
+  because the repair that `0cctfd` needed has to be idempotent, and an
+  earlier version of it passed two runs and broke the cache on the
+  third.  `0cctfd` is closed.
+
 ### Leftovers from task 3
 
 Before we close task 5, stuff in this section needs to be either moved
@@ -786,13 +810,13 @@ Carried over from Task 3:
 ### Task 5 Summary
 
 Task 5 is open, so this section is a working chart rather than a
-summary.  It is the Task 2 table remeasured against a package server
-we control, and it gets updated in place until the task closes.  The
+summary.  It is the Task 2 table remeasured against a package server we
+control, and it gets updated in place until the task closes.  The
 original chart stays as it was, because it measured `coverage` from
 PyPI and this one measures `embedded_venv` from `127.0.0.1`.
 
 ```
-date        : 2026-09-25 16:10
+date        : 2026-09-25 19:12
 python      : 3.12.3 at /usr/bin/python3
 platform    : linux
 inside venv : False
@@ -803,62 +827,54 @@ repetitions : 3; cold and warm are medians
 +------+-----------------+---------+-------+-------+--------+--------+--------+
 | case | mechanism       | imports | lines | paste | cold   | warm   | size   |
 +------+-----------------+---------+-------+-------+--------+--------+--------+
-| 1    | venv(pip), pip  | 4       | 20    | 24    | 4.35 s | 1.21 s | 15259  |
+| 1    | venv(pip), pip  | 4       | 20    | 24    | 4.42 s | 0.09 s | 15275  |
 |      | in process      |         |       |       |        |        |        |
-| 2    | venv(pip), pip  | 4       | 20    | 24    | 4.45 s | 1.31 s | 15259  |
+| 2    | venv(pip), pip  | 4       | 20    | 24    | 4.45 s | 0.10 s | 15275  |
 |      | subprocess      |         |       |       |        |        |        |
-| 3    | no venv, stdlib | 5       | 45    | 49    | 0.16 s | 0.16 s | 36     |
+| 3    | no venv, stdlib | 5       | 45    | 49    | 0.13 s | 0.10 s | 52     |
 |      | wheel           |         |       |       |        |        |        |
-| 4    | venv(pip), then | 5       | 26    | 30    | 4.55 s | 1.23 s | 68     |
+| 4    | venv(pip), then | 5       | 26    | 30    | 4.38 s | 0.10 s | 84     |
 |      | delete pip      |         |       |       |        |        |        |
-| 5    | venv(no pip),   | 4       | 20    | 24    | 1.23 s | 1.20 s | 68     |
+| 5    | venv(no pip),   | 4       | 20    | 24    | 1.23 s | 0.10 s | 84     |
 |      | pip in proc     |         |       |       |        |        |        |
-| 6    | no venv, pip in | 1       | 11    | 15    | 1.20 s | 1.22 s | 40     |
+| 6    | no venv, pip in | 1       | 11    | 15    | 1.23 s | 0.09 s | 56     |
 |      | process         |         |       |       |        |        |        |
-| 7    | no venv, pip    | 1       | 11    | 15    | 1.30 s | 1.30 s | 40     |
+| 7    | no venv, pip    | 1       | 11    | 15    | 1.33 s | 0.08 s | 56     |
 |      | subprocess      |         |       |       |        |        |        |
-| 8    | no venv, pip    | 2       | 15    | 19    | 2.75 s | 2.76 s | 40     |
+| 8    | no venv, pip    | 2       | 15    | 19    | 2.76 s | 0.09 s | 56     |
 |      | from wheel      |         |       |       |        |        |        |
-| 9    | as 6 plus --no- | 1       | 11    | 15    | 1.22 s | 1.21 s | 40     |
+| 9    | as 6 plus --no- | 1       | 11    | 15    | 1.27 s | 0.09 s | 56     |
 |      | compile         |         |       |       |        |        |        |
-| 10   | as 7 plus --no- | 1       | 11    | 15    | 1.31 s | 1.31 s | 40     |
+| 10   | as 7 plus --no- | 1       | 11    | 15    | 1.36 s | 0.09 s | 56     |
 |      | compile         |         |       |       |        |        |        |
-| 11   | as 4 but        | 5       | 26    | 30    | 3.77 s | 0.18 s | 68     |
+| 11   | as 4 but        | 5       | 26    | 30    | 3.88 s | 0.10 s | 84     |
 |      | subprocess      |         |       |       |        |        |        |
-| 12   | venv(no pip),   | 7       | 51    | 55    | 0.15 s | 0.14 s | 64     |
+| 12   | venv(no pip),   | 7       | 51    | 55    | 0.15 s | 0.11 s | 80     |
 |      | stdlib wheel    |         |       |       |        |        |        |
 +------+-----------------+---------+-------+-------+--------+--------+--------+
 
-3 FAILURES: case 11, once per repetition, on the warm run only.
+All cases succeeded.
 ```
 
 What the remeasurement says:
 
-* Eleven of the twelve cases fetch `embedded_venv` from our own server
-  and import it.  That is the thing Task 5 exists to establish, and it
-  is now established for everything but case 11.
+* All twelve cases fetch `embedded_venv` from our own server and import
+  it, with no failures.  That is the thing Task 5 exists to establish.
 * `imports`, `lines` and `paste` are identical to the Task 2 chart in
-  every row, which confirms that `JSON_API` cost no case a line.
-* **Case 11 fails on the warm run, every repetition.**  It installs
-  with the venv's own `pip` and then deletes that `pip`, so the second
-  run has nothing to install with.  It survived the Task 2 chart only
-  because `coverage` installs as a directory: the guard is
-  `if not (target / PACKAGE).is_dir()`, which was true once and false
-  afterwards.  `embedded_venv` installs as a single `.py` file, so
-  `is_dir()` is false forever, every run re-installs, and case 11
-  re-installs with a `pip` it has removed.  This is a real defect in
-  the case rather than an artefact of the harness, and it is the first
-  thing the chart caught.
-* Warm no longer differs much from cold, for the same reason: with the
-  guard never tripping, a warm run repeats the whole install.  Cases
-  1, 2 and 4 still show a warm gain because they skip rebuilding the
-  virtual environment, not because they skip the download.
-* Sizes fell by roughly a factor of 25, from 1682-1790 KB to 36-68 KB
-  outside the venv-with-pip cases.  `embedded_venv` is one pure Python
-  module where `coverage` ships compiled extensions.  The 15259 KB of
-  cases 1 and 2 is almost entirely the `pip` they keep.
-
-
+  every row.  Neither `JSON_API` nor the `0cctfd` repair cost a case a
+  line, because both live outside the pasted case bodies.
+* Warm is now genuinely warm: 0.08 to 0.11 s everywhere, against 1.20
+  to 2.76 s before `0cctfd` was fixed.  The guard now trips, so a
+  second run inserts a path and imports rather than fetching again.
+  Case 11, which failed on every warm run, passes.
+* Sizes rose by 16 KB per case, which is the `README.md` the
+  constructor writes plus the directory the repair creates.  The
+  constructor did not run at all before, because `bootstrap.py` only
+  imported the module.
+* Against the Task 2 chart, sizes are still smaller by a factor of
+  about 20 outside the venv-with-pip cases, because `embedded_venv` is
+  one pure Python module where `coverage` ships compiled extensions.
+  The 15275 KB of cases 1 and 2 is almost entirely the `pip` they keep.
 
 ## Issues
 
@@ -899,36 +915,6 @@ Being worked on right now, in priority order.  None at present.
 ### Pending Issues
 
 Not yet started, in priority order.
-
-* **The cache check tests for a directory. (0cctfd)**  Every one of the
-  twelve cases guards its install with
-  `if not (target / PACKAGE).is_dir()`.  A distribution that installs
-  as a single module puts a `.py` file there, not a directory, so the
-  guard is false on every run and the install is repeated forever.
-  `embedded_venv` is exactly such a distribution, so the defect
-  applies to the package this project ships.
-
-  Two things follow.  Every case re-downloads on every run, which the
-  Task 5 chart shows as warm times that match cold times.  And case 11
-  does not merely repeat work, it fails: it installs with the venv's
-  own `pip`, deletes that `pip`, and then on the second run tries to
-  install with it again, exiting non-zero three times out of three.
-  The Task 2 chart missed all of this because `coverage` installs as a
-  directory, which made the guard behave correctly by accident.
-
-  A possible solution is to ask whether the package imports rather
-  than whether a path exists, which is also what `2apiia` asks for; a
-  narrower one is to test for the module file as well as the
-  directory.  The two issues are distinct.  `2apiia` is about skipping
-  an install that is not needed, and this one is about a cache hit
-  that is never detected at all.
-
-  Various thoughts:
-  * Claude (2026-09-25): Priority 0 because it escapes.  A pasted case
-    carries the defect into somebody else's program, where the symptom
-    is a silent re-download on every single run, and for case 11 a
-    hard failure on the second.  Found by Step 5.3, which pointed the
-    cases at `embedded_venv` instead of `coverage` for the first time.
 
 * **Nothing identifies a cache as valid. (0nicav)**  Every case installs into
   `~/.embedded_venv` with no version, platform tag or interpreter
@@ -1128,4 +1114,48 @@ are not proposed again.
 
 Resolved, most recent first, each dated.  They are purged once
 nobody wants to read them any more, after every reference to them
-is gone.  None at present.
+is gone.
+
+* **The cache check tests for a directory. (0cctfd)**
+  (CLOSED 2026-09-25)  Every one of the
+  twelve cases guards its install with
+  `if not (target / PACKAGE).is_dir()`.  A distribution that installs
+  as a single module puts a `.py` file there, not a directory, so the
+  guard is false on every run and the install is repeated forever.
+  `embedded_venv` is exactly such a distribution, so the defect
+  applies to the package this project ships.
+
+  Two things follow.  Every case re-downloads on every run, which the
+  Task 5 chart shows as warm times that match cold times.  And case 11
+  does not merely repeat work, it fails: it installs with the venv's
+  own `pip`, deletes that `pip`, and then on the second run tries to
+  install with it again, exiting non-zero three times out of three.
+  The Task 2 chart missed all of this because `coverage` installs as a
+  directory, which made the guard behave correctly by accident.
+
+  A possible solution is to ask whether the package imports rather
+  than whether a path exists, which is also what `2apiia` asks for; a
+  narrower one is to test for the module file as well as the
+  directory.  The two issues are distinct.  `2apiia` is about skipping
+  an install that is not needed, and this one is about a cache hit
+  that is never detected at all.
+
+  Various thoughts:
+  * Claude (2026-09-25): Fixed the same day, by Wayne's approach: the
+    second stage repairs the layout rather than twelve pasted case
+    bodies being edited, so no case gained a line and the `paste`
+    column did not move.  `EmbeddedVEnv.repair_module_layout` rewrites
+    the module it was imported from as `<name>/__init__.py`, but only
+    when that file lies under the cache root, so a checkout is never
+    touched.  The cost is one extra fetch, on the first run only.
+  * Claude (2026-09-25): Two things were not obvious.  Half the cases
+    install into `~/.embedded_venv` and half into a `site-packages`
+    directory inside it, so the repair has to look anywhere under the
+    root rather than at the root itself; and `bootstrap.py` never
+    constructed an `EmbeddedVEnv`, so its epilogue now does what a real
+    program does next.  The repair also has to decline to run once the
+    module is a package, since `__init__.py` has the stem `__init__`
+    and an earlier version buried it one directory deeper on the second
+    run.  `test_every_case_bootstraps_repeatedly` runs three times for
+    that reason.
+

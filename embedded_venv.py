@@ -118,6 +118,72 @@ class EmbeddedVEnv:
         self.readme = self.root / "README.md"
         self.readme.write_text(f"# {title}\n{body}\n")
 
+        # Repair a single module install, so that the bootstrap that
+        # fetched this one recognises it next time.  See `0cctfd`.
+        self.repair_module_layout()
+
+    def repair_module_layout(self) -> Path | None:
+        """Rewrite this module inside the cache as a package directory.
+
+        Every case in `bootstrap.py` decides whether it has already
+        installed the package by asking `(target / PACKAGE).is_dir()`.
+        A distribution that installs as a single module puts
+        `embedded_venv.py` there rather than a directory, so the answer
+        is no on every run and the fetch is repeated forever.  Case 11
+        does worse than waste a download: it deletes the `pip` it
+        installed with, so its second run has nothing to install with
+        and fails.  This is the `0cctfd` issue in `LOGBOOK.md`.
+
+        Rather than edit twelve case bodies that people paste, the
+        second stage repairs the layout once, the first time it runs.
+        The file this module was imported from becomes
+        `<name>/__init__.py` in the same directory, which every case's
+        `is_dir()` test then finds.  The cost is one extra fetch, on
+        the first run only.
+
+        The file is only touched when it lies somewhere under `root`,
+        which is what keeps a checkout being worked on from being
+        rewritten.  Half the cases install into `root` itself and half
+        into a `site-packages` directory inside it, so anywhere under
+        `root` is the test that covers both.
+
+        Repairing twice must not nest, so this returns `None` once the
+        module is already a package.
+
+        Returns:
+        * (`Path | None`): The directory now holding the module, or
+          `None` when there was nothing to repair.
+        """
+        # Once repaired, this module is a package, and a package has a
+        # `__path__`.  Without this test the second run would take
+        # `__init__.py`, whose stem is `__init__`, and bury it one
+        # directory deeper, leaving the package with no `__init__.py`
+        # at all.  The run after that would import a namespace package
+        # and fail on `__version__`.
+        if "__path__" in globals():
+            return None
+
+        # A frozen interpreter gives a module no file to move.
+        origin: str | None = globals().get("__file__")
+        if origin is None:
+            return None
+
+        # Only ever rewrite inside the cache, never a checkout.
+        module: Path = Path(origin).resolve()
+        if module.suffix != ".py" or not module.is_file():
+            return None
+        try:
+            module.relative_to(self.root.resolve())
+        except ValueError:
+            return None
+
+        # Move the module into a directory named after it, then drop it.
+        package: Path = module.parent / module.stem
+        package.mkdir(exist_ok=True)
+        (package / "__init__.py").write_bytes(module.read_bytes())
+        module.unlink()
+        return package
+
     def include(self, package: str, argv: Sequence[str] = (),
                 distribution: str | None = None) -> ModuleType:
         """Make a package importable, fetching it if it is missing.

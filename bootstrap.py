@@ -504,6 +504,14 @@ def main() -> None:
     # `type(sys)` is `types.ModuleType`, reached without importing
     # `types`, because `sys` is a module and is already imported.
     assert isinstance(module, type(sys)), f"{PACKAGE} gave {module!r}"
+
+    # A real program constructs one next, and that is not idle here:
+    # the constructor repairs a single module install so that this
+    # case's own `is_dir()` guard recognises it on the following run.
+    # See `0cctfd`.  Harness machinery, so `paste` does not count it.
+    if hasattr(module, "EmbeddedVEnv"):
+        module.EmbeddedVEnv()
+
     print(f"{PACKAGE}: module {module.__name__} "
           f"version {module.__version__} from {module.__file__}")
 
