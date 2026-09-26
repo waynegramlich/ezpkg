@@ -316,6 +316,12 @@ columns mean is in its module docstring.
 |      | stdlib wheel    |         |       |       |        |        |        |
 +------+-----------------+---------+-------+-------+--------+--------+--------+
 
+{Step 6.1 of Task 6 wrapped the fetch in a three line `try` on
+2026-09-26, so every `paste` figure above is now three higher: 27, 27,
+52, 33, 27, 18, 18, 22, 18, 18, 33 and 58 for cases 1 to 12.  The
+wrapper turns a failed fetch into one line of diagnosis instead of a
+traceback, which is the `0whwnn` issue.}
+
 ### Findings
 
 1. **`venv.EnvBuilder` does not default to symlinks; the command
@@ -971,6 +977,12 @@ repetitions : 3; cold and warm are medians
 All cases succeeded.
 ```
 
+{Step 6.1 of Task 6 wrapped the fetch in a three line `try` on
+2026-09-26, so every `paste` figure above is now three higher: 27, 27,
+52, 33, 27, 18, 18, 22, 18, 18, 33 and 58 for cases 1 to 12.  The
+wrapper turns a failed fetch into one line of diagnosis instead of a
+traceback, which is the `0whwnn` issue.}
+
 What the remeasurement says:
 
 * All twelve cases fetch `embedded_venv` from our own server and import
@@ -996,51 +1008,131 @@ What the remeasurement says:
 ## Task 6: Flesh out the `EmbeddedVEnv` Class
 
 The primary purpose of this task is to add features to
-`embedded_venv.py`.  The number in the left column is the priority, 1
-being the most urgent, and the steps are sorted with priority 1 at the
-bottom, nearest the prompt.
+`embedded_venv.py`.  The steps are sorted by priority with the highest
+**first**, so Step 6.1 is the next thing to do.  Renumbering is
+expected every time the order changes, and is Claude's job.
 
-A step number is a stable identity and does not change.  Reordering the
-work means editing the priority column and the order of the bullets,
-and nothing else, so a step can be referred to by number without the
-reference rotting.  Keeping the two in step is Claude's job.
-
-* 13 - Step 6.1: And more.  A place holder for additional steps.
-* 12 - Step 6.2: A fetch from the real PyPI, carried over from Task 5.  It is
-  the only thing that can settle Task 3's conclusion that a bootstrap
-  needs `python3-pip` plus a TLS trust store, since that claim is about
-  trusting the public certificate authorities and a private certificate
-  tests the opposite.  It is also just `include` against the real index.
-* 11 - Step 6.3: The `README.md` text.  What it should say needs discussing,
-  and it has to describe the versioned layout once Step 6.11 lands.
-  Note the current behaviour: it is rewritten on every construction
-  rather than only when absent, which makes writing a file a side
-  effect of making an object and will surprise somebody.
-* 10 - Step 6.4: `.pth` files, which is `3pfaibne`.  `include` uses
-  `sys.path.insert`, which never executes a `.pth` file, so a package
-  relying on one is quietly half installed.  `site.addsitedir` is the
-  experiment.
-*  9 - Step 6.5: Garbage collection.  Cull packages that have not been used
-  for a while.  Not by access time: nearly every Linux filesystem
-  mounts `relatime`, so `atime` updates at most once a day and not on
-  ordinary reads, and `noatime` switches it off altogether, so culling
-  on it would delete packages in daily use.  `include` is the only
-  thing that reads the cache, so have it record use in a sidecar file
-  and cull on that.
-*  8 - Step 6.6: Declared requirements, which is `2hsrpbd`.  Read the
-  calling script's PEP 723 `# /// script` block instead of a package
-  name written into the bootstrap.  It builds on Step 6.12, and it
-  makes the same file work under `uv run` for nothing, which is worth a
-  great deal given that prior art is why this project has to justify
-  itself at all.
-*  7 - Step 6.7: Messages.  When should anything be said: on creating the
-  directory, on each download, on a stale bootstrap?  One constraint is
-  hard.  A library must never write to standard output, because the
-  host program's output may be piped or parsed.  `logging` with a
-  `NullHandler` lets the host decide.  One line on standard error when a
-  download actually starts is still worth it, because several seconds
-  of silence looks like a hang.
-*  6 - Step 6.8: Find the bootstrap, and notice when it is stale.  Python has
+* Step 6.1: Generate error on bootstrap fetch error (`0whwnn`):
+  * The new bootstrap diagnoses a failed fetch, which closes `0whwnn`.
+  * Measured 2026-09-25 against a dead port: case 6 ends in
+   `RuntimeError: pip failed` after ten lines of traceback and never
+    mentions the network, and case 3 buries `Connection refused` under 47.
+    Neither is an error message.
+  * Wrap the fetch once in the shared region and `raise SystemExit` naming
+    the package, the destination and the underlying error.  `SHARED_LINES`
+    then goes from 4 to 7 and every `paste` figure rises by three, which
+    makes this the first change to move that column.  A `sys.excepthook`
+    would be shorter and is rejected: the bootstrap sits at the top of
+    somebody else's program and must not leave a global hook mangling
+    their tracebacks.
+* Step 6.2: Several packages in one call.  `include` takes one package
+  and spends a whole `pip` invocation on it.  A list costs one
+  invocation, lets `pip` resolve the set together, and is what makes
+  Step 6.3's freshness check affordable, since a single dry-run covers
+  every package at once.
+* Step 6.3: A versioned cache.  This is the fix for `0nicav`, which is
+  priority 0 because the cache path carries no version, interpreter or
+  platform, so the same directory reached by a different Python would
+  load whatever the last one installed.  `include` should install into a
+  subdirectory naming all three and reuse it when it is already there.
+  Also settles where the cache lives, which is `2wscdl`.
+  * 6.3.1 - Key on the request, not the resolution:  `include("x")` and
+    `include("x", ["x>=7"])` want different slots, and the version pip
+    resolves is only recorded inside one afterwards.
+  * 6.3.2 - Do not move the root:  `repair_module_layout` fires only
+    for a module under `self.root`, so relocating the cache silently
+    reopens `0cctfd` and case 11 fails on its second run again.
+  * 6.3.3 - Two caches, not one:  stage 1 is pinned to
+    `~/.embedded_venv` by the pasted code, so stage 2 goes in
+    `root/<key>/` beneath it.  That answers `2wscdl` with a constraint.
+  * 6.3.4 - What the key holds:  `sys.implementation.cache_tag`,
+    `sysconfig.get_platform()` and the requirement string.  It cannot
+    tell musl from glibc, which is the blind spot of `2wtmifs`.
+  * 6.3.5 - Four call sites move:  `--target`, `contains`, and
+    `sys.path.insert`, which now inserts a slot rather than the root.
+    `README.md` stays put but starts describing the wrong layout.
+  * 6.3.6 - Migration:  leave packages already installed flat for Step
+    6.9 to cull.  A constructor should not delete files it never made.
+  * 6.3.7 - Validate with the index hash, not a recorded version:  ask
+    `pip install --dry-run --report` for the file it would choose and
+    its SHA-256, and refetch only when that differs from what is
+    cached.  It is pip's own resolver, so it cannot disagree with pip,
+    where reimplementing tag and specifier matching is what `2wtmifs`
+    already gets wrong.  Measured 2026-09-25: warm start 0.09 s, a bare
+    index page for `coverage` 0.6 s and 5.1 MB, a dry-run 1.5 s.
+    Downloading the index twice is accepted: it is a fraction of a
+    second against a user hand-building a virtual environment so that
+    `pip install` will not fail.
+  * 6.3.8 - The same failure wants opposite handling:  on a first fetch
+    there is no cache, so an unreachable index must say so and stop; on
+    a staleness check there is one, so it must be shrugged off, because
+    a laptop on a plane has to start.
+* Step 6.4: Concurrent installs.  Two copies of one program starting at
+  once both find the cache empty and both run `pip install --target`
+  into the same directory, and an interleaved pair can leave a half
+  written package that imports and then fails.  Install into a temporary
+  directory and `rename` it into place, which is atomic within one
+  filesystem, or take an `O_EXCL` lock.  No issue covers this yet.
+* Step 6.5: Security, and the Scavenger Hunt.  The architecture is in
+  `README.md`, written as the page a stranger lands on: unapproved
+  packages are downloaded to a holding area, the user is shown what
+  arrived and approves it, and only then is anything installed and
+  imported.  Approval is once per program rather than once per run.
+  * 6.5.1 - Write the threat model down first, because the claim has to
+    be narrow to be true.  A malicious program author gets no
+    protection at all, since the bootstrap is their code and they can
+    delete the prompt.  A typosquatted package gets very little:
+    `reqeusts . PyPI` and `requests . PyPI` have titles of identical
+    form, so pasting one proves a page was fetched, not that the right
+    one was recognised.  A compromised index or network is TLS and
+    hashes, not ceremony.  What the Hunt genuinely defends is
+    inattention to the dependency set, and that is worth saying
+    plainly; claiming more would make it theatre.
+  * 6.5.2 - The real guarantee is the ordering:  download, approve,
+    install.  With `--only-binary :all:` a wheel is an inert zip, so no
+    third party code has run at the moment the user is asked.  Neither
+    `uv run` nor `pip-run` can make that claim, and it should be stated
+    as the architectural promise rather than left as an aside.
+  * 6.5.3 - Refuse sdists.  `--only-binary :all:` is the one lever
+    worth more than all the rest, because an sdist runs arbitrary code
+    at install time through `setup.py` and a wheel does not.
+  * 6.5.4 - Show the transitive closure.  Nobody ever looks at what
+    `pip install requests` actually pulls in, and a list the user must
+    page through is the first time most people would see the number.
+    That alone justifies the mechanism.
+  * 6.5.5 - Approve a hash, not a name.  Approving "coverage" means
+    nothing; approving `coverage 7.16.1 sha256=e82e10b9...` is a real
+    decision, and a version bump then correctly re-prompts.  The
+    identity to record is the one Step 6.3 already fetches.
+  * 6.5.6 - Non-interactive execution is a hard requirement, not an
+    edge case.  A program under cron, CI, systemd, a pipe or a
+    double-clicked launcher has no tty, and the Hunt would hang or
+    crash.  Needs `sys.stdin.isatty()`, a documented approval file or
+    environment variable for that case, and a clear message when
+    neither is present.
+  * 6.5.7 - Habituation is the standing objection and deserves an
+    answer in the `README.md`.  Every repeated confirmation ritual
+    decays into muscle memory, as certificate warnings and UAC did.
+    Once per program rather than once per run is the mitigation, and
+    saying so is the reply.
+  * 6.5.8 - One prompt for the whole set, not `N` title pastes, is
+    worth considering.  The same visibility at a tenth of the tedium,
+    and the title paste is the part that buys least.  The cost lands on
+    the person who did not choose the dependencies, and `uv run` asks
+    them for nothing.
+  * 6.5.9 - The approval store is a local allowlist, so anything
+    running as the user can pre-approve itself.  Probably acceptable,
+    since malware with write access to a home directory has better
+    options, but it should be a stated decision rather than an
+    oversight.
+  * 6.5.10 - Typosquatting lands in the gap between the distribution
+    name and the import name in `include`, because `pip install` takes
+    the name nobody reads.  PEP 503 indexes publish `#sha256=`
+    fragments, so hashes can be pinned as well.
+  * 6.5.11 - `README.md` still has `## Security Issues of Executing
+    Unvetted Code` marked TBD, and it is the section the whole feature
+    rests on.  The sub-items above are its outline.
+* Step 6.6: Find the bootstrap, and notice when it is stale.  Python has
   a great many introspection facilities, and the direct one is
   `sys.modules["__main__"].__file__` rather than walking frames with
   `inspect`.  Read that file and look for the bootstrap.  It has to
@@ -1053,75 +1145,47 @@ reference rotting.  Keeping the two in step is Claude's job.
   unknown hash is somebody's edited copy and should be passed over in
   silence.  What to do about a stale bootstrap -- warn, refuse, or offer
   to rewrite the file -- is a separate decision.
-*  5 - Step 6.9: Security.  We are fetching files of unknown origin from an
-  index anybody can publish to, and we cannot vet their contents; the
-  write up should say so plainly rather than imply otherwise.  One lever
-  is worth more than the rest combined: `--only-binary :all:`.  An sdist
-  runs arbitrary code at install time through `setup.py` while a wheel
-  does not, so refusing sdists removes install time execution entirely.
-  Beyond that, PEP 503 indexes publish `#sha256=` fragments, so hashes
-  can be pinned; and the gap between the distribution name and the
-  import name in `include` is exactly where typosquatting bites, because
-  `pip install` takes the name nobody reads.
-*  4 - Step 6.10: Concurrent installs.  Two copies of one program starting at
-  once both find the cache empty and both run `pip install --target`
-  into the same directory, and an interleaved pair can leave a half
-  written package that imports and then fails.  Install into a temporary
-  directory and `rename` it into place, which is atomic within one
-  filesystem, or take an `O_EXCL` lock.  No issue covers this yet.
-*  3 - Step 6.11: A versioned cache.  This is the fix for `0nicav`, which is
-  priority 0 because the cache path carries no version, interpreter or
-  platform, so the same directory reached by a different Python would
-  load whatever the last one installed.  `include` should install into a
-  subdirectory naming all three and reuse it when it is already there.
-  Also settles where the cache lives, which is `2wscdl`.
-  * 6.11.1 - Key on the request, not the resolution:  `include("x")` and
-    `include("x", ["x>=7"])` want different slots, and the version pip
-    resolves is only recorded inside one afterwards.
-  * 6.11.2 - Do not move the root:  `repair_module_layout` fires only
-    for a module under `self.root`, so relocating the cache silently
-    reopens `0cctfd` and case 11 fails on its second run again.
-  * 6.11.3 - Two caches, not one:  stage 1 is pinned to
-    `~/.embedded_venv` by the pasted code, so stage 2 goes in
-    `root/<key>/` beneath it.  That answers `2wscdl` with a constraint.
-  * 6.11.4 - What the key holds:  `sys.implementation.cache_tag`,
-    `sysconfig.get_platform()` and the requirement string.  It cannot
-    tell musl from glibc, which is the blind spot of `2wtmifs`.
-  * 6.11.5 - Four call sites move:  `--target`, `contains`, and
-    `sys.path.insert`, which now inserts a slot rather than the root.
-    `README.md` stays put but starts describing the wrong layout.
-  * 6.11.6 - Migration:  leave packages already installed flat for Step
-    6.5 to cull.  A constructor should not delete files it never made.
-  * 6.11.7 - Validate with the index hash, not a recorded version:  ask
-    `pip install --dry-run --report` for the file it would choose and
-    its SHA-256, and refetch only when that differs from what is
-    cached.  It is pip's own resolver, so it cannot disagree with pip,
-    where reimplementing tag and specifier matching is what `2wtmifs`
-    already gets wrong.  Measured 2026-09-25: warm start 0.09 s, a bare
-    index page for `coverage` 0.6 s and 5.1 MB, a dry-run 1.5 s.
-    Downloading the index twice is accepted: it is a fraction of a
-    second against a user hand-building a virtual environment so that
-    `pip install` will not fail.
-  * 6.11.8 - The same failure wants opposite handling:  on a first fetch
-    there is no cache, so an unreachable index must say so and stop; on
-    a staleness check there is one, so it must be shrugged off, because
-    a laptop on a plane has to start.
-*  2 - Step 6.12: Several packages in one call.  `include` takes one package
-  and spends a whole `pip` invocation on it.  A list costs one
-  invocation, lets `pip` resolve the set together, and is what makes
-  Step 6.11's freshness check affordable, since a single dry-run covers
-  every package at once.
-*  1 - Step 6.13: The bootstrap diagnoses a failed fetch, which closes
-  `0whwnn`.  Measured 2026-09-25 against a dead port: case 6 ends in
-  `RuntimeError: pip failed` after ten lines of traceback and never
-  mentions the network, and case 3 buries `Connection refused` under 47.
-  Neither is an error message.  Wrap the fetch once in the shared region
-  and `raise SystemExit` naming the package, the destination and the
-  underlying error.  `SHARED_LINES` then goes from 4 to 7 and every
-  `paste` figure rises by three, which makes this the first change to
-  move that column.  A `sys.excepthook` would be shorter and is
-  rejected: the bootstrap sits at the top of somebody else's program and
-  must not leave a global hook mangling their tracebacks.
+* Step 6.7: Messages.  When should anything be said: on creating the
+  directory, on each download, on a stale bootstrap?  One constraint is
+  hard.  A library must never write to standard output, because the
+  host program's output may be piped or parsed.  `logging` with a
+  `NullHandler` lets the host decide.  One line on standard error when a
+  download actually starts is still worth it, because several seconds
+  of silence looks like a hang.
+
+  A pointer to the `README.md` belongs in the failed fetch message from
+  Step 6.1, and costs one `paste` line: the URL in a shared constant
+  keeps the `raise` on one source line at 73 columns, where inlining it
+  is 121 and wrapping it costs two, so `SHARED_LINES` would go from 7
+  to 8.  Not done, because the URL depends on the repository name.
+* Step 6.8: Declared requirements, which is `2hsrpbd`.  Read the
+  calling script's PEP 723 `# /// script` block instead of a package
+  name written into the bootstrap.  It builds on Step 6.2, and it
+  makes the same file work under `uv run` for nothing, which is worth a
+  great deal given that prior art is why this project has to justify
+  itself at all.
+* Step 6.9: Garbage collection.  Cull packages that have not been used
+  for a while.  Not by access time: nearly every Linux filesystem
+  mounts `relatime`, so `atime` updates at most once a day and not on
+  ordinary reads, and `noatime` switches it off altogether, so culling
+  on it would delete packages in daily use.  `include` is the only
+  thing that reads the cache, so have it record use in a sidecar file
+  and cull on that.
+* Step 6.10: `.pth` files, which is `3pfaibne`.  `include` uses
+  `sys.path.insert`, which never executes a `.pth` file, so a package
+  relying on one is quietly half installed.  `site.addsitedir` is the
+  experiment.
+* Step 6.11: The `README.md` text.  What it should say needs discussing,
+  and it has to describe the versioned layout once Step 6.3 lands.
+  Note the current behaviour: it is rewritten on every construction
+  rather than only when absent, which makes writing a file a side
+  effect of making an object and will surprise somebody.
+* Step 6.12: A fetch from the real PyPI, carried over from Task 5.  It is
+  the only thing that can settle Task 3's conclusion that a bootstrap
+  needs `python3-pip` plus a TLS trust store, since that claim is about
+  trusting the public certificate authorities and a private certificate
+  tests the opposite.  It is also just `include` against the real index.
+* Step 6.13: And more.  A place holder for additional steps.
 
 ### Task 6 Summary
 
@@ -1205,24 +1269,6 @@ Not yet started, in priority order.
     places.  I will point out that the reason why we have 10 bootstrap code
     candidates gives us some flexibility dealing with this issue.
 
-* **What happens with no network? (0whwnn)**  Undefined in all twelve
-  cases.  Should the bootstrap fail, or fall back to whatever the
-  system already provides?
-
-  Various thoughts:
-  * Wayne (2026-09-22): We are going to die without the network to fetch the
-    package. We need to at least let the user know that we died because we
-    could not get the package.
-  * Claude (2026-09-24): The second stage does this now.
-    `EmbeddedVEnv.include` raises `RuntimeError` carrying pip's own standard
-    error, so a caller is told why rather than left with an import failure.
-    The twelve bootstrap cases still do not, and they are the half that runs on
-    a stranger's machine.
-  * Claude (2026-09-25): A candidate for `### Closed Issues`, since the second
-    stage is the part that ships.  Left pending because the bootstrap half is
-    the half that reaches a stranger's machine, and closing the issue would
-    stop anyone looking at it again.  Wayne's call.
-
 * **An already-importable package is installed anyway. (2apiia)**  All
   twelve cases ask whether the package is on disk at their own target,
   never whether it is already importable.  With `coverage` present in an
@@ -1240,6 +1286,13 @@ Not yet started, in priority order.
   * Claude (2026-09-25): A candidate for `### Closed Issues`, on the same
     terms as `0whwnn`: fixed where it ships, unfixed in the pasted bootstrap.
     The two should close together or not at all.  Wayne's call.
+  * Claude (2026-09-26): The thought above no longer holds.  `0whwnn`
+    closed on its own, because Step 6.1 fixed the pasted half as well,
+    and this issue's pasted half is still unfixed: all twelve cases test
+    a path on disk rather than asking whether the package imports.  So
+    it stays open on its own merits rather than as `0whwnn`'s twin.  The
+    fix is now cheaper than it was, since Step 6.3 has to rework the
+    same guard for the versioned cache.
 
 * **How many machines does requiring `pip` exclude? (2hmmdrpe)**  The
   decision to require `pip`, recorded under the preinstalled
@@ -1366,6 +1419,32 @@ are not proposed again.
 Resolved, most recent first, each dated.  They are purged once
 nobody wants to read them any more, after every reference to them
 is gone.
+
+* **What happens with no network? (0whwnn)**
+  (CLOSED 2026-09-26)  Undefined in all twelve
+  cases.  Should the bootstrap fail, or fall back to whatever the
+  system already provides?
+
+  Various thoughts:
+  * Wayne (2026-09-22): We are going to die without the network to fetch the
+    package. We need to at least let the user know that we died because we
+    could not get the package.
+  * Claude (2026-09-24): The second stage does this now.
+    `EmbeddedVEnv.include` raises `RuntimeError` carrying pip's own standard
+    error, so a caller is told why rather than left with an import failure.
+    The twelve bootstrap cases still do not, and they are the half that runs on
+    a stranger's machine.
+  * Claude (2026-09-25): A candidate for `### Closed Issues`, since the second
+    stage is the part that ships.  Left pending because the bootstrap half is
+    the half that reaches a stranger's machine, and closing the issue would
+    stop anyone looking at it again.  Wayne's call.
+  * Claude (2026-09-26): Closed.  Step 6.1 of Task 6 wrapped the fetch
+    so that a failed one exits with a single line naming the package and
+    the underlying error, and no traceback.  Cases 3 and 12 give exactly
+    one line; the ten `pip` cases give three or four, the extra lines
+    being pip's own diagnostics, which are kept because they are more
+    specific than ours.  `test_a_failed_fetch_is_one_line` holds it.
+    The fall back alternative was declined by Wayne on 2026-09-22.
 
 * **The cache check tests for a directory. (0cctfd)**
   (CLOSED 2026-09-25)  Every one of the

@@ -775,10 +775,13 @@ class EmbeddedVEnvTest(unittest.TestCase):
     def test_a_truncated_wheel_fails_case_3(self) -> None:
         """Case 3 unzips the wheel itself, so it must fail too."""
         # `zipfile` is what notices, since the fetch itself succeeded.
+        # Step 6.1 replaced the traceback with one line, so the
+        # assertion reads the message rather than the module name.
         self.inject(".whl", "truncate")
         done: subprocess.CompletedProcess[str] = self.run_case("3")
         self.assertNotEqual(done.returncode, 0)
-        self.assertIn("zipfile", done.stderr)
+        self.assertIn(f"cannot fetch {MODULE}", done.stderr)
+        self.assertIn("not a zip file", done.stderr)
 
     def test_a_missing_project_page_fails_the_install(self) -> None:
         """A 404 for the project page is reported, not worked around."""
@@ -809,6 +812,30 @@ class EmbeddedVEnvTest(unittest.TestCase):
             target, DISTRIBUTION, {"PIP_TIMEOUT": "1", "PIP_RETRIES": "0"})
         self.assertNotEqual(done.returncode, 0)
         self.assertFalse((target / f"{MODULE}.py").exists())
+
+    def test_a_failed_fetch_is_one_line(self) -> None:
+        """A case that cannot reach the index says so, without a traceback.
+
+        This is the `0whwnn` issue.  Before Step 6.1 case 3 buried
+        `Connection refused` under 47 lines of traceback and case 6
+        ended in `RuntimeError: pip failed` without ever mentioning the
+        network.
+        """
+        # A port nothing listens on stands in for a missing network.
+        dead: str = "http://127.0.0.1:1/"
+        label: str
+        home: Path
+        done: subprocess.CompletedProcess[str]
+        for label in cases():
+            with self.subTest(case=label):
+                home = Path(tempfile.mkdtemp(prefix=f"dead-{label}-",
+                                             dir=self.root))
+                done = run_bootstrap_case(
+                    label, home, dead,
+                    {"PIP_RETRIES": "0", "PIP_TIMEOUT": "2"})
+                self.assertNotEqual(done.returncode, 0)
+                self.assertNotIn("Traceback", done.stderr)
+                self.assertIn(f"cannot fetch {MODULE}", done.stderr)
 
     def test_json_api_lists_the_wheel(self) -> None:
         """The synthesized JSON API answers in the shape case 3 reads."""

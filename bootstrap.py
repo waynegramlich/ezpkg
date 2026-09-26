@@ -38,6 +38,16 @@ that makes the lookup possible is harness machinery too, and is
 excluded from the count along with `sys.argv[1]` and the closing
 `print`.
 
+The `try` wrapper is the one piece of harness machinery that `paste`
+does charge, because a pasted case really does carry it.  Here it sits
+at the entry point so that no case body has to be re-indented, but a
+program with one case pasted into it spells the same three lines around
+that case: `try:`, `except Exception as error:`, and the `raise
+SystemExit`.  Without it a missing network is a traceback rather than a
+message, which is the `0whwnn` issue.  Those three lines are why
+`SHARED_LINES` is 7 and not 4, and every `paste` figure is three higher
+than it was before 2026-09-26.
+
 `JSON_API` is the same arrangement for the same reason.  Cases 3 and
 12 read PyPI's JSON API with `urllib`, which knows nothing of
 `PIP_INDEX_URL`, so there is no environment variable already able to
@@ -530,9 +540,11 @@ MECHANISMS = {
     "11": "as 4 but subprocess",
     "12": "venv(no pip), stdlib wheel",
 }
-# Lines a case needs but does not contain: the three module level imports
-# and PACKAGE.  This is the difference between `lines` and `paste`.
-SHARED_LINES = 4
+# Lines a case needs but does not contain: the three module level
+# imports, PACKAGE, and the three of the `try` wrapper that turns a
+# failed fetch into one line of diagnosis.  This is the difference
+# between `lines` and `paste`.
+SHARED_LINES = 7
 REPETITIONS = 3
 COLUMNS = ["case", "mechanism", "imports", "lines", "paste", "cold",
            "warm", "size"]
@@ -729,6 +741,14 @@ if __name__ == "__main__":
     if len(sys.argv) == 1:
         run_tests()
     elif sys.argv[1] in MECHANISMS:
-        main()                      # internal: one case, one interpreter
+        # A pasted case carries this wrapper around its own body.  The
+        # fetch is the part that reaches the network, and a traceback is
+        # not an error message; see `0whwnn` and Step 6.1 of
+        # `LOGBOOK.md`.  `Exception` rather than `BaseException`, so
+        # that a control-C still reads as a control-C.
+        try:
+            main()                  # internal: one case, one interpreter
+        except Exception as error:  # noqa: BLE001 -- deliberate
+            raise SystemExit(f"cannot fetch {PACKAGE}: {error}") from None
     else:
         sys.exit(f"usage: {sys.argv[0]}          (takes no arguments)")
