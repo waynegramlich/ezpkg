@@ -1063,49 +1063,127 @@ expected every time the order changes, and is Claude's job.
     and is surfaced with pip's own words.  The one discrimination that
     really matters, first fetch versus staleness check in 6.3.8, comes
     from whether the cache is populated, which is known locally.
-* Step 6.3: A versioned cache.  This is the fix for `0nicav`, which is
-  priority 0 because the cache path carries no version, interpreter or
-  platform, so the same directory reached by a different Python would
-  load whatever the last one installed.  `install` should install into a
-  subdirectory naming all three and reuse it when it is already there.
-  Also settles where the cache lives, which is `2wscdl`.
-  * 6.3.1 - Key on the request, not the resolution:  `install("x")` and
-    `install("x", ["x>=7"])` want different slots, and the version pip
-    resolves is only recorded inside one afterwards.
-  * 6.3.2 - Do not move the root:  `repair_module_layout` fires only
-    for a module under `self.root`, so relocating the cache silently
-    reopens `0cctfd` and case 11 fails on its second run again.
-  * 6.3.3 - Two caches, not one:  stage 1 is pinned to
-    `~/.alt_venv` by the pasted code, so stage 2 goes in
-    `root/<key>/` beneath it.  That answers `2wscdl` with a constraint.
-  * 6.3.4 - What the key holds:  `sys.implementation.cache_tag`,
-    `sysconfig.get_platform()` and the requirement string.  It cannot
-    tell musl from glibc, which is the blind spot of `2wtmifs`.
-  * 6.3.5 - Four call sites move:  `--target`, `contains`, and
-    `sys.path.insert`, which now inserts a slot rather than the root.
-    `README.md` stays put but starts describing the wrong layout.
-  * 6.3.6 - Migration:  leave packages already installed flat for Step
-    6.9 to cull.  A constructor should not delete files it never made.
-  * 6.3.7 - Validate with the index hash, not a recorded version:  ask
-    `pip install --dry-run --report` for the file it would choose and
-    its SHA-256, and refetch only when that differs from what is
-    cached.  It is pip's own resolver, so it cannot disagree with pip,
-    where reimplementing tag and specifier matching is what `2wtmifs`
-    already gets wrong.  Measured 2026-09-25: warm start 0.09 s, a bare
-    index page for `coverage` 0.6 s and 5.1 MB, a dry-run 1.5 s.
-    Downloading the index twice is accepted: it is a fraction of a
-    second against a user hand-building a virtual environment so that
-    `pip install` will not fail.
-  * 6.3.8 - The same failure wants opposite handling:  on a first fetch
+* Step 6.3: A versioned cache built out of the wheels themselves.  This
+  is the fix for `0nicav`, priority 0 because the cache path carries no
+  version, interpreter or platform, so the same directory reached by a
+  different Python loads whatever the last one left.  It also settles
+  where the cache lives, `2wscdl`, and it carries the jail that Step 6.5
+  needs.
+
+  The pipeline is download, approve, unpack, import.  `pip download`
+  fetches wheels into a holding area; the user approves what arrived;
+  each approved wheel is unpacked into a directory of its own; and only
+  those directories are ever put on `sys.path`.
+  * 6.3.1 - Four directories under `root`, and one rule.  `pending/`
+    holds wheels that arrived but are not approved, `wheels/` holds the
+    approved artifacts, `versions/` holds one unpacked tree per resolved
+    version, and `requests/` holds one record per request answered.
+    **Only `versions/` is ever put on `sys.path`.**  That single
+    sentence is the jail: a wheel is an inert zip, so nothing under
+    `pending/` can have run.  Unpacking happens inside `pending/` too,
+    not beside the destination, so `versions/` never holds a partial
+    tree for `contains` or `sys.path` to find.  Both are under `root`,
+    so the rename into place stays within one filesystem and stays
+    atomic.
+  * 6.3.2 - Do not move `root` itself.  `repair_module_layout` fires
+    only for a module under `self.root`, so relocating the cache
+    silently reopens `0cctfd` and case 11 fails on its second run.
+    Stage 1 is pinned to `~/.alt_venv` by the pasted code, so all of
+    this goes beneath it.  That answers `2wscdl` with a constraint
+    rather than a preference.
+  * 6.3.3 - Write no version expression parser.  Measured 2026-09-26
+    with 1.0.0, 2.0.0 and 3.0.0rc1 published: `sprocket>=3` **fails**,
+    although `3.0.0rc1` satisfies `>=3` numerically, because PEP 440
+    excludes pre-releases unless asked.  A tuple comparing parser would
+    have installed the release candidate, silently, on somebody else's
+    machine.  That is `2wtmifs`'s failure mode exactly.  PEP 440 also
+    has epochs, post and dev releases, local versions, `~=` and `==1.2.*`
+    wildcards.  `pip` owns all of it.
+  * 6.3.4 - Key the cache on the request, not the resolution.  If
+    `sprocket<2` was resolved before, reuse it; no comparison is needed,
+    only string equality on a normalised requirement.  The cost is cache
+    misses, never wrong answers: `sprocket<2` and `sprocket<2.0` become
+    two keys for one result.
+  * 6.3.5 - Two forms need no round trip and no parser.  A `==` pin is
+    answered by looking for a directory named `sprocket-1.0.0`, which is
+    the form a reproducible program uses.  A bare name can never be
+    answered from the cache at all, since "newest" is a property of the
+    index, so even a perfect parser would not save that round trip,
+    which is most of the reason not to write one.
+  * 6.3.6 - A version directory name has to carry the interpreter and
+    the platform as well as the version, which is what `0nicav` is
+    about: `sys.implementation.cache_tag` and
+    `sysconfig.get_platform()`.  Neither can tell musl from glibc, the
+    blind spot of `2wtmifs`.
+  * 6.3.7 - `pip download` does not accept `--report`, measured
+    2026-09-26: exit 2, it is an `install` option.  So hash the wheel
+    that arrived rather than trusting what the index claimed, which is
+    the better of the two anyway.  That hash is also the identity Step
+    6.5 approves.
+  * 6.3.8 - Download **with** dependencies, not `--no-deps`.  The
+    transitive closure landing in `pending/` is exactly what Step 6.5.4
+    wants the user to see, and it is the thing nobody ever looks at.
+  * 6.3.9 - Approval is a rename from `pending/` into `versions/`, which
+    is atomic within one filesystem.  That gives Step 6.4 its answer for
+    nothing.  Measured 2026-09-26: renaming a directory onto a
+    **non-empty** one fails with `ENOTEMPTY`, which is what makes the
+    loser of a race take the winner's tree rather than see half of one.
+    Onto an **empty** directory it silently succeeds, so nothing must
+    ever create an empty `versions/<key>/`.  This holds even when two
+    downloads differ, so it does not depend on the wheels being
+    identical.
+  * 6.3.13 - One record file per request, not one shared file.  A shared
+    file is read, modified and written, and two overlapping writers lose
+    one of the two entries; measured 2026-09-26 with two threads, they
+    do.  A file named by the hash of the request cannot collide, is
+    smaller to read and write, and is moved into place with `replace`
+    rather than `rename`, which is the same on POSIX but does not raise
+    on Windows where `3vedih` is already waiting.  The request is stored
+    inside the record as well, so a person can read it and a hash
+    collision cannot pass as a hit.  Two writers recording the *same*
+    request may honestly disagree, if the index gained a release between
+    them; one wins, both trees exist, and the loser's is garbage for
+    Step 6.9.
+  * 6.3.10 - The same failure wants opposite handling.  On a first fetch
     there is no cache, so an unreachable index must say so and stop; on
     a staleness check there is one, so it must be shrugged off, because
-    a laptop on a plane has to start.
-* Step 6.4: Concurrent installs.  Two copies of one program starting at
-  once both find the cache empty and both run `pip install --target`
-  into the same directory, and an interleaved pair can leave a half
-  written package that imports and then fails.  Install into a temporary
-  directory and `rename` it into place, which is atomic within one
-  filesystem, or take an `O_EXCL` lock.  No issue covers this yet.
+    a laptop on a plane has to start.  The distinction comes from
+    whether the cache is populated, which is known locally.
+  * 6.3.11 - Two versions of one module cannot coexist in a process.
+    Measured 2026-09-26: with both trees on `sys.path`, a second
+    `import sprocket` returned the **first** version and
+    `importlib.invalidate_caches()` did not change it, because
+    `sys.modules` is keyed by module name.  So the cache may hold many
+    versions while any one program resolves to one per import name.
+    `install` already refuses a repeated import name within one call;
+    two separate calls asking for different versions are not caught yet,
+    and that is the silent wrong version bug.
+  * 6.3.12 - Unpacking wheels ourselves takes on part of the wheel spec
+    that `pip` currently handles: `RECORD`, `.data/purelib` and
+    `.data/scripts`, entry points, and `.pth` files, which is
+    `3pfaibne`.  For a pure Python wheel it is the `purelib` move and
+    little else, but it is a real scope increase and should be entered
+    knowingly.  Cases 3 and 12 already do this much.
+* Step 6.4: Concurrent installs.  Mostly answered by Step 6.3's
+  construction rather than by a mechanism of its own, because nothing
+  installs into a shared directory any more.  Done: a download directory
+  per call, so two programs never share a staging area; unpacking inside
+  `pending/` and renaming into `versions/`, where `ENOTEMPTY` makes the
+  loser take the winner's tree; one record file per request, so no write
+  can lose another's; and `mkdir(exist_ok=True)` throughout.
+  * 6.4.1 - `repair_module_layout` had a real race, found 2026-09-26 by
+    asking this question: two programs both read the module and both
+    removed it, and the second raised `FileNotFoundError` out of a
+    constructor.  `unlink(missing_ok=True)` now, with a test that makes
+    the read delete the file as a rival would have.
+  * 6.4.2 - Still open: a program killed mid-unpack leaves an
+    `unpacking-` directory under `pending/`, and a killed download
+    leaves its own.  Neither is importable, so neither is a correctness
+    problem, but they accumulate and belong to Step 6.9.
+  * 6.4.3 - Still open: every concurrency test here is one process,
+    using threads or a forced `OSError`.  A genuine two process test
+    would be stronger, and is the one thing that could still surprise
+    us.
 * Step 6.5: Security, and the Scavenger Hunt.  The architecture is in
   `README.md`, written as the page a stranger lands on: unapproved
   packages are downloaded to a holding area, the user is shown what
@@ -1219,6 +1297,65 @@ expected every time the order changes, and is Claude's job.
   trusting the public certificate authorities and a private certificate
   tests the opposite.  It is also just `install` against the real index.
 * Step 6.13: And more.  A place holder for additional steps.
+
+### Step 6.1: Error on a failed fetch  (DONE 2026-09-26)
+
+A failed fetch now exits with one line instead of a traceback, which
+closes `0whwnn`.  Measured against a dead port, before and after:
+
+| case        | before                    | after                     |
+| ----------- | ------------------------- | ------------------------- |
+| 3, `urllib` | 47 lines, traceback       | 1 line, no traceback      |
+| 6, `pip`    | 10 lines, `pip failed`    | 4 lines, no traceback     |
+
+* Only cases 3 and 12 give exactly one line.  The ten `pip` cases give
+  three or four, and the extra lines are pip's own diagnostics, which
+  are kept deliberately: `ERROR: Could not find a version that
+  satisfies the requirement` is more specific than anything we would
+  say in its place.
+* The wrapper sits at the entry point rather than around each case, so
+  no case body had to be re-indented; 300 lines shifting four columns
+  would have pushed many past 79.  A pasted case carries the same three
+  lines around its own body, which is why `SHARED_LINES` went from 4 to
+  7 and every `paste` figure rose by three.  This is the first change to
+  move that column, and the Task 2 and Task 5 charts carry annotations
+  saying so.
+* `except Exception` needed `# noqa: BLE001`.  The blind catch is the
+  entire point, so it is silenced with a reason rather than narrowed to
+  a tuple that would miss something.  `Exception` rather than
+  `BaseException`, so a control-C still reads as a control-C.
+* `test_a_truncated_wheel_fails_case_3` broke, correctly: it had been
+  asserting the word `zipfile` from the traceback that this step
+  removes.  It now reads the message.
+
+### Step 6.2: Several packages in one call  (DONE 2026-09-26)
+
+`include` became `install`, which takes one requirement or a list and
+spends one `pip` invocation on the set.
+
+* The API is `install("coverage")` returning a module, and
+  `install(["coverage", "pytest>=7.0,<8"])` returning one module per
+  requirement in order, so `cov, pt = ...` unpacks.  A
+  `(import_name, requirement)` pair covers the packages whose two names
+  differ, which replaces the old `distribution` argument.
+* PEP 508 already carries version constraints, so no new structure was
+  needed for them.  `argv` became per-call rather than per-package,
+  since one invocation serves the whole set.
+* Two `@overload` stubs give the varying return type.  `Requirements` is
+  spelled `list | tuple` rather than `Sequence`, because a `str` is
+  itself a `Sequence[str]` and the overloads would otherwise overlap.
+  Docstrings on overload stubs are legal but pointless: only the
+  implementation's survives, since each `def` rebinds the name.
+* The one-invocation claim is counted rather than inferred.
+  `test_install_runs_pip_once_for_the_set` wraps `subprocess.run`, lets
+  the genuine one do the work, and asserts exactly one call carrying
+  both requirements.
+* The test index now publishes `sprocket` at 1.0.0 and 2.0.0, because
+  one version per project makes every constraint pass trivially.  Four
+  constraints are checked against both: `sprocket<2` and
+  `sprocket!=2.0.0` take 1.0.0, `sprocket>=2` takes 2.0.0, and a bare
+  `sprocket` takes the newest.
+* 48 tests, up from 39 at the start of the step.
 
 ### Task 6 Summary
 

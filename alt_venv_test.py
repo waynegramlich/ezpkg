@@ -57,6 +57,7 @@ import shutil
 import ssl
 import subprocess
 import sys
+import sysconfig
 import tempfile
 import threading
 import time
@@ -236,6 +237,46 @@ def build_wheel(module: Path, distribution: str, version: str,
     with zipfile.ZipFile(wheel, "w", zipfile.ZIP_DEFLATED) as archive:
         for path, content in members.items():
             archive.writestr(path, content)
+    return wheel
+
+
+def add_data_member(wheel: Path, sub: str, name: str,
+                    text: str) -> Path:
+    """Rewrite a wheel with one extra member under its `.data` tree.
+
+    `build_wheel` makes the simple shape, a module and a `.dist-info`.
+    A real wheel may also carry a `{distribution}-{version}.data`
+    directory whose `purelib` and `platlib` contents belong beside the
+    modules rather than under `.data`, and moving them is the one part
+    of the wheel specification `AltVEnv.unpack` has to know; see Step
+    6.3.12 in `LOGBOOK.md`.  Nothing here can test that without a wheel
+    shaped this way.
+
+    Arguments:
+    * `wheel` (`Path`):
+      The wheel to rewrite, which is replaced.
+    * `sub` (`str`):
+      `purelib` or `platlib`.
+    * `name` (`str`):
+      The file to add under it.
+    * `text` (`str`):
+      What that file contains.
+
+    Returns:
+    * (`Path`): The wheel, rewritten in place.
+    """
+    # A zip cannot grow in place, so it is rebuilt beside itself.
+    fields: list[str] = wheel.stem.split("-")
+    member: str = f"{fields[0]}-{fields[1]}.data/{sub}/{name}"
+    rebuilt: Path = wheel.with_suffix(".rebuilt")
+    old: zipfile.ZipFile
+    new: zipfile.ZipFile
+    with zipfile.ZipFile(wheel) as old, \
+            zipfile.ZipFile(rebuilt, "w", zipfile.ZIP_DEFLATED) as new:
+        for entry in old.infolist():
+            new.writestr(entry.filename, old.read(entry.filename))
+        new.writestr(member, text)
+    rebuilt.replace(wheel)
     return wheel
 
 
@@ -967,6 +1008,38 @@ class AltVEnvTest(unittest.TestCase):
         self.assertTrue((stray.parent / MODULE / "__init__.py").is_file())
         self.assertFalse(stray.exists())
 
+    def test_repair_survives_another_process_getting_there_first(self
+                                                                 ) -> None:
+        """The module vanishing mid-repair is not an error.
+
+        Two programs starting at once both read the module and both try
+        to remove it; the second must not raise `FileNotFoundError` out
+        of a constructor.  Simulated by making the read delete the file,
+        which is what the other process would have done.
+        """
+        # Plant the module, then make reading it also remove it.
+        root: Path
+        stray: Path
+        root, stray = self.cached_module("raced_repair")
+        cache: alt_venv.AltVEnv = alt_venv.AltVEnv(root)
+        genuine = Path.read_bytes
+
+        def read_then_vanish(self: Path) -> bytes:
+            """Read the file, then delete it as a rival would have."""
+            data: bytes = genuine(self)
+            if self == stray:
+                self.unlink()
+            return data
+
+        package: Path | None
+        with (unittest.mock.patch.object(alt_venv, "__file__", str(stray)),
+              unittest.mock.patch.object(Path, "read_bytes",
+                                         read_then_vanish)):
+            package = cache.repair_module_layout()
+        self.assertEqual(package, stray.parent / MODULE)
+        assert package is not None          # narrowed for `mypy`
+        self.assertTrue((package / "__init__.py").is_file())
+
     def test_repair_declines_a_package(self) -> None:
         """Once the module is a package the repair does nothing."""
         # A package has a `__path__`, and nesting would eat `__init__.py`.
@@ -1379,7 +1452,9 @@ class InstallTest(unittest.TestCase):
         """A missing package is fetched and handed back imported."""
         # The package does not exist anywhere but the local index.
         self.assertEqual(self.install(self.cache, "widget"), "widget 1.2.3")
-        self.assertTrue((self.cache / "widget.py").is_file())
+        self.assertTrue(any(p.name.startswith("widget-1.2.3")
+                            for p in
+                            (self.cache / "versions").iterdir()))
 
     def test_install_passes_argv_to_pip(self) -> None:
         """Extra arguments reach `pip install`."""
@@ -1454,8 +1529,9 @@ class InstallTest(unittest.TestCase):
         self.assertEqual(
             self.install(target, ["widget", ("gadgetlib", "python-gadget")]),
             "widget 1.2.3\ngadgetlib 4.5.6")
-        self.assertTrue((target / "widget.py").is_file())
-        self.assertTrue((target / "gadgetlib.py").is_file())
+        self.assertEqual(sorted(p.name.split("-")[0] for p in
+                                (target / "versions").iterdir()),
+                         ["python_gadget", "widget"])
 
     def test_install_accepts_a_version_constraint(self) -> None:
         """A requirement carries its own constraint, as `pip` spells it."""
@@ -1466,6 +1542,198 @@ class InstallTest(unittest.TestCase):
         self.assertIn("could not fetch widget==9.9.9",
                       self.install(self.root / "impossible",
                                    ["widget==9.9.9"]))
+
+    def test_the_cache_has_three_directories_and_one_rule(self) -> None:
+        """Only `versions` is ever put on `sys.path`.
+
+        That one sentence is the jail of Step 6.3.1.  A wheel under
+        `pending` is an inert zip, so nothing in it can have run, and
+        nothing there is importable.
+        """
+        # Install something, then check where things ended up.
+        cache: Path = self.root / "layout"
+        self.addCleanup(self.forget, str(cache), "widget")
+        venv: alt_venv.AltVEnv = alt_venv.AltVEnv(cache)
+        pending: Path
+        wheels: Path
+        versions: Path
+        requests: Path
+        pending, wheels, versions, requests = venv.paths()
+        with unittest.mock.patch.dict(
+                os.environ, {"PIP_INDEX_URL": self.index_url}):
+            venv.install("widget")
+
+        # The artifact is kept, the tree is unpacked, the holding area
+        # is empty, and only the tree is on the path.
+        self.assertEqual([p.name for p in wheels.iterdir()],
+                         ["widget-1.2.3-py3-none-any.whl"])
+        self.assertEqual(len(list(versions.iterdir())), 1)
+        self.assertEqual(list(pending.iterdir()), [])
+        tree: Path = next(versions.iterdir())
+        self.assertIn(str(tree), sys.path)
+        self.assertNotIn(str(pending), sys.path)
+        self.assertNotIn(str(wheels), sys.path)
+        self.assertNotIn(str(requests), sys.path)
+        self.assertNotIn(str(cache), sys.path)
+
+        # One record per request, named by its hash, rather than one
+        # shared file two writers would fight over.
+        self.assertEqual(len(list(requests.iterdir())), 1)
+
+        # Unpacking happens inside the jail, so `versions` holds only
+        # finished trees and never a partial one.
+        self.assertEqual([p.name for p in versions.iterdir()],
+                         [venv.version_key(next(wheels.iterdir()))])
+
+    def test_unpack_moves_a_data_purelib_beside_the_modules(self) -> None:
+        """A wheel's `.data/purelib` contents land beside its modules.
+
+        This is the part of the wheel specification `unpack` took on
+        when it stopped using `pip install`; see Step 6.3.12.  Coverage
+        found it unexercised, because no wheel the suite built had a
+        `.data` tree at all.
+        """
+        # Build a wheel of the awkward shape, then unpack it by hand.
+        source: Path = self.root / "dataful" / "dataful.py"
+        source.parent.mkdir(parents=True, exist_ok=True)
+        source.write_text('"""d."""\n__version__ = "1.0.0"\n')
+        wheel: Path = build_wheel(source, "dataful", "1.0.0", "d",
+                                  self.root / "dataful-dist")
+        add_data_member(wheel, "purelib", "beside.py", "VALUE = 7\n")
+
+        # The member must come out one level up, not under `.data`.
+        venv: alt_venv.AltVEnv = alt_venv.AltVEnv(self.root / "dataful-cache")
+        staged: Path = Path(shutil.copy(wheel, venv.paths()[0]))
+        tree: Path = venv.unpack(staged)
+        self.assertTrue((tree / "beside.py").is_file())
+        self.assertEqual((tree / "beside.py").read_text(), "VALUE = 7\n")
+        self.assertEqual(list(tree.glob("*.data")), [])
+
+    def test_unpack_reuses_a_tree_that_is_already_there(self) -> None:
+        """Two requests resolving to one version share one tree.
+
+        `sprocket<2` and `sprocket==1.0.0` are different requests, so
+        both consult `pip`, but they resolve to the same version and
+        must not unpack it twice.
+        """
+        # Two requests, one tree, and the wheel kept exactly once.
+        cache: Path = self.root / "shared"
+        self.addCleanup(self.forget, str(cache), "sprocket")
+        venv: alt_venv.AltVEnv = alt_venv.AltVEnv(cache)
+        with unittest.mock.patch.dict(
+                os.environ, {"PIP_INDEX_URL": self.index_url}):
+            venv.install("sprocket<2")
+            del sys.modules["sprocket"]
+            venv.install("sprocket==1.0.0")
+        pending: Path
+        wheels: Path
+        versions: Path
+        requests: Path
+        pending, wheels, versions, requests = venv.paths()
+        self.assertEqual(len(list(versions.iterdir())), 1)
+        self.assertEqual([p.name for p in wheels.iterdir()],
+                         ["sprocket-1.0.0-py3-none-any.whl"])
+        self.assertEqual(list(pending.iterdir()), [])
+        self.assertEqual(len(venv.remember("sprocket<2") or []), 1)
+        self.assertEqual(len(venv.remember("sprocket==1.0.0") or []), 1)
+
+        # Two requests, so two records, both naming the one tree.
+        self.assertEqual(len(list(requests.iterdir())), 2)
+
+    def test_unpack_survives_losing_the_race(self) -> None:
+        """A tree appearing mid-unpack is accepted, not fought over.
+
+        Two programs starting at once both unpack, and the loser of the
+        rename has to take the winner's tree rather than raise.  This is
+        the concurrency answer of Step 6.3.9, and coverage found it
+        unexercised because one process never loses.
+        """
+        # Make the rename into place fail exactly as a lost race does.
+        cache: Path = self.root / "raced"
+        venv: alt_venv.AltVEnv = alt_venv.AltVEnv(cache)
+        source: Path = self.root / "raced-src" / "raced.py"
+        source.parent.mkdir(parents=True, exist_ok=True)
+        source.write_text('"""r."""\n__version__ = "1.0.0"\n')
+        wheel: Path = build_wheel(source, "raced", "1.0.0", "r",
+                                  self.root / "raced-dist")
+        staged: Path = Path(shutil.copy(wheel, venv.paths()[0]))
+        expected: Path = venv.paths()[2] / venv.version_key(staged)
+
+        # Only the staging rename fails; the `.data` moves must not.
+        genuine = Path.rename
+
+        def refuse(self: Path, target: Any) -> Path:
+            """Fail the one rename that puts a tree into place."""
+            if Path(target) == expected:
+                raise OSError("another process got there first")
+            return genuine(self, target)
+
+        with unittest.mock.patch.object(Path, "rename", refuse):
+            self.assertEqual(venv.unpack(staged), expected)
+
+    def test_a_version_tree_names_the_interpreter(self) -> None:
+        """A tree name carries version, interpreter and platform.
+
+        This is the `0nicav` fix: the same directory reached by a
+        different Python would otherwise load whatever the last one
+        left behind.
+        """
+        # The name is built from the wheel's own filename plus this
+        # interpreter, so it can be predicted exactly.
+        cache: Path = self.root / "named"
+        self.addCleanup(self.forget, str(cache), "widget")
+        venv: alt_venv.AltVEnv = alt_venv.AltVEnv(cache)
+        with unittest.mock.patch.dict(
+                os.environ, {"PIP_INDEX_URL": self.index_url}):
+            venv.install("widget")
+        expected: str = (f"widget-1.2.3-{sys.implementation.cache_tag}"
+                         f"-{sysconfig.get_platform()}")
+        self.assertEqual([p.name for p in venv.paths()[2].iterdir()],
+                         [expected])
+
+    def test_a_remembered_request_needs_no_pip(self) -> None:
+        """A request answered before costs a read, not an invocation.
+
+        Keyed on what was asked rather than on what it resolved to, so
+        no version expression is compared and no PEP 440 parser can
+        disagree with `pip`; see Step 6.3.4.
+        """
+        # First call fetches; second must not run `pip` at all.
+        cache: Path = self.root / "remembered"
+        self.addCleanup(self.forget, str(cache), "sprocket")
+        venv: alt_venv.AltVEnv = alt_venv.AltVEnv(cache)
+        calls: list[Sequence[str]] = []
+        genuine = subprocess.run
+
+        def counted(*args: Any, **kwargs: Any) -> Any:
+            """Record an invocation and then perform it."""
+            calls.append(args[0])
+            return genuine(*args, **kwargs)
+
+        with (unittest.mock.patch.dict(
+                  os.environ, {"PIP_INDEX_URL": self.index_url}),
+              unittest.mock.patch.object(alt_venv.subprocess, "run",
+                                         counted)):
+            first: ModuleType = venv.install("sprocket<2")
+            del sys.modules["sprocket"]
+            second: ModuleType = venv.install("sprocket<2")
+        self.assertEqual(first.__version__, "1.0.0")
+        self.assertEqual(second.__version__, "1.0.0")
+        self.assertEqual(len(calls), 1, calls)
+
+    def test_a_deleted_tree_counts_as_a_miss(self) -> None:
+        """Deleting the cache is safe, so a stale record is ignored."""
+        # The README promises the directory can be removed; a record
+        # pointing at a tree that is gone must not be believed.
+        cache: Path = self.root / "stale"
+        self.addCleanup(self.forget, str(cache), "widget")
+        venv: alt_venv.AltVEnv = alt_venv.AltVEnv(cache)
+        with unittest.mock.patch.dict(
+                os.environ, {"PIP_INDEX_URL": self.index_url}):
+            venv.install("widget")
+            self.assertIsNotNone(venv.remember("widget"))
+            shutil.rmtree(next(venv.paths()[2].iterdir()))
+            self.assertIsNone(venv.remember("widget"))
 
     def test_install_takes_the_newest_version_by_default(self) -> None:
         """With no constraint, `pip` picks the highest version published."""
@@ -1546,7 +1814,8 @@ class InstallTest(unittest.TestCase):
         self.assertEqual(
             self.install(target, [("gadgetlib", "python-gadget")]),
             "gadgetlib 4.5.6")
-        self.assertTrue((target / "gadgetlib.py").is_file())
+        self.assertTrue(any(p.name.startswith("python_gadget")
+                            for p in (target / "versions").iterdir()))
 
     def test_one_name_is_not_enough(self) -> None:
         """Asking by import name alone fails when the names differ."""

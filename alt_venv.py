@@ -34,11 +34,20 @@ SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 """
 # SPDX-License-Identifier: MIT-0
 
+# Every import below is in the standard library, and none of them comes
+# from a package a distribution can leave out.
+import hashlib
 import importlib
 import inspect
+import json
+import os
 import re
+import shutil
 import subprocess
 import sys
+import sysconfig
+import tempfile
+import zipfile
 from collections.abc import Sequence
 from pathlib import Path
 from types import ModuleType
@@ -222,11 +231,184 @@ class AltVEnv:
             return None
 
         # Move the module into a directory named after it, then drop it.
+        # Two programs starting at once both get this far, so the
+        # removal has to tolerate the other one having done it already.
         package: Path = module.parent / module.stem
         package.mkdir(exist_ok=True)
         (package / "__init__.py").write_bytes(module.read_bytes())
-        module.unlink()
+        module.unlink(missing_ok=True)
         return package
+
+    def paths(self) -> tuple[Path, Path, Path, Path]:
+        """Return the four cache directories, creating them if needed.
+
+        See Step 6.3.1 in `LOGBOOK.md`.  `pending` holds wheels that
+        have arrived and are not approved, `wheels` holds the approved
+        artifacts, `versions` holds one unpacked tree per resolved
+        distribution and version, and `requests` holds one small record
+        per request answered.  Only `versions` is ever put on
+        `sys.path`, which is what makes `pending` a jail rather than a
+        waiting room: a wheel is an inert zip, so nothing in it can
+        have run.
+
+        Returns:
+        * (`tuple[Path, Path, Path, Path]`): `pending`, `wheels`,
+          `versions`, `requests`.
+        """
+        # One call site creates all four, so they cannot drift apart.
+        made: list[Path] = []
+        leaf: str
+        for leaf in ("pending", "wheels", "versions", "requests"):
+            made.append(self.root / leaf)
+            made[-1].mkdir(parents=True, exist_ok=True)
+        return made[0], made[1], made[2], made[3]
+
+    def version_key(self, wheel: Path) -> str:
+        """Return the directory name an unpacked wheel belongs in.
+
+        The name carries the interpreter and the platform as well as the
+        distribution and version, which is what `0nicav` is about: the
+        same directory reached by a different Python would otherwise
+        load a shared object built for something else.  It cannot tell
+        musl from glibc, which is the blind spot of `2wtmifs`.
+
+        Arguments:
+        * `wheel` (`Path`):
+          A wheel, named as the specification requires:
+          `distribution-version-python-abi-platform.whl`.
+
+        Returns:
+        * (`str`): The directory name, such as
+          `sprocket-1.0.0-cpython-312-linux-x86_64`.
+        """
+        # The first two fields of a wheel name are what identify it.
+        fields: list[str] = wheel.stem.split("-")
+        tag: str = sys.implementation.cache_tag or "unknown"
+        return (f"{fields[0]}-{fields[1]}-{tag}-"
+                f"{sysconfig.get_platform()}")
+
+    def download(self, requirements: Sequence[str],
+                 argv: Sequence[str] = ()) -> list[Path]:
+        """Fetch wheels into the holding area without installing them.
+
+        `pip download` is used rather than `pip install`, so that
+        nothing is unpacked and nothing runs until the wheels have been
+        looked at.  Dependencies come too: the transitive closure is
+        exactly what somebody approving the set needs to see, and it is
+        the part nobody ever looks at.  `--only-binary :all:` refuses
+        source distributions, which would run `setup.py` at install
+        time where a wheel does not.
+
+        Each call downloads into a directory of its own under
+        `pending`, so that two programs starting at once cannot mix
+        their wheels together.
+
+        Arguments:
+        * `requirements` (`Sequence[str]`):
+          Requirements as `pip` spells them.
+        * `argv` (`Sequence[str]`):
+          Extra arguments for `pip download`.
+
+        Returns:
+        * (`list[Path]`): The wheels that arrived, in sorted order.
+
+        Raises:
+        * `ValueError`:
+          If `pip` exits 2, meaning the command line was wrong rather
+          than the index.
+        * `RuntimeError`:
+          If `pip` fails for any other reason, with its standard error
+          included.
+        """
+        # A directory per call, so concurrent downloads stay apart.
+        pending: Path = self.paths()[0]
+        holding: Path = Path(tempfile.mkdtemp(dir=pending))
+        done: subprocess.CompletedProcess[str] = subprocess.run(
+            [sys.executable, "-m", "pip", "download", "--quiet",
+             "--no-input", "--disable-pip-version-check",
+             "--only-binary", ":all:", *argv, "--dest", str(holding),
+             *requirements],
+            capture_output=True, text=True, check=False)
+        if done.returncode == 2:
+            raise ValueError(
+                f"pip rejected the command line: "
+                f"{done.stderr.strip() or 'pip gave no reason'}")
+        if done.returncode != 0:
+            raise RuntimeError(
+                f"could not fetch {', '.join(requirements)} into "
+                f"{holding}: "
+                f"{done.stderr.strip() or 'pip gave no reason'}")
+        return sorted(holding.glob("*.whl"))
+
+    def unpack(self, wheel: Path) -> Path:
+        """Unpack one wheel into a directory of its own, and keep it.
+
+        The unpacking happens beside the destination and is renamed
+        into place, which is atomic within one filesystem, so a second
+        program doing the same thing at the same time cannot see a half
+        written tree.  That is the `6.4` concurrency answer as a side
+        effect rather than a separate mechanism.
+
+        A wheel's `.data/purelib` and `.data/platlib` contents belong
+        beside the modules rather than under a `.data` directory, which
+        is the one part of the wheel specification this has to know;
+        see Step 6.3.12.
+
+        Arguments:
+        * `wheel` (`Path`):
+          A wheel in the holding area.
+
+        Returns:
+        * (`Path`): The directory now holding the unpacked tree, which
+          is where it already was if another call got there first.
+        """
+        # A tree that is already in place is left exactly as it is.
+        pending: Path
+        wheels: Path
+        versions: Path
+        pending, wheels, versions, _unused = self.paths()
+        target: Path = versions / self.version_key(wheel)
+        if target.is_dir():
+            return target
+
+        # Unpack inside the holding area rather than beside the
+        # destination, so that an incomplete tree is never inside
+        # `versions`, which is the directory `contains` and `sys.path`
+        # trust.  Both are under `root`, so the rename is still within
+        # one filesystem and still atomic.
+        staging: Path = Path(tempfile.mkdtemp(dir=pending,
+                                              prefix="unpacking-"))
+        archive: zipfile.ZipFile
+        with zipfile.ZipFile(wheel) as archive:
+            archive.extractall(staging)
+
+        # `.data/purelib` and `.data/platlib` belong one level up, and
+        # the directory they came from is then removed, so that an empty
+        # `.data` is not left sitting in an otherwise tidy tree.  A
+        # wheel's `scripts`, `headers` or `data` subdirectories are not
+        # handled and are deliberately left where they are; see Step
+        # 6.3.12 in `LOGBOOK.md`.
+        data: Path
+        sub: str
+        item: Path
+        for data in staging.glob("*.data"):
+            for sub in ("purelib", "platlib"):
+                if (data / sub).is_dir():
+                    for item in (data / sub).iterdir():
+                        item.rename(staging / item.name)
+                    (data / sub).rmdir()
+            if not any(data.iterdir()):
+                data.rmdir()
+        try:
+            staging.rename(target)
+        except OSError:
+            # Another call won the race, which is the right answer.
+            shutil.rmtree(staging, ignore_errors=True)
+            return target
+
+        # Keep the artifact, which is what Step 6.5 approves.
+        wheel.rename(wheels / wheel.name)
+        return target
 
     # What `install` accepts: a requirement as `pip` spells it, or a
     # `(import_name, requirement)` pair for the packages whose two
@@ -347,49 +529,130 @@ class AltVEnv:
             raise ValueError("repeated import name: "
                              + ", ".join(sorted(repeated)))
 
-        # Fetch only what is missing, in one `pip` for the whole set;
-        # see the `2apiia` issue in `LOGBOOK.md`.
-        missing: list[str] = [requirement for name, requirement
-                              in zip(names, asking, strict=True)
-                              if not self.contains(name)]
-        done: subprocess.CompletedProcess[str]
-        if missing:
-            done = subprocess.run(
-                [sys.executable, "-m", "pip", "install", "--quiet",
-                 "--no-input", "--disable-pip-version-check",
-                 *argv, "--target", str(self.root), *missing],
-                capture_output=True, text=True, check=False)
-            if done.returncode == 2:
-                raise ValueError(
-                    f"pip rejected the command line: "
-                    f"{done.stderr.strip() or 'pip gave no reason'}")
-            if done.returncode != 0:
-                raise RuntimeError(
-                    f"could not fetch {', '.join(missing)} into "
-                    f"{self.root}: "
-                    f"{done.stderr.strip() or 'pip gave no reason'}")
+        # A request answered before is answered from the cache, keyed by
+        # what was asked rather than by what it resolved to; see Step
+        # 6.3.4.  No version expression is compared, so no PEP 440
+        # parser is needed and none can disagree with `pip`.
+        request: str = " ".join(sorted(asking))
+        remembered: list[str] | None = self.remember(request)
+        trees: list[Path]
+        if remembered is None:
+            arrived: list[Path] = self.download(asking, argv)
+            trees = [self.unpack(wheel) for wheel in arrived]
+            self.remember(request, [tree.name for tree in trees])
 
-        # Put the cache on `sys.path` before importing out of it.
-        if str(self.root) not in sys.path:
-            sys.path.insert(0, str(self.root))
+            # The holding directory has served its purpose once every
+            # wheel in it is either kept or already unpacked.
+            holding: Path
+            for holding in {wheel.parent for wheel in arrived}:
+                shutil.rmtree(holding, ignore_errors=True)
+        else:
+            trees = [self.root / "versions" / key for key in remembered]
+
+        # Only the unpacked trees go on the path, never the holding
+        # area.  That one rule is the whole of the jail; see 6.3.1.
+        tree: Path
+        for tree in trees:
+            if str(tree) not in sys.path:
+                sys.path.insert(0, str(tree))
         importlib.invalidate_caches()
         modules: list[ModuleType] = [importlib.import_module(name)
                                      for name in names]
         return modules[0] if single else modules
 
-    def contains(self, package: str) -> bool:
-        """Report whether a package is already in the cache.
+    def remember(self, request: str,
+                 trees: list[str] | None = None) -> list[str] | None:
+        """Read or write what a request resolved to last time.
 
-        A package arrives either as a directory or as a single
-        module, so both spellings count.
+        One small file per request, named by the hash of the request, so
+        that two programs recording different requests never touch the
+        same path.  A single shared file would be read, modified and
+        written, and two overlapping writers would lose one of the two
+        entries; measured 2026-09-26, they do.
+
+        Writing goes to a temporary file and is moved into place with
+        `replace`, so a reader sees the old record or the new one and
+        never a partial one.  Two writers recording the *same* request
+        may legitimately disagree, if the index gained a release between
+        them; one wins, both trees exist, and the loser's becomes
+        garbage for Step 6.9 to cull.
+
+        The request is stored inside the file as well as hashed into its
+        name, so that a record can be read by a person and so that a
+        hash collision cannot be mistaken for a hit.  A remembered
+        request whose trees have since been deleted counts as a miss,
+        because the cache is meant to be safe to delete.
+
+        Arguments:
+        * `request` (`str`):
+          The requirements, sorted and joined, as `install` builds them.
+        * `trees` (`list[str] | None`):
+          The version directory names to record.  `None`, the default,
+          reads instead of writing.
+
+        Returns:
+        * (`list[str] | None`): What the request resolved to, or `None`
+          when it is unknown, when its trees are gone, or when this call
+          was a write.
+        """
+        # The file name is the hash; the request itself is inside it.
+        requests: Path = self.paths()[3]
+        digest: str = hashlib.sha256(request.encode()).hexdigest()
+        record: Path = requests / f"{digest}.json"
+
+        # Writing: a temporary file moved into place cannot be seen
+        # half written, and cannot lose anybody else's record.
+        handle: int
+        temporary: str
+        if trees is not None:
+            handle, temporary = tempfile.mkstemp(dir=requests)
+            with os.fdopen(handle, "w") as opened:
+                json.dump({"request": request, "trees": trees}, opened,
+                          indent=1, sort_keys=True)
+            Path(temporary).replace(record)
+            return None
+
+        # Reading: an absent or unreadable record means nothing is known.
+        known: dict[str, object]
+        try:
+            known = json.loads(record.read_text())
+        except (OSError, ValueError):
+            return None
+
+        # A record counts only if it is this request and its trees are
+        # all still there.
+        found: object = known.get("trees")
+        versions: Path = self.paths()[2]
+        if known.get("request") != request or not isinstance(found, list):
+            return None
+        if not all(isinstance(key, str) and (versions / key).is_dir()
+                   for key in found):
+            return None
+        return [str(key) for key in found]
+
+    def contains(self, package: str) -> bool:
+        """Report whether the cache holds an importable package.
+
+        Every unpacked tree under `versions` is searched, because there
+        is one per distribution and version and a package may sit in
+        any of them.  A package arrives either as a directory or as a
+        single module, so both spellings count.
+
+        Nothing under `pending` is looked at.  A wheel there has not
+        been approved, so as far as the rest of the world is concerned
+        it is not in the cache at all; see Step 6.3.1 in `LOGBOOK.md`.
 
         Arguments:
         * `package` (`str`):
           The import name to look for.
 
         Returns:
-        * (`bool`): True if the cache already holds it.
+        * (`bool`): True if some approved tree holds it.
         """
-        # Either spelling means there is nothing to fetch.
-        return ((self.root / package).is_dir()
-                or (self.root / f"{package}.py").is_file())
+        # Either spelling, in any version directory, counts as present.
+        tree: Path
+        for tree in self.paths()[2].iterdir():
+            if ((tree / package).is_dir()
+                    or (tree / f"{package}.py").is_file()):
+                return True
+        return False
