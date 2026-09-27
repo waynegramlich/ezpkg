@@ -635,7 +635,9 @@ under its own separate version control, and then deleted.
 
 The primary purpose of this task is to do end-to-end testing of the bootstrap
 code with a real package server.  A proposed list of steps list belows:
+
 * Step 5.1: Select a package server.  This is a research task.  No coding.
+
 * Step 5.2: Serve the existing tree over HTTP.  A `ThreadingHTTPServer`
   bound to `127.0.0.1` on port 0, so that the operating system assigns
   the port and the test reads it back rather than colliding with a stale
@@ -645,18 +647,22 @@ code with a real package server.  A proposed list of steps list belows:
   that pass today over `file://` -- the same assertions, a different
   transport.  Measured 2026-09-25: `pip` reaches a plain HTTP loopback
   index with no `--trusted-host` and no TLS.
+
 * Step 5.3: Settle cases 3 and 12.  They fetch
   `https://pypi.org/pypi/{PACKAGE}/json` with bare `urllib`, which knows
   nothing of `PIP_INDEX_URL`, so they are the one real gap: either serve
   that JSON shape from the same server, or teach both cases the simple
   API instead.
+
 * Step 5.4: The failure cases carried over from Task 3.  A truncated
   wheel, a missing `index.html`, and a 500 from the index.  All three are
   cheap once a server exists, because a server can be told to misbehave
   where a directory cannot.
+
 * Step 5.5: Run every `bootstrap.py` case against the server end to end,
   asserting that `alt_venv` lands in the cache and imports.  This is
   the test the task exists for.
+
 * Step 5.6: TLS, which nothing has exercised yet.  Two questions: does a
   case refuse a certificate it cannot verify, and does it succeed once
   the certificate is trusted?  `pip` reads `PIP_CERT` and `urllib` reads
@@ -664,6 +670,7 @@ code with a real package server.  A proposed list of steps list belows:
   This does not settle the `ca-certificates` dependency from Task 3,
   which is about trusting the public authorities well enough to reach
   the real PyPI; a private certificate tests the opposite.
+
 * Step 5.7: Test suite coverage, measured with the standard library
   `trace` rather than `coverage`, so that the suite needs nothing
   installed.
@@ -1025,6 +1032,7 @@ expected every time the order changes, and is Claude's job.
     would be shorter and is rejected: the bootstrap sits at the top of
     somebody else's program and must not leave a global hook mangling
     their tracebacks.
+
 * Step 6.2: Several packages in one call, and what to do about bad
   requirements.  `install` takes one requirement or a list, costs one
   `pip` invocation for the set so that `pip` resolves them together,
@@ -1063,6 +1071,7 @@ expected every time the order changes, and is Claude's job.
     and is surfaced with pip's own words.  The one discrimination that
     really matters, first fetch versus staleness check in 6.3.8, comes
     from whether the cache is populated, which is known locally.
+
 * Step 6.3: A versioned cache built out of the wheels themselves.
   (DONE 2026-09-26.)  This is the fix for `0nicav`, priority 0 because
   the cache path carries no version, interpreter or platform, so the
@@ -1168,6 +1177,7 @@ expected every time the order changes, and is Claude's job.
     `3pfaibne`.  For a pure Python wheel it is the `purelib` move and
     little else, but it is a real scope increase and should be entered
     knowingly.  Cases 3 and 12 already do this much.
+
 * Step 6.4: Concurrent installs.  (DONE 2026-09-26.)  Mostly answered by
   Step 6.3's
   construction rather than by a mechanism of its own, because nothing
@@ -1209,6 +1219,7 @@ expected every time the order changes, and is Claude's job.
     test that passes proves nothing until the fix it guards has been
     removed and the test has been seen to fail.  Timing tests are
     especially good at passing for no reason.
+
 * Step 6.5: Coverage of child processes.  (DONE 2026-09-26.)  Most of
   what this suite does happens in children, and `trace` follows
   neither those nor threads, so `bootstrap.py` read as 7% however
@@ -1287,7 +1298,7 @@ expected every time the order changes, and is Claude's job.
     seventeen minutes with `--children` on `COMPLETE`, and the hook is
     off unless asked for.
 
-* Step 6.6: Security, and the Scavenger Hunt.  The architecture is in
+* Step 6.6: Security, and who approves what.  The architecture is in
   `README.md`, written as the page a stranger lands on: unapproved
   packages are downloaded to a holding area, the user is shown what
   arrived and approves it, and only then is anything installed and
@@ -1334,18 +1345,43 @@ expected every time the order changes, and is Claude's job.
     and the title paste is the part that buys least.  The cost lands on
     the person who did not choose the dependencies, and `uv run` asks
     them for nothing.
-  * 6.6.9 - The approval store is a local allowlist, so anything
-    running as the user can pre-approve itself.  Probably acceptable,
-    since malware with write access to a home directory has better
-    options, but it should be a stated decision rather than an
-    oversight.
-  * 6.6.10 - Typosquatting lands in the gap between the distribution
-    name and the import name in `install`, because `pip install` takes
-    the name nobody reads.  PEP 503 indexes publish `#sha256=`
-    fragments, so hashes can be pinned as well.
+  * 6.6.9 - Answered 2026-09-26, and the answer is a boundary rather
+    than a defence.  The approvals live beside the program, as `prog.py`
+    to `prog.altvenv`, and anybody who can write that file can edit
+    `prog.py` itself, so pre-approving something is strictly less work
+    than simply changing the program.  Nothing here defends against
+    somebody who already has write access to the program; saying so is
+    the decision.
+  * 6.6.10 - Answered 2026-09-26: the prompt does not defend against
+    typosquatting and never could.  `reqeusts` and `requests` have names
+    of the same shape, summaries that are copies of each other, and
+    project pages that look alike, so nothing shown to somebody at run
+    time distinguishes them.  The **approvals file** is the defence: the
+    author, who chose the dependency and can tell the two apart, got the
+    name right once, and the SHA-256 pins that exact artifact
+    thereafter.  This is why approval belongs to the author and not to
+    whoever happens to run the program.
+
+  * 6.6.12 - The cache owns the package, not the program.  Wayne's
+    sentence, 2026-09-26, and it is the reason the warm path neither
+    asks nor verifies: a tree in `versions/` may have arrived on behalf
+    of some other program entirely, so no one program's approvals file
+    is the authority over it.  Verification therefore belongs to the
+    moment of fetching, which is also the only moment anything is asked.
+
+  * 6.6.13 - What gets asked, settled 2026-09-26.  Nothing is said and
+    nothing is asked unless at least one wheel has to be downloaded.
+    When anything does, the whole set is shown, including packages the
+    cache already holds, because the request is keyed on the entire
+    requirement set and a set nobody has vetted has not been vetted.
+    Measured: a second program sharing a cache and asking for `needy`
+    is shown `needy` as asked for and `widget` as having come along,
+    although `widget` was already there from the first program.  The
+    listing therefore appears once per cache, not once per run.
   * 6.6.11 - `README.md` still has `## Security Issues of Executing
     Unvetted Code` marked TBD, and it is the section the whole feature
     rests on.  The sub-items above are its outline.
+
 * Step 6.7: Find the bootstrap, and notice when it is stale.  Python has
   a great many introspection facilities, and the direct one is
   `sys.modules["__main__"].__file__` rather than walking frames with
@@ -1357,8 +1393,24 @@ expected every time the order changes, and is Claude's job.
   case body and keep a table of known hashes here.  A hash in the table
   but not the current one is stale and can be reported precisely; an
   unknown hash is somebody's edited copy and should be passed over in
-  silence.  What to do about a stale bootstrap -- warn, refuse, or offer
-  to rewrite the file -- is a separate decision.
+  silence.
+  * 6.7.1 - One locator, three readers.  Three steps need the main
+    program's path and its source text: this one, to find the pasted
+    case; Step 6.9, to find the requirements block; and Step 6.6, which
+    already uses the path alone to place `prog.altvenv`.  So one small
+    thing -- the program's path and text, `None` for the REPL,
+    `python3 -c` and a frozen interpreter -- and one place where those
+    awkward cases are got right and tested.
+  * 6.7.2 - Nobody is messaged.  There is no channel to an author at run
+    time, only whoever started the program, and a staleness report is
+    useful to an author and noise to a recipient who cannot act on it.
+    So the author asks rather than being told: silent by default, and a
+    report on request, in the same shape as `ALT_VENV_APPROVE=write`.
+    That removes the question of how to reach an author entirely.
+  * 6.7.3 - What to do about a stale bootstrap -- report it, refuse to
+    run, or offer to rewrite the file -- is still open, but 6.7.2 makes
+    reporting the obvious default.
+
 * Step 6.8: Messages.  When should anything be said: on creating the
   directory, on each download, on a stale bootstrap?  One constraint is
   hard.  A library must never write to standard output, because the
@@ -1372,12 +1424,31 @@ expected every time the order changes, and is Claude's job.
   keeps the `raise` on one source line at 73 columns, where inlining it
   is 121 and wrapping it costs two, so `SHARED_LINES` would go from 7
   to 8.  Not done, because the URL depends on the repository name.
+
 * Step 6.9: Declared requirements, which is `2hsrpbd`.  Read the
   calling script's PEP 723 `# /// script` block instead of a package
-  name written into the bootstrap.  It builds on Step 6.2, and it
-  makes the same file work under `uv run` for nothing, which is worth a
-  great deal given that prior art is why this project has to justify
-  itself at all.
+  name written into the bootstrap.  It builds on Step 6.2, and it makes
+  the same file work under `uv run` for nothing, which is worth a great
+  deal given that prior art is why this project has to justify itself at
+  all.
+  * 6.9.1 - PEP 723 rather than a format of our own, decided
+    2026-09-26.  Requirements do belong in the program, which was the
+    proposal; the only question was the syntax, and PEP 723 is final,
+    is what `uv` and `pipx` already read, and costs nothing to parse.
+  * 6.9.2 - Not the module docstring, for two measured reasons.  `-OO`
+    strips docstrings: `python3 -OO` printed `doc is None` where
+    `python3` printed the text, so requirements read from `__doc__`
+    would vanish under optimisation, exactly as the `README.md` text
+    already can.  And a machine readable block in a docstring turns up
+    in `help(module)`, which is why the PEP uses comments.  Scanning the
+    source text sidesteps the first but not the second.
+  * 6.9.3 - Parsing costs no dependency.  `tomllib` has been in the
+    standard library since 3.11 and is in `libpython3.12-stdlib` here,
+    not in a separable package.  It does raise the floor from 3.10,
+    which `X | Y` and `match` already set, to 3.11; worth saying out
+    loud before it is discovered.
+  * 6.9.4 - Wants the shared locator described in 6.7.1.
+
 * Step 6.10: Garbage collection.  Cull packages that have not been used
   for a while.  Not by access time: nearly every Linux filesystem
   mounts `relatime`, so `atime` updates at most once a day and not on
@@ -1393,20 +1464,24 @@ expected every time the order changes, and is Claude's job.
   whole of the fix; the `unpacking-` prefix is there to make them
   identifiable.  A tree in `versions/` that no request record names any
   longer is the third kind, and arrives from Step 6.3.13.
+
 * Step 6.11: `.pth` files, which is `3pfaibne`.  `install` uses
   `sys.path.insert`, which never executes a `.pth` file, so a package
   relying on one is quietly half installed.  `site.addsitedir` is the
   experiment.
+
 * Step 6.12: The `README.md` text.  What it should say needs discussing,
   and it has to describe the versioned layout once Step 6.3 lands.
   Note the current behaviour: it is rewritten on every construction
   rather than only when absent, which makes writing a file a side
   effect of making an object and will surprise somebody.
+
 * Step 6.13: A fetch from the real PyPI, carried over from Task 5.  It is
   the only thing that can settle Task 3's conclusion that a bootstrap
   needs `python3-pip` plus a TLS trust store, since that claim is about
   trusting the public certificate authorities and a private certificate
   tests the opposite.  It is also just `install` against the real index.
+
 * Step 6.14: And more.  A place holder for additional steps.
 
 ### Step 6.1: Error on a failed fetch  (DONE 2026-09-26)
@@ -1467,6 +1542,74 @@ spends one `pip` invocation on the set.
   `sprocket!=2.0.0` take 1.0.0, `sprocket>=2` takes 2.0.0, and a bare
   `sprocket` takes the newest.
 * 48 tests, up from 39 at the start of the step.
+
+### Step 6.6: Security, and who approves what
+
+The Scavenger Hunt was designed and then discarded.  What replaced it
+rests on one observation: the person who runs somebody else's program
+cannot judge whether `charset-normalizer 3.3.2` belongs there, so any
+question put to them is a rubber stamp.  The **author** chose the
+dependencies and can tell `requests` from `reqeusts`, so the author
+approves, once, and the file travels with the program.
+
+* The author runs with `ALT_VENV_APPROVE=write` and gets
+  `prog.altvenv` beside `prog.py`: one line per wheel, its name and its
+  SHA-256, sorted so that a change is a small diff.  They commit it.
+  `skip` neither records nor checks, for an author still deciding.
+* A recipient with that file has it verified, silently, and a mismatch
+  refuses before anything is unpacked.  A recipient without one is told
+  what arrived and asked once, `[y/N/?]`, where `?` describes each wheel
+  and does not count against the patience meant for typos.
+* Nothing from the index is printed as fact.  The origin, the size and
+  the digest are ours; a package's `Summary` is prefixed `it says:` and
+  stripped of everything unprintable, because it is written by the same
+  person who would write a typosquat's.
+
+Four things were learned the hard way, three of them by a test failing
+rather than by thinking.
+
+1. **`open("/dev/tty", "r+")` does not work**, and would have failed
+   silently.  Against a pseudoterminal it raises
+   `UnsupportedOperation: File or stream is not seekable`, because
+   buffered read-write text mode wants to seek and a character device
+   cannot.  That exception is a subclass of `OSError`, so the
+   `except OSError` meant for "there is no terminal" would have caught
+   it, reported no terminal, and **never asked anybody anything,
+   anywhere**, while every test that did not use a real terminal passed.
+   Two handles, one for reading and one for writing.
+2. **A prompt can only be tested with a pseudoterminal**, and only
+   `os.login_tty` makes the slave the child's *controlling* terminal,
+   which is what `/dev/tty` resolves to.  Inheriting the descriptor is
+   not enough: a child started with `start_new_session` alone reports
+   `No such device or address`.  `login_tty` also puts the child's own
+   output on the terminal, so nothing comes back through pipes.  It runs
+   in a small launcher after `exec` rather than in `preexec_fn`, which
+   `ruff` flagged and which would risk deadlocking a process that has
+   threads -- and this suite has a server thread.
+3. **The first cut only verified on a cache miss**, so an author whose
+   cache was warm could never regenerate the approvals.  The request
+   record now names the wheels as well as the trees, and `write` works
+   from a warm cache.  Verification still happens only when something is
+   fetched, for the reason in 6.6.12.
+4. **`came along` had never executed.**  Tracing child processes found
+   it: no wheel the suite built had a dependency, so `pip` never pulled
+   anything along and the distinction that 6.6.4 rests on was
+   unreachable.  `build_wheel` takes `requires` now, the index publishes
+   `needy`, which needs `widget`, and two tests watch the two kinds
+   being told apart.  The same shape of gap as the `.data` tree and the
+   wheel tag matcher: fixtures too simple to reach the interesting
+   branch.
+
+82 tests, up from 62 at the start of the step.  `alt_venv.py` reaches
+97% with child processes traced, and 74% without, which is the
+measurement being blind rather than the code being untested: every
+approval test is a child program.
+
+Not done, and deliberately: `README.md`.  It still describes the
+Scavenger Hunt, still has `## Security Issues of Executing Unvetted
+Code` marked TBD, and carries the threat model of 6.6.1 and the
+habituation answer of 6.6.7 for an actual reader.  That is 6.6.11, and
+the step is not finished until it is written.
 
 ### Task 6 Summary
 

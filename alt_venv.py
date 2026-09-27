@@ -53,6 +53,11 @@ from pathlib import Path
 from types import ModuleType
 from typing import IO, overload
 
+# How many times `AltVEnv.consent` will put the same question, when the
+# answer is neither yes nor no.  Bounded, so that a terminal feeding
+# nonsense cannot keep a program alive indefinitely.
+ATTEMPTS: int = 3
+
 # The one place the version is written down.  `bootstrap.py`
 # prints it after importing, and the test suite stamps it into
 # the wheel it builds.
@@ -262,6 +267,369 @@ class AltVEnv:
             made.append(self.root / leaf)
             made[-1].mkdir(parents=True, exist_ok=True)
         return made[0], made[1], made[2], made[3]
+
+    def approvals(self) -> Path | None:
+        """Return the file that records what the author approved.
+
+        The file travels with the program rather than with the cache,
+        because the judgement it records is the author's: they chose the
+        dependencies and can tell `requests` from `reqeusts`, where the
+        person who merely ran the program cannot.  So it sits beside the
+        main program, as `prog.py` to `prog.altvenv`, and is meant to be
+        committed next to it.
+
+        A program with no file of its own -- the interpreter prompt,
+        `python3 -c`, a frozen executable -- has nowhere to keep one and
+        gets no verification.  See Step 6.6 in `LOGBOOK.md`.
+
+        Returns:
+        * (`Path | None`): Where the approvals are, or `None` when this
+          program has no file to put them beside.
+        """
+        # The main program is what the approvals belong to.
+        main: ModuleType | None = sys.modules.get("__main__")
+        where: str | None = getattr(main, "__file__", None)
+        if where is None:
+            return None
+        return Path(where).resolve().with_suffix(".altvenv")
+
+    def approved(self) -> dict[str, str] | None:
+        """Read the approvals, as a mapping from wheel name to digest.
+
+        Returns:
+        * (`dict[str, str] | None`): What was approved, or `None` when
+          there is no approvals file, which means nothing is verified.
+        """
+        # An unreadable file is treated as absent: nothing is verified,
+        # and `install` says as much rather than failing obscurely.
+        record: Path | None = self.approvals()
+        if record is None or not record.is_file():
+            return None
+        found: dict[str, str] = {}
+        line: str
+        for line in record.read_text().splitlines():
+            if line.startswith("#") or not line.strip():
+                continue
+            fields: list[str] = line.split()
+            if len(fields) == 2:
+                found[fields[0]] = fields[1]
+        return found
+
+    def approve(self, wheels: Sequence[Path]) -> Path | None:
+        """Record the wheels that arrived as approved.
+
+        Called when `ALT_VENV_APPROVE` is `write`, which is how an
+        author regenerates the file after changing what the program
+        needs.  Sorted by name, so that a change shows up as a small
+        diff in whatever the program is committed to.
+
+        Arguments:
+        * `wheels` (`Sequence[Path]`):
+          The wheels to record.
+
+        Returns:
+        * (`Path | None`): The file written, or `None` when this program
+          has nowhere to keep one.
+        """
+        # One line per wheel, name then digest, sorted for the diff.
+        record: Path | None = self.approvals()
+        if record is None:
+            return None
+        rows: list[str] = sorted(f"{wheel.name} {self.digest(wheel)}"
+                                 for wheel in wheels)
+        record.write_text(
+            "# Wheels this program has approved, by SHA-256.  Regenerate\n"
+            "# with ALT_VENV_APPROVE=write after changing what it needs.\n"
+            + "".join(f"{row}\n" for row in rows))
+        return record
+
+    def summary(self, wheel: Path) -> str:
+        """Return what a wheel says about itself, in one safe line.
+
+        Read from the `METADATA` inside the archive, so no network call
+        and no unpacking: the wheel is still an inert zip when this runs.
+
+        The text is written by whoever uploaded the package, which is the
+        adversary in the case this is meant to help with, so a
+        typosquat's summary reads exactly like the real one.  It is
+        offered as description, never as evidence, and everything
+        unprintable is removed: a summary may contain escape sequences,
+        and printing those beside a question lets them rewrite the
+        question.
+
+        Arguments:
+        * `wheel` (`Path`):
+          A wheel to look inside.
+
+        Returns:
+        * (`str`): The summary, or an empty string if it has none.
+        """
+        # `Summary` is one header among many, and nominally one line.
+        archive: zipfile.ZipFile
+        text: str = ""
+        try:
+            with zipfile.ZipFile(wheel) as archive:
+                name: str = next(one for one in archive.namelist()
+                                 if one.endswith(".dist-info/METADATA"))
+                text = archive.read(name).decode("utf8", "replace")
+        except (OSError, KeyError, StopIteration, zipfile.BadZipFile):
+            return ""
+        line: str
+        for line in text.splitlines():
+            if line.startswith("Summary:"):
+                return "".join(one for one in line[8:].strip()
+                               if one.isprintable())[:60]
+        return ""
+
+    def details(self, wheels: Sequence[Path],
+                asking: Sequence[str]) -> list[str]:
+        """Describe each wheel, for somebody who typed `?`.
+
+        Separates what was observed from what the package claims about
+        itself.  The size and the digest are ours; the origin is the
+        index we were pointed at; the summary is the package's own words.
+
+        Arguments:
+        * `wheels` (`Sequence[Path]`):
+          The wheels that arrived.
+        * `asking` (`Sequence[str]`):
+          The requirements that were asked for.
+
+        Returns:
+        * (`list[str]`): Lines to show, without trailing newlines.
+        """
+        # Where these came from is a fact; what they say is a claim.
+        origin: str = os.environ.get("PIP_INDEX_URL", "the default index")
+        wanted: set[str] = {requirement_name(one).replace("-", "_").lower()
+                            for one in asking}
+        lines: list[str] = [f"fetched from {origin}"]
+        wheel: Path
+        for wheel in sorted(wheels):
+            fields: list[str] = wheel.stem.split("-")
+            asked: str = ("asked for" if fields[0].lower() in wanted
+                          else "came along")
+            told: str = self.summary(wheel) or "(says nothing about itself)"
+            lines.append(f"  {fields[0]} {fields[1]}, {asked}, "
+                         f"{wheel.stat().st_size / 1024:.1f} KB")
+            lines.append(f"    it says: {told}")
+            lines.append(f"    sha256:  {self.digest(wheel)}")
+        return lines
+
+    def terminal(self) -> tuple[IO[str], IO[str]] | None:
+        """Return the controlling terminal, or `None` if there is none.
+
+        `/dev/tty` rather than `sys.stdin`, because a program used as a
+        filter has its standard input bound to a pipe and reading a line
+        from it would silently eat the program's own data.  This is how
+        `ssh` and `sudo` ask for a password.
+
+        Two handles rather than one opened `r+`.  Measured 2026-09-26
+        against a pseudoterminal: `r+` raises
+        `UnsupportedOperation: File or stream is not seekable`, because
+        buffered read-write text mode wants to seek and a character
+        device cannot.  That exception is a subclass of `OSError`, so a
+        single handle plus `except OSError` would have caught it and
+        reported no terminal, silently never asking anybody anything.
+
+        Opening it is the test.  There is often no controlling terminal
+        at all -- under `cron`, a service manager, a build, or a
+        double-clicked launcher -- and then there is nobody to ask.
+
+        Returns:
+        * (`tuple[IO[str], IO[str]] | None`): The terminal open for
+          writing and for reading, or `None` when there is not one.
+        """
+        # Whether it opens is the whole of the question.
+        try:
+            return (Path("/dev/tty").open("w", encoding="utf-8"),
+                    Path("/dev/tty").open("r", encoding="utf-8"))
+        except OSError:
+            return None
+
+    def consent(self, wheels: Sequence[Path],
+                asking: Sequence[str]) -> bool:
+        """Ask once whether to install what arrived.
+
+        One question, not one per package: the count is the part anybody
+        can judge.  Somebody who cannot say whether
+        `charset-normalizer 3.3.2` belongs can still say that seven
+        packages is a surprise when they asked for one.
+
+        `y` or `yes` goes ahead; `n`, `no` or a bare newline declines,
+        because `[y/N/?]` says the default is no; `?` describes each
+        wheel and asks again; anything else is taken for a typo and the
+        question is put again, up to `ATTEMPTS` typos.  Asking for the
+        detail is not a typo and does not count, so curiosity is never
+        punished.  A terminal that has gone away reads as empty, which
+        declines at once rather than being asked again forever.
+
+        With no terminal there is nobody to ask, and the answer is yes:
+        the list has already been printed, and failing instead would
+        break every program run from `cron` or a build on the first day.
+        A guarantee rather than a notification is what the approvals file
+        is for; see Step 6.6.
+
+        Arguments:
+        * `wheels` (`Sequence[Path]`):
+          The wheels that arrived.
+        * `asking` (`Sequence[str]`):
+          The requirements that were asked for.
+
+        Returns:
+        * (`bool`): True to go ahead.
+        """
+        # No terminal, no question.
+        opened: tuple[IO[str], IO[str]] | None = self.terminal()
+        if opened is None:
+            return True
+
+        # `y` goes ahead, `n` or an empty line declines, `?` says more
+        # and asks again, and anything else is a typo worth asking about
+        # again.  Only typos are counted, so that reading the detail can
+        # never use up the patience meant for mistakes.
+        answer: str
+        typos: int = 0
+        writer: IO[str]
+        reader: IO[str]
+        writer, reader = opened
+        with writer, reader:
+            while typos < ATTEMPTS:
+                writer.write(f"{len(asking)} requested, {len(wheels)} to "
+                             f"install into {self.root}; "
+                             f"go ahead? [y/N/?] ")
+                writer.flush()
+                answer = reader.readline()
+
+                # An empty read is the terminal going away, not an
+                # answer, and asking again would never end.
+                if not answer:
+                    return False
+                answer = answer.strip().lower()
+                if answer in ("y", "yes"):
+                    return True
+                if answer in ("", "n", "no"):
+                    return False
+                if answer == "?":
+                    writer.write("\n" + "\n".join(
+                        self.details(wheels, asking)) + "\n")
+                    continue
+                typos += 1
+                writer.write("Please answer y, n, or ? for more.\n")
+        return False
+
+    def gate(self, wheels: Sequence[Path],
+             asking: Sequence[str] = ()) -> None:
+        """Write, skip, enforce or ask, as the environment says.
+
+        `ALT_VENV_APPROVE` unset enforces the approvals or asks when
+        there are none, `write` records what arrived instead, and `skip`
+        does neither, which is for an author still deciding what the
+        program needs.
+
+        An author running `write` or `skip` is present and deliberate,
+        so neither asks anything.  Otherwise, approvals decide: if the
+        author approved this set, it is verified in silence, and if there
+        are no approvals at all the person who started the program is
+        asked once.  The author's judgement replaces the recipient's
+        prompt rather than being added to it.
+
+        Arguments:
+        * `wheels` (`Sequence[Path]`):
+          The wheels to record or to check.
+        * `asking` (`Sequence[str]`):
+          The requirements that were asked for, for the question.
+
+        Raises:
+        * `RuntimeError`:
+          Through `verify`, if a wheel is unapproved or altered, or if
+          the person asked declines.
+        """
+        # One place decides, so the cold and warm paths cannot diverge.
+        mode: str = os.environ.get("ALT_VENV_APPROVE", "").lower()
+        if mode == "write":
+            print(f"approvals written to {self.approve(wheels)}",
+                  file=sys.stderr)
+            return
+        if mode == "skip":
+            return
+        if self.approved() is not None:
+            self.verify(wheels)
+            return
+        if not self.consent(wheels, asking):
+            raise RuntimeError(
+                f"declined: nothing was installed into {self.root}")
+
+    def verify(self, wheels: Sequence[Path]) -> None:
+        """Refuse anything the author did not approve.
+
+        Checked after the wheels have arrived and **before** any of them
+        is unpacked, which is what makes the refusal meaningful: a wheel
+        is an inert zip, so nothing in it has run at the moment it is
+        turned away.
+
+        Arguments:
+        * `wheels` (`Sequence[Path]`):
+          The wheels that arrived.
+
+        Raises:
+        * `RuntimeError`:
+          If a wheel is absent from the approvals, or present with a
+          different digest.  The message names the file to regenerate,
+          because that is the only sensible next step.
+        """
+        # No approvals file means nothing to check against.
+        expected: dict[str, str] | None = self.approved()
+        if expected is None:
+            return
+        wheel: Path
+        actual: str
+        for wheel in wheels:
+            actual = self.digest(wheel)
+            if wheel.name not in expected:
+                raise RuntimeError(
+                    f"{wheel.name} is not approved in "
+                    f"{self.approvals()}; regenerate it with "
+                    f"ALT_VENV_APPROVE=write if it should be")
+            if expected[wheel.name] != actual:
+                raise RuntimeError(
+                    f"{wheel.name} does not match its approval in "
+                    f"{self.approvals()}: expected "
+                    f"{expected[wheel.name]}, got {actual}")
+
+    def announce(self, wheels: Sequence[Path],
+                 asking: Sequence[str]) -> None:
+        """Say what arrived, separating what was asked for from the rest.
+
+        Written to standard error, never to standard output, because a
+        library that writes to standard output corrupts the output of
+        any program whose own output is piped or parsed.
+
+        Nothing from the index is printed: not a summary, not a page
+        title.  Those are written by whoever uploaded the package, so a
+        typosquat's read exactly like the real thing, and index text can
+        carry escape sequences that rewrite the terminal.  Only the
+        filename, which the wheel specification fixes, and our own
+        digest of it.
+
+        Arguments:
+        * `wheels` (`Sequence[Path]`):
+          The wheels that arrived.
+        * `asking` (`Sequence[str]`):
+          The requirements that were asked for.
+        """
+        # Which of these were asked for, and which merely came along?
+        wanted: set[str] = {requirement_name(one).replace("-", "_").lower()
+                            for one in asking}
+        lines: list[str] = []
+        wheel: Path
+        for wheel in sorted(wheels):
+            fields: list[str] = wheel.stem.split("-")
+            asked: str = ("asked for" if fields[0].lower() in wanted
+                          else "came along")
+            lines.append(f"  {fields[0]} {fields[1]}  {asked}")
+        print(f"{len(asking)} requested, {len(wheels)} downloaded into "
+              f"{self.root}:", file=sys.stderr)
+        print("\n".join(lines), file=sys.stderr)
 
     def digest(self, wheel: Path) -> str:
         """Return the SHA-256 of a wheel, as hexadecimal.
@@ -482,6 +850,14 @@ class AltVEnv:
         leaves its logging handlers on the root logger of whatever
         imports it.
 
+        `ALT_VENV_APPROVE` decides what happens to what arrives.  Unset,
+        each wheel is checked against the approvals file beside the
+        program and a mismatch is refused.  `write` records what arrived
+        instead of checking it, which is how an author regenerates the
+        file.  `skip` checks nothing, which is for an author still
+        deciding what the program needs.  A program with no approvals
+        file is told what arrived and not asked about it; see Step 6.6.
+
         A requirement is spelled the way `pip` spells it, so a version
         constraint needs no special support:
         `install(["coverage", "pytest>=7.0,<8"])`.  The one thing a
@@ -568,12 +944,21 @@ class AltVEnv:
         # 6.3.4.  No version expression is compared, so no PEP 440
         # parser is needed and none can disagree with `pip`.
         request: str = " ".join(sorted(asking))
-        remembered: list[str] | None = self.remember(request)
+        remembered: tuple[list[str], list[str]] | None = (
+            self.remember(request))
         trees: list[Path]
         if remembered is None:
             arrived: list[Path] = self.download(asking, argv)
+
+            # Say what turned up, then check it against what the author
+            # approved, and only then unpack.  Nothing in a wheel has
+            # run at the moment it is refused; see Step 6.6.
+            self.announce(arrived, asking)
+            self.gate(arrived, asking)
+
             trees = [self.unpack(wheel) for wheel in arrived]
-            self.remember(request, [tree.name for tree in trees])
+            self.remember(request, [tree.name for tree in trees],
+                          [wheel.name for wheel in arrived])
 
             # The holding directory has served its purpose once every
             # wheel in it is either kept or already unpacked.
@@ -581,7 +966,17 @@ class AltVEnv:
             for holding in {wheel.parent for wheel in arrived}:
                 shutil.rmtree(holding, ignore_errors=True)
         else:
-            trees = [self.root / "versions" / key for key in remembered]
+            trees = [self.paths()[2] / key for key in remembered[0]]
+
+            # A warm cache fetches nothing, so there is nothing new to
+            # approve or refuse.  Verification belongs to the moment of
+            # fetching: somebody who can rewrite the cache can rewrite
+            # the program too, so that is not the threat this defends
+            # against.  But an author regenerating the approvals must
+            # not have to empty the cache first, so `write` still works.
+            if os.environ.get("ALT_VENV_APPROVE", "").lower() == "write":
+                kept: Path = self.paths()[1]
+                self.gate([kept / name for name in remembered[1]])
 
         # Only the unpacked trees go on the path, never the holding
         # area.  That one rule is the whole of the jail; see 6.3.1.
@@ -594,8 +989,9 @@ class AltVEnv:
                                      for name in names]
         return modules[0] if single else modules
 
-    def remember(self, request: str,
-                 trees: list[str] | None = None) -> list[str] | None:
+    def remember(self, request: str, trees: list[str] | None = None,
+                 wheels: list[str] | None = None
+                 ) -> tuple[list[str], list[str]] | None:
         """Read or write what a request resolved to last time.
 
         One small file per request, named by the hash of the request, so
@@ -623,11 +1019,15 @@ class AltVEnv:
         * `trees` (`list[str] | None`):
           The version directory names to record.  `None`, the default,
           reads instead of writing.
+        * `wheels` (`list[str] | None`):
+          The wheel filenames those trees came from, recorded so that
+          `ALT_VENV_APPROVE=write` can regenerate the approvals from a
+          warm cache instead of demanding an empty one.
 
         Returns:
-        * (`list[str] | None`): What the request resolved to, or `None`
-          when it is unknown, when its trees are gone, or when this call
-          was a write.
+        * (`tuple[list[str], list[str]] | None`): The trees and the
+          wheels the request resolved to, or `None` when it is unknown,
+          when its trees are gone, or when this call was a write.
         """
         # The file name is the hash; the request itself is inside it.
         requests: Path = self.paths()[3]
@@ -641,7 +1041,8 @@ class AltVEnv:
         if trees is not None:
             handle, temporary = tempfile.mkstemp(dir=requests)
             with os.fdopen(handle, "w") as opened:
-                json.dump({"request": request, "trees": trees}, opened,
+                json.dump({"request": request, "trees": trees,
+                           "wheels": wheels or []}, opened,
                           indent=1, sort_keys=True)
             Path(temporary).replace(record)
             return None
@@ -656,13 +1057,15 @@ class AltVEnv:
         # A record counts only if it is this request and its trees are
         # all still there.
         found: object = known.get("trees")
+        came: object = known.get("wheels", [])
         versions: Path = self.paths()[2]
         if known.get("request") != request or not isinstance(found, list):
             return None
         if not all(isinstance(key, str) and (versions / key).is_dir()
                    for key in found):
             return None
-        return [str(key) for key in found]
+        return ([str(key) for key in found],
+                [str(one) for one in came] if isinstance(came, list) else [])
 
     def contains(self, package: str) -> bool:
         """Report whether the cache holds an importable package.

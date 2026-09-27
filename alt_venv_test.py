@@ -52,6 +52,7 @@ import importlib
 import io
 import json
 import os
+import pty
 import re
 import shutil
 import ssl
@@ -200,7 +201,8 @@ def escaped_name(distribution: str) -> str:
 
 def build_wheel(module: Path, distribution: str, version: str,
                 summary: str, directory: Path,
-                tag: str = "py3-none-any") -> Path:
+                tag: str = "py3-none-any",
+                requires: Sequence[str] = ()) -> Path:
     """Build a pure Python wheel holding one module.
 
     A wheel is a zip archive with an agreed layout, so building one
@@ -233,6 +235,12 @@ def build_wheel(module: Path, distribution: str, version: str,
       Where to write the wheel.  Created if it does not exist.
     * `tag` (`str`):
       The compatibility tag, as a wheel filename spells it.
+    * `requires` (`Sequence[str]`):
+      Requirements this wheel depends on, written into `METADATA` as
+      `Requires-Dist`.  Without one of these, every wheel the suite
+      builds is a leaf, `pip` never pulls anything along, and the
+      distinction between what was asked for and what merely arrived
+      cannot be exercised at all.
 
     Returns:
     * (`Path`): The wheel that was written.
@@ -244,7 +252,9 @@ def build_wheel(module: Path, distribution: str, version: str,
         module.name: module.read_bytes(),
         f"{info}/METADATA": (
             f"Metadata-Version: 2.1\nName: {distribution}\n"
-            f"Version: {version}\nSummary: {summary}\n").encode(),
+            f"Version: {version}\nSummary: {summary}\n"
+            + "".join(f"Requires-Dist: {one}\n"
+                      for one in requires)).encode(),
         f"{info}/WHEEL": (b"Wheel-Version: 1.0\n"
                           b"Generator: alt_venv_test\n"
                           b"Root-Is-Purelib: true\n"
@@ -1510,7 +1520,19 @@ class InstallTest(unittest.TestCase):
                                         "A versioned throwaway.",
                                         cls.root / "dist"))
 
-        cls.index = build_index([wheel, two_named, *versions],
+        # A package that depends on another, so that `pip` fetches
+        # something nobody asked for.  Without this the difference
+        # between "asked for" and "came along" is unreachable, which is
+        # what Step 6.6.4 rests on.
+        needy: Path = cls.root / "needy.py"
+        needy.write_text('"""Needs a widget."""\n'
+                         '__version__ = "1.0.0"\n')
+        depending: Path = build_wheel(needy, "needy", "1.0.0",
+                                      "Needs a widget.",
+                                      cls.root / "dist",
+                                      requires=["widget"])
+
+        cls.index = build_index([wheel, two_named, depending, *versions],
                                 cls.root / "index")
         cls.cache = cls.root / "cache"
 
@@ -1799,8 +1821,10 @@ class InstallTest(unittest.TestCase):
         self.assertEqual([p.name for p in wheels.glob("*.whl")],
                          ["sprocket-1.0.0-py3-none-any.whl"])
         self.assertEqual(list(pending.iterdir()), [])
-        self.assertEqual(len(venv.remember("sprocket<2") or []), 1)
-        self.assertEqual(len(venv.remember("sprocket==1.0.0") or []), 1)
+        empty: tuple[list[str], list[str]] = ([], [])
+        self.assertEqual(len((venv.remember("sprocket<2") or empty)[0]), 1)
+        self.assertEqual(
+            len((venv.remember("sprocket==1.0.0") or empty)[0]), 1)
 
         # Two requests, so two records, both naming the one tree.
         self.assertEqual(len(list(requests.iterdir())), 2)
@@ -2060,6 +2084,423 @@ class InstallTest(unittest.TestCase):
                                    ["python-gadget"])
         self.assertIn("ModuleNotFoundError", output)
         self.assertIn("python_gadget", output)
+
+    def program(self, name: str, requirement: str) -> Path:
+        """Write a little program that installs one requirement.
+
+        Approvals live beside the main program, so they can only be
+        exercised by a real program in a directory of its own: an
+        in-process test would put `alt_venv_test.altvenv` in the project.
+
+        Arguments:
+        * `name` (`str`):
+          A directory name, to keep one test's program from another's.
+        * `requirement` (`str`):
+          What the program should install.
+
+        Returns:
+        * (`Path`): The program written.
+        """
+        # Its own directory, its own cache, its own approvals file.
+        where: Path = self.root / name
+        where.mkdir(parents=True, exist_ok=True)
+        program: Path = where / "prog.py"
+        program.write_text(
+            "import sys\n"
+            f"sys.path.insert(0, {str(Path(__file__).resolve().parent)!r})\n"
+            "import alt_venv\n"
+            "from pathlib import Path\n"
+            f"v = alt_venv.AltVEnv(Path({str(where / 'cache')!r}))\n"
+            f"print(v.install({requirement!r}).__version__)\n")
+        return program
+
+    def run_program(self, program: Path,
+                    **extra: str) -> subprocess.CompletedProcess[str]:
+        """Run one of those programs against the local index.
+
+        Arguments:
+        * `program` (`Path`):
+          What `program` returned.
+        * `extra` (`str`):
+          More environment, such as `ALT_VENV_APPROVE`.
+
+        Returns:
+        * (`subprocess.CompletedProcess[str]`): The finished child.
+        """
+        # The index is local; everything else is inherited.
+        environment: dict[str, str] = dict(
+            os.environ, PIP_INDEX_URL=self.index_url, **extra)
+        environment.pop("VIRTUAL_ENV", None)
+        return subprocess.run([sys.executable, str(program)],
+                              env=environment, capture_output=True,
+                              text=True, check=False)
+
+    def test_without_approvals_the_user_is_told_not_asked(self) -> None:
+        """With no approvals file, what arrived is reported and run.
+
+        The person who merely ran somebody's program cannot judge
+        `charset-normalizer 3.3.2` either way, so asking them would be a
+        rubber stamp.  See Step 6.6.
+        """
+        # Nothing is prompted, and the listing separates the two kinds.
+        program: Path = self.program("told", "widget")
+        done: subprocess.CompletedProcess[str] = self.run_program(program)
+        self.assertEqual(done.returncode, 0, done.stderr[-300:])
+        self.assertEqual(done.stdout.strip(), "1.2.3")
+        self.assertIn("1 requested, 1 downloaded", done.stderr)
+        self.assertIn("widget 1.2.3  asked for", done.stderr)
+        self.assertFalse(program.with_suffix(".altvenv").exists())
+
+    def test_the_author_records_approvals(self) -> None:
+        """`ALT_VENV_APPROVE=write` writes the file beside the program."""
+        # Wheel name and digest, one per line, sorted for the diff.
+        program: Path = self.program("record", "widget")
+        done: subprocess.CompletedProcess[str] = self.run_program(
+            program, ALT_VENV_APPROVE="write")
+        self.assertEqual(done.returncode, 0, done.stderr[-300:])
+        record: Path = program.with_suffix(".altvenv")
+        self.assertTrue(record.is_file())
+        rows: list[str] = [line for line in record.read_text().splitlines()
+                           if not line.startswith("#")]
+        self.assertEqual(len(rows), 1)
+        self.assertTrue(rows[0].startswith("widget-1.2.3-py3-none-any.whl "))
+        self.assertEqual(len(rows[0].split()[1]), 64)
+
+    def test_matching_approvals_are_silent(self) -> None:
+        """A recipient whose approvals match is not bothered at all."""
+        # Record once, then run again from an empty cache.
+        program: Path = self.program("silent", "widget")
+        self.assertEqual(
+            self.run_program(program, ALT_VENV_APPROVE="write").returncode, 0)
+        shutil.rmtree(program.parent / "cache")
+        done: subprocess.CompletedProcess[str] = self.run_program(program)
+        self.assertEqual(done.returncode, 0, done.stderr[-300:])
+        self.assertEqual(done.stdout.strip(), "1.2.3")
+        self.assertNotIn("not approved", done.stderr)
+
+    def test_an_unapproved_wheel_is_refused(self) -> None:
+        """A dependency changed without reapproval stops the program.
+
+        This is the protection the whole step exists for, and it works
+        because the author, who could tell one package from another, said
+        once what was allowed.
+        """
+        # Approve 1.2.3, then ask for 2.0.0 without reapproving.
+        program: Path = self.program("refused", "sprocket==1.0.0")
+        self.assertEqual(
+            self.run_program(program, ALT_VENV_APPROVE="write").returncode, 0)
+        program.write_text(program.read_text().replace("1.0.0", "2.0.0"))
+        done: subprocess.CompletedProcess[str] = self.run_program(program)
+        self.assertNotEqual(done.returncode, 0)
+        self.assertIn("is not approved", done.stderr)
+        self.assertIn("sprocket-2.0.0", done.stderr)
+
+        # And nothing was unpacked, because the refusal comes first.
+        trees: list[Path] = list((program.parent / "cache"
+                                  / "versions").iterdir())
+        self.assertTrue(all("2.0.0" not in tree.name for tree in trees), trees)
+
+    def test_an_altered_wheel_is_refused(self) -> None:
+        """An approval that no longer matches the artifact is refused."""
+        # Corrupt the recorded digest, which is what a swapped wheel
+        # would look like from here.
+        program: Path = self.program("altered", "widget")
+        self.assertEqual(
+            self.run_program(program, ALT_VENV_APPROVE="write").returncode, 0)
+        record: Path = program.with_suffix(".altvenv")
+        record.write_text(record.read_text().replace(
+            record.read_text().split()[-1], "0" * 64))
+        shutil.rmtree(program.parent / "cache")
+        done: subprocess.CompletedProcess[str] = self.run_program(program)
+        self.assertNotEqual(done.returncode, 0)
+        self.assertIn("does not match its approval", done.stderr)
+
+    def test_skip_bypasses_the_approvals(self) -> None:
+        """`ALT_VENV_APPROVE=skip` is for an author still deciding."""
+        # The approvals say 1.0.0; skip installs 2.0.0 anyway.
+        program: Path = self.program("skipping", "sprocket==1.0.0")
+        self.assertEqual(
+            self.run_program(program, ALT_VENV_APPROVE="write").returncode, 0)
+        program.write_text(program.read_text().replace("1.0.0", "2.0.0"))
+        done: subprocess.CompletedProcess[str] = self.run_program(
+            program, ALT_VENV_APPROVE="skip")
+        self.assertEqual(done.returncode, 0, done.stderr[-300:])
+        self.assertEqual(done.stdout.strip(), "2.0.0")
+
+    def test_approvals_can_be_written_from_a_warm_cache(self) -> None:
+        """An author need not empty the cache to regenerate them.
+
+        A warm cache fetches nothing, so the approval path would never
+        run; the request record names the wheels it used so that `write`
+        still has something to record.
+        """
+        # Populate the cache first, with no approvals at all.
+        program: Path = self.program("warm", "widget")
+        self.assertEqual(self.run_program(program).returncode, 0)
+        self.assertFalse(program.with_suffix(".altvenv").exists())
+
+        # Now record, from a cache that fetches nothing.
+        done: subprocess.CompletedProcess[str] = self.run_program(
+            program, ALT_VENV_APPROVE="write")
+        self.assertEqual(done.returncode, 0, done.stderr[-300:])
+        self.assertIn("approvals written to", done.stderr)
+        rows: list[str] = [line for line in
+                           program.with_suffix(".altvenv").read_text(
+                               ).splitlines() if not line.startswith("#")]
+        self.assertEqual(len(rows), 1)
+        self.assertTrue(rows[0].startswith("widget-1.2.3"))
+
+    def answer_on_a_terminal(self, program: Path, reply: bytes,
+                             **extra: str) -> str:
+        """Run a program with a real terminal and answer its question.
+
+        A pseudoterminal is the only honest way to test a prompt read
+        from `/dev/tty`.  `os.login_tty` is what makes the slave the
+        child's **controlling** terminal, which is what `/dev/tty`
+        resolves to; inheriting the descriptor is not enough, and a
+        child started with `start_new_session` alone reports
+        `No such device or address`.
+
+        `login_tty` also puts the child's own output on the terminal, so
+        everything comes back through the master rather than through
+        pipes.
+
+        Arguments:
+        * `program` (`Path`):
+          The program to run.
+        * `reply` (`bytes`):
+          What to type, including the newline.
+        * `extra` (`str`):
+          More environment.
+
+        Returns:
+        * (`str`): Everything the child wrote to the terminal.
+        """
+        # A terminal pair, with the slave as the child's own.  The
+        # attaching is done by a launcher after `exec` rather than by
+        # `preexec_fn`, which runs between `fork` and `exec` and can
+        # deadlock in a process that has threads -- and this one has a
+        # server thread.
+        master: int
+        slave: int
+        master, slave = pty.openpty()
+        launcher: str = (
+            "import os, sys\n"
+            "os.login_tty(int(sys.argv[1]))\n"
+            "os.execv(sys.executable, [sys.executable, sys.argv[2]])\n")
+        environment: dict[str, str] = dict(
+            os.environ, PIP_INDEX_URL=self.index_url, **extra)
+        environment.pop("VIRTUAL_ENV", None)
+        child: subprocess.Popen[bytes] = subprocess.Popen(
+            [sys.executable, "-c", launcher, str(slave), str(program)],
+            env=environment, pass_fds=(slave,))
+        os.close(slave)
+        os.write(master, reply)
+        child.wait(timeout=300)
+
+        # Read until the terminal has nothing more to give.
+        seen: bytes = b""
+        block: bytes
+        while True:
+            try:
+                block = os.read(master, 4096)
+            except OSError:
+                break
+            if not block:
+                break
+            seen += block
+            if len(seen) > 8192:
+                break
+        os.close(master)
+        return seen.decode(errors="replace")
+
+    def test_a_terminal_is_asked_once_and_yes_proceeds(self) -> None:
+        """With a terminal and no approvals, one question is asked."""
+        # The count is on the question, because the count is the part
+        # anybody can judge.
+        program: Path = self.program("asked_yes", "widget")
+        seen: str = self.answer_on_a_terminal(program, b"y\n")
+        self.assertIn("1 requested, 1 to install", seen)
+        self.assertIn("go ahead? [y/N/?]", seen)
+        self.assertIn("1.2.3", seen)
+
+    def test_declining_installs_nothing(self) -> None:
+        """Saying no installs nothing, and nothing has run.
+
+        The refusal comes before any wheel is unpacked, so declining is
+        clean rather than half done; see Step 6.6.2.
+        """
+        # Answer no, then look at what the cache holds.
+        program: Path = self.program("asked_no", "widget")
+        seen: str = self.answer_on_a_terminal(program, b"n\n")
+        self.assertIn("go ahead? [y/N/?]", seen)
+        self.assertIn("declined", seen)
+        versions: Path = program.parent / "cache" / "versions"
+        self.assertEqual(list(versions.iterdir()), [])
+
+    def test_an_empty_answer_declines(self) -> None:
+        """Only an explicit yes goes ahead, so the default is no."""
+        # A bare newline is the distracted answer, and it must be safe.
+        program: Path = self.program("asked_enter", "widget")
+        seen: str = self.answer_on_a_terminal(program, b"\n")
+        self.assertIn("declined", seen)
+
+    def test_an_unrecognised_answer_asks_again(self) -> None:
+        """Something that is neither yes nor no is taken for a typo."""
+        # Two bad answers, then yes: the question appears three times.
+        program: Path = self.program("asked_again", "widget")
+        seen: str = self.answer_on_a_terminal(program, b"x\nmaybe\ny\n")
+        self.assertEqual(
+            seen.count("Please answer y, n, or ? for more."), 2, seen)
+        self.assertEqual(seen.count("go ahead? [y/N/?]"), 3, seen)
+        self.assertIn("1.2.3", seen)
+
+    def test_a_question_mark_says_more_and_asks_again(self) -> None:
+        """`?` describes each wheel, then puts the question again.
+
+        The terse listing is the default; somebody who wants to know
+        more can ask without leaving the program.  What was observed is
+        kept apart from what the package claims about itself.
+        """
+        # Ask for detail, then agree.
+        program: Path = self.program("curious", "widget")
+        seen: str = self.answer_on_a_terminal(program, b"?\ny\n")
+        self.assertEqual(seen.count("go ahead? [y/N/?]"), 2, seen)
+        self.assertIn("fetched from", seen)
+        self.assertIn("it says:", seen)
+        self.assertIn("sha256:", seen)
+        self.assertIn("KB", seen)
+        self.assertIn("1.2.3", seen)
+
+    def test_asking_for_detail_is_not_a_typo(self) -> None:
+        """`?` does not spend the patience meant for mistakes.
+
+        Curiosity is not punished: the attempt limit counts answers that
+        make no sense, and `?` makes sense.
+        """
+        # More question marks than the limit, then a real answer.
+        program: Path = self.program("patient", "widget")
+        seen: str = self.answer_on_a_terminal(
+            program, b"?\n" * (alt_venv.ATTEMPTS + 2) + b"n\n")
+        self.assertEqual(seen.count("fetched from"), alt_venv.ATTEMPTS + 2)
+        self.assertIn("declined", seen)
+        self.assertNotIn("Please answer", seen)
+
+    def test_a_summary_cannot_rewrite_the_terminal(self) -> None:
+        """Escape sequences in a package's own words are removed.
+
+        The summary is written by whoever uploaded the package, which is
+        the adversary in the case this is meant to help with, so it is
+        never printed as it arrived.
+        """
+        # A wheel whose summary carries a colour escape.
+        source: Path = self.root / "escaping" / "escaping.py"
+        source.parent.mkdir(parents=True, exist_ok=True)
+        source.write_text('"""e."""\n__version__ = "1.0.0"\n')
+        wheel: Path = build_wheel(source, "escaping", "1.0.0",
+                                  "Red \x1b[31mtext\x1b[0m here.",
+                                  self.root / "escaping-dist")
+        venv: alt_venv.AltVEnv = alt_venv.AltVEnv(self.root / "escaping-cache")
+        told: str = venv.summary(wheel)
+        self.assertIn("Red", told)
+        self.assertNotIn("\x1b", told)
+        self.assertTrue(told.isprintable(), repr(told))
+
+    def test_a_dependency_is_shown_as_having_come_along(self) -> None:
+        """What was asked for is told apart from what arrived with it.
+
+        This is what Step 6.6.4 rests on: nobody ever looks at what a
+        single `pip install` actually pulls in, and the listing is the
+        first time most people would see the number.  Until a test wheel
+        had a dependency, the `came along` branch had never executed at
+        all -- found by tracing child processes.
+        """
+        # `needy` depends on `widget`, so two arrive for one request.
+        program: Path = self.program("came_along", "needy")
+        done: subprocess.CompletedProcess[str] = self.run_program(program)
+        self.assertEqual(done.returncode, 0, done.stderr[-400:])
+        self.assertIn("1 requested, 2 downloaded", done.stderr)
+        self.assertIn("needy 1.0.0  asked for", done.stderr)
+        self.assertIn("widget 1.2.3  came along", done.stderr)
+
+    def test_the_detail_also_separates_the_two_kinds(self) -> None:
+        """`?` marks a dependency as having come along as well."""
+        # The same distinction, in the verbose form.
+        program: Path = self.program("came_along_detail", "needy")
+        seen: str = self.answer_on_a_terminal(program, b"?\ny\n")
+        self.assertIn("needy 1.0.0, asked for,", seen)
+        self.assertIn("widget 1.2.3, came along,", seen)
+        self.assertIn("Needs a widget.", seen)
+
+    def test_a_summary_that_is_absent_or_unreadable(self) -> None:
+        """A wheel with no summary, or no metadata at all, says nothing.
+
+        Both fall back to an empty string rather than raising, because a
+        listing must not be the thing that stops a program.
+        """
+        # A wheel whose METADATA carries no `Summary` header at all.
+        venv: alt_venv.AltVEnv = alt_venv.AltVEnv(self.root / "quiet-cache")
+        bare: Path = self.root / "quiet" / "bare.whl"
+        bare.parent.mkdir(parents=True, exist_ok=True)
+        archive: zipfile.ZipFile
+        with zipfile.ZipFile(bare, "w") as archive:
+            archive.writestr("bare-1.0.0.dist-info/METADATA",
+                             "Metadata-Version: 2.1\nName: bare\n")
+        self.assertEqual(venv.summary(bare), "")
+
+        # And something that is not a zip at all.
+        broken: Path = self.root / "quiet" / "broken.whl"
+        broken.write_text("this is not a wheel\n")
+        self.assertEqual(venv.summary(broken), "")
+
+        # And a wheel with no `.dist-info` in it.
+        empty: Path = self.root / "quiet" / "empty.whl"
+        with zipfile.ZipFile(empty, "w") as archive:
+            archive.writestr("nothing.py", "x = 1\n")
+        self.assertEqual(venv.summary(empty), "")
+
+    def test_asking_gives_up_eventually(self) -> None:
+        """Nonsense does not keep the question alive forever.
+
+        A terminal feeding rubbish would otherwise hang the program, so
+        the question is put `ATTEMPTS` times and then declined.
+        """
+        # More bad answers than there are attempts.
+        program: Path = self.program("asked_enough", "widget")
+        seen: str = self.answer_on_a_terminal(
+            program, b"x\n" * (alt_venv.ATTEMPTS + 3))
+        self.assertEqual(seen.count("go ahead? [y/N/?]"), alt_venv.ATTEMPTS)
+        self.assertIn("declined", seen)
+
+    def test_approvals_replace_the_question(self) -> None:
+        """An approved set is verified in silence, not asked about.
+
+        The author's judgement replaces the recipient's prompt rather
+        than being added to it: the recipient cannot judge a package
+        name, and somebody who could already did.
+        """
+        # Record approvals, empty the cache, then run with a terminal.
+        program: Path = self.program("no_question", "widget")
+        self.assertEqual(
+            self.run_program(program, ALT_VENV_APPROVE="write").returncode, 0)
+        shutil.rmtree(program.parent / "cache")
+        seen: str = self.answer_on_a_terminal(program, b"n\n")
+        self.assertNotIn("go ahead?", seen)
+        self.assertIn("1.2.3", seen)
+
+    def test_without_a_terminal_nothing_is_asked(self) -> None:
+        """No terminal means nobody to ask, so the fetch goes ahead.
+
+        Failing instead would break every program started by `cron`, a
+        build or a service manager on its first day.  The approvals file
+        is how a guarantee is had; a listing is only a notification.
+        """
+        # `run_program` uses pipes, so there is no controlling terminal.
+        program: Path = self.program("no_terminal", "widget")
+        done: subprocess.CompletedProcess[str] = self.run_program(program)
+        self.assertEqual(done.returncode, 0, done.stderr[-300:])
+        self.assertNotIn("go ahead?", done.stderr)
+        self.assertEqual(done.stdout.strip(), "1.2.3")
 
     def test_install_takes_the_newest_version_by_default(self) -> None:
         """With no constraint, `pip` picks the highest version published."""
