@@ -1435,7 +1435,9 @@ expected every time the order changes, and is Claude's job.
     which `X | Y` and `match` already set, to 3.11; worth saying out
     loud before it is discovered.
   * 6.7.4 - The floor is stated, and it is as low as the code allows.
-    Decided 2026-09-27: `>=3.10`, because annotations such as
+    **Superseded by 6.7.7 later the same day, which raised it to
+    `>=3.11` for `tomllib`.**  What was decided here, and still holds
+    for the language itself: `>=3.10`, because annotations such as
     `Path | None` are evaluated at run time and `bootstrap.py` uses
     `match`, and because **nothing here needs 3.11 or 3.12**.  Importing
     `tomllib` for this step moves it to `>=3.11`, and that is the whole
@@ -1505,41 +1507,62 @@ expected every time the order changes, and is Claude's job.
     although it has stripped the docstrings from the module, which is the
     whole reason 6.7.2 reads the source.
 
-  * 6.7.7 - **Undecided, and it blocks the parser:** what reads the TOML.
-    6.7.3 said `tomllib` raises the floor to 3.11 and 6.7.4 then set the
-    floor at `>=3.10`; both cannot hold once the import is real, so this
-    is the contradiction to settle first.  The options:
+  * 6.7.7 - Got the TOML parser working.  6.7.3 said `tomllib` raises
+    the floor to 3.11 and 6.7.4 then set the floor at `>=3.10`, and both
+    could not hold once the import was real.  The options:
 
-    * Import `tomllib` at the top and raise the floor to 3.11, which
-      turns away Ubuntu 22.04 LTS, supported to April 2027.
-    * Import it lazily, so 3.10 keeps working until a program actually
-      has a block, and the refusal names the Python rather than failing
-      at import time.
     * Hand-parse the two keys wanted -- `requires-python`, a string, and
       `dependencies`, a list of strings -- and depend on no TOML reader
-      at all.
+      at all.  Rejected: a hand parser is a second implementation of
+      somebody else's specification, which is the mistake 6.7.1 declined
+      to make when it chose PEP 723 over a bespoke format.
+    * Import `tomllib` lazily, so 3.10 keeps working until a program
+      actually has a block.  Rejected: it buys one Python version at the
+      price of two code paths and a failure that appears late.
+    * Import `tomllib` at the top like any other standard library module
+      and raise the floor to `>=3.11`.  **Chosen 2026-09-27**, because
+      3.11 has been out four years.
 
-  * 6.7.8 - Write the parser.  PEP 723's own regex finds the
-    `# /// script` ... `# ///` block, the `# ` prefixes come off, and
-    what is left is TOML.  Two `script` blocks in one file is an error
-    the PEP requires, as is a block that is not valid TOML.  It reads
-    the text `main_source` returns, never the module object.
-  * 6.7.9 - Decide the API: whether `install()` with no arguments means
+    `script_metadata` followed on 2026-09-27: source text in, what the
+    block declared out, `None` when there is no `script` block, and
+    `ValueError` on two blocks or on TOML that will not parse.  Twelve
+    tests, none needing a child process or the disk.  The regex is PEP
+    723's own, copied and not rewritten, because a block we fail to
+    recognise is a block some other tool accepts.  Two measured
+    consequences, shared by any tool using it:
+
+    * An empty block reads as **no** block, the pattern wanting at least
+      one commented line between the fences.  Harmless, and the test
+      expecting `{}` was the thing that was wrong.
+    * A block of another type immediately above a `script` block
+      **hides** it, silently, because `content` matches commented lines
+      greedily straight through the closing fence.  One blank line
+      between them is the cure.
+
+    The second also defeats the duplicate check the PEP requires, two
+    adjacent blocks matching as one, so `FENCE` counts `# /// script`
+    openers first and names the real mistake.
+
+    The project gained `ruff.toml` and `mypy.ini`, both saying 3.11,
+    because with no configuration `ruff` assumed 3.10, disbelieved that
+    `tomllib` is standard library and sorted its import into the third
+    party block.
+  * 6.7.8 - Decide the API: whether `install()` with no arguments means
     "install what the program declared", or whether a separate
     `declared()` returns the requirements and the caller passes them on.
     Both `README.md` files describe whichever this is, so it wants
     settling before Step 6.13.
-  * 6.7.10 - Close the dogfooding loop 6.7.5 promised.  `build_wheel`
+  * 6.7.9 - Close the dogfooding loop 6.7.5 promised.  `build_wheel`
     takes `Requires-Python` from `alt_venv.py`'s own block, through our
     parser, instead of from `FLOOR`, so that the floor stops being
     written twice and a broken parser has a consequence.
-  * 6.7.11 - **Undecided, recorded rather than solved:** whether a
+  * 6.7.10 - **Undecided, recorded rather than solved:** whether a
     declared `requires-python` is enforced.  Comparing it means PEP 440
     version comparison, which 6.3.3 declined to reimplement, and `pip`
     already enforces the `Requires-Python` of each wheel it is asked
     for.  What is unenforced is the *program's* own floor, which is
     arguably the interpreter's business and not ours.
-  * 6.7.12 - Tests: a block present, absent, malformed and duplicated,
+  * 6.7.11 - Tests: a block present, absent, malformed and duplicated,
     plus `-OO` and `python3 -c`.  The last two come nearly free from
     6.7.6's child process harness.
 

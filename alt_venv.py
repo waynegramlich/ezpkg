@@ -1,15 +1,17 @@
 # /// script
-# requires-python = ">=3.10"
+# requires-python = ">=3.11"
 # dependencies = []
 # ///
 #
 # The block above is this project eating its own cooking, and it is the
-# one place the Python floor is written down.  See Step 6.7.4 in
-# `LOGBOOK.md`: 3.10, because `Path | None` is evaluated at run time and
-# `bootstrap.py` uses `match`, and no higher because nothing here needs
-# 3.11 or 3.12.  `dependencies` is empty on purpose and says so: a
-# project about fetching packages that are not preinstalled has none of
-# its own.
+# one place the Python floor is written down.  See Steps 6.7.4 and 6.7.7
+# in `LOGBOOK.md`: 3.11, because `tomllib` reads the block and `tomllib`
+# arrived in 3.11, and no higher because nothing here needs 3.12.  The
+# language features used set only 3.10 -- `Path | None` is evaluated at
+# run time and `bootstrap.py` uses `match` -- so the standard library is
+# what costs the extra version.  `dependencies` is empty on purpose and
+# says so: a project about fetching packages that are not preinstalled
+# has none of its own.
 #
 # Nothing reads it yet.  A tool such as `uv` reads the block belonging to
 # the script it is running, and this is a library that is never
@@ -66,11 +68,12 @@ import subprocess
 import sys
 import sysconfig
 import tempfile
+import tomllib
 import zipfile
 from collections.abc import Sequence
 from pathlib import Path
 from types import ModuleType
-from typing import IO, overload
+from typing import IO, Any, overload
 
 # How many times `AltVEnv.consent` will put the same question, when the
 # answer is neither yes nor no.  Bounded, so that a terminal feeding
@@ -160,6 +163,89 @@ def main_path() -> Path | None:
     if not found.is_file():
         return None
     return found
+
+
+# The regex PEP 723 specifies for finding a metadata block, copied from
+# the PEP rather than written afresh, because a block this project fails
+# to recognise is a block some other tool accepts.  `(?m)` makes `^` and
+# `$` match per line, and the `type` group is what tells a `script` block
+# from any other kind the PEP may come to define.
+BLOCK: re.Pattern[str] = re.compile(
+    r"(?m)^# /// (?P<type>[a-zA-Z0-9-]+)$\s(?P<content>(^#(| .*)$\s)+)"
+    r"^# ///$")
+
+# Opening fences, counted separately from the blocks themselves.
+# `BLOCK`'s `content` group matches commented lines greedily and will
+# swallow a closing fence and the next block's opener, so two adjacent
+# blocks arrive as one match and never look duplicated; measured
+# 2026-09-27.  Counting the fences notices them anyway.  See Step 6.7.7.
+FENCE: re.Pattern[str] = re.compile(r"(?m)^# /// script$")
+
+
+def script_metadata(text: str) -> dict[str, Any] | None:
+    """Return the PEP 723 metadata declared in a program's source.
+
+    PEP 723 puts the metadata in `#` comments, opened by `# /// script`
+    and closed by `# ///`, with every line between them commented too.
+    Stripping the comment markers leaves TOML, which `tomllib` reads.
+    See Steps 6.7.2 and 6.7.7 in `LOGBOOK.md`.
+
+    The argument is source **text**, not a module or a path, because a
+    comment does not exist at run time: the compiler drops it, and `-OO`
+    drops the docstrings as well.  `main_source` is where the text comes
+    from.
+
+    Blocks of other types are ignored rather than refused, since the PEP
+    reserves the syntax for kinds it has not defined yet and a program
+    carrying one is not making a mistake.
+
+    Two measured consequences of using the PEP's regex rather than one of
+    our own, both of which a tool that shares the regex also has.  An
+    empty block gives `None` and not an empty dictionary, because the
+    pattern requires at least one commented line between the fences, so
+    an empty block matches nothing and is indistinguishable from no
+    block.  And a block of another type immediately above a `script`
+    block hides it, because the first block's match runs on through the
+    second; one blank or uncommented line between them is enough to
+    separate them.
+
+    Arguments:
+    * `text` (`str`):
+      The program's source.
+
+    Returns:
+    * (`dict[str, Any] | None`): What the block declared, or `None` when
+      the program has no `script` block at all.  An empty block gives an
+      empty dictionary, which is not the same thing.
+
+    Raises:
+    * `ValueError`:
+      If there is more than one `script` block, which PEP 723 makes an
+      error, or if the block is not valid TOML.  Both are the author's
+      mistake and silence would hide it.  Which of two blocks was meant
+      is unknowable, so neither is guessed at.
+    """
+    # Fences first, since two adjacent blocks match as one.
+    fences: int = len(FENCE.findall(text))
+    if fences > 1:
+        raise ValueError(
+            f"{fences} PEP 723 script blocks; there may be only one")
+
+    # Only `script` blocks; the PEP reserves other types for later.
+    found: list[re.Match[str]] = [
+        match for match in BLOCK.finditer(text)
+        if match.group("type") == "script"]
+    if not found:
+        return None
+
+    # Each line is `#`, or `# ` and then the TOML, so two characters go.
+    lines: list[str] = [
+        line[2:] if line.startswith("# ") else line[1:]
+        for line in found[0].group("content").splitlines()]
+    try:
+        return tomllib.loads("\n".join(lines))
+    except tomllib.TOMLDecodeError as error:
+        raise ValueError(f"PEP 723 block is not valid TOML: {error}") from None
 
 
 def main_source() -> tuple[Path, str] | None:

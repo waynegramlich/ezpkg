@@ -713,7 +713,7 @@ def run_tests() -> None:
         print(f"case {label:>2}: cold {cold:5.2f} s   warm {warm:5.2f} s"
               f"   size {size:>6} KB   {description}", file=sys.stderr)
 
-    now = datetime.datetime.now(datetime.timezone.utc).astimezone()
+    now = datetime.datetime.now(datetime.UTC).astimezone()
     report = [
         "Results of `python3 bootstrap.py`.  Column meanings are in the",
         "module docstring of bootstrap.py.",

@@ -83,10 +83,11 @@ VERSION: str = alt_venv.__version__
 SUMMARY: str = "Fetch Python packages that are not preinstalled."
 
 # The lowest Python `alt_venv.py` runs on, written into the wheel as
-# `Requires-Python`.  It is 3.10 because annotations such as
-# `Path | None` are evaluated at run time and `bootstrap.py` uses
-# `match`; nothing here needs 3.11 or 3.12.  See Step 6.7.4.
-FLOOR: str = ">=3.10"
+# `Requires-Python`.  It is 3.11 because `tomllib` reads the PEP 723
+# block and arrived in 3.11; the language features used need only 3.10.
+# Written twice for now, here and in `alt_venv.py`'s own block, which
+# Step 6.7.9 closes.  See Steps 6.7.4 and 6.7.7.
+FLOOR: str = ">=3.11"
 
 # Which cases the all-case tests exercise.  The default is one case, on
 # the grounds that this project is not shipping a virtual environment
@@ -254,7 +255,7 @@ def build_wheel(module: Path, distribution: str, version: str,
       cannot be exercised at all.
     * `floor` (`str`):
       The lowest Python this wheel runs on, as a specifier such as
-      `>=3.10`, written into `METADATA` as `Requires-Python`.  Empty,
+      `>=3.11`, written into `METADATA` as `Requires-Python`.  Empty,
       the default, claims nothing.  With it, `pip` refuses the wheel on
       an interpreter that cannot run it and says why; without it the
       install succeeds and the program fails later with a `SyntaxError`
@@ -2675,6 +2676,181 @@ class InstallTest(unittest.TestCase):
         self.assertFalse(venv.contains("widget"))
         self.install(target, "widget")
         self.assertTrue(venv.contains("widget"))
+
+
+class MetadataTest(unittest.TestCase):
+    """Exercise `script_metadata`, the PEP 723 block reader.
+
+    Nothing here runs a child or touches the disk: the function takes
+    source text and returns what it declared, so a string is the whole
+    fixture.
+
+    Constructor:
+    * `MetadataTest()`, by `unittest` rather than by hand.
+    """
+
+    def test_a_block_is_read(self) -> None:
+        """The ordinary case, with both keys PEP 723 defines."""
+        # Exactly the shape the PEP's own example uses.
+        found: dict[str, Any] | None = alt_venv.script_metadata(
+            "# /// script\n"
+            '# requires-python = ">=3.11"\n'
+            "# dependencies = [\n"
+            '#   "requests<3",\n'
+            '#   "rich",\n'
+            "# ]\n"
+            "# ///\n"
+            "print('hello')\n")
+        self.assertEqual(found, {"requires-python": ">=3.11",
+                                 "dependencies": ["requests<3", "rich"]})
+
+    def test_no_block_is_not_an_error(self) -> None:
+        """A program without a block declares nothing, and that is fine."""
+        # `None` rather than an exception: most programs have no block.
+        self.assertIsNone(alt_venv.script_metadata("print('hello')\n"))
+
+    def test_an_empty_block_is_indistinguishable_from_none(self) -> None:
+        """An empty block reads as no block at all.
+
+        Measured, not intended: PEP 723's regex requires at least one
+        commented line between the fences, so `# /// script` followed
+        straight by `# ///` matches nothing.  Any tool sharing the
+        regex behaves the same way, which is the reason to keep it.
+        """
+        # A block declaring nothing and no block ask for nothing, so
+        # the two being confused costs nothing either.
+        self.assertIsNone(alt_venv.script_metadata("# /// script\n# ///\n"))
+
+    def test_a_block_with_one_blank_line_is_read(self) -> None:
+        """One commented line inside is enough for the regex."""
+        # The boundary of the case above, which is worth pinning.
+        self.assertEqual(
+            alt_venv.script_metadata("# /// script\n#\n# ///\n"), {})
+
+    def test_a_bare_comment_line_is_allowed(self) -> None:
+        """A `#` with nothing after it is a blank line in the TOML.
+
+        The PEP's regex permits it, so the prefix stripping has to take
+        one character from such a line and two from every other.
+        """
+        # A blank line between two keys is the case that catches this.
+        found: dict[str, Any] | None = alt_venv.script_metadata(
+            "# /// script\n"
+            '# requires-python = ">=3.11"\n'
+            "#\n"
+            "# dependencies = []\n"
+            "# ///\n")
+        self.assertEqual(found, {"requires-python": ">=3.11",
+                                 "dependencies": []})
+
+    def test_another_block_type_is_ignored(self) -> None:
+        """A block that is not `script` is passed over, not refused.
+
+        PEP 723 reserves the syntax for types it has not defined, so a
+        program carrying one is not making a mistake.
+        """
+        # One uncommented line between them, which is what separates
+        # the two blocks; see the test below for what happens without.
+        found: dict[str, Any] | None = alt_venv.script_metadata(
+            "# /// pyproject\n"
+            "# [tool.something]\n"
+            "# ///\n"
+            "\n"
+            "# /// script\n"
+            "# dependencies = []\n"
+            "# ///\n")
+        self.assertEqual(found, {"dependencies": []})
+
+    def test_an_adjacent_block_hides_the_script_block(self) -> None:
+        """A block butted against another swallows it.
+
+        Measured 2026-09-27, and a limit rather than a choice: the
+        `content` group matches commented lines greedily and runs
+        straight through the closing fence and the next opener, so the
+        whole thing is one `pyproject` match and the `script` block is
+        invisible.  A tool sharing the PEP's regex reads it the same
+        way, and one blank line between the blocks is the cure.
+        """
+        # No error, which is the uncomfortable part: nothing is declared
+        # and nothing complains.
+        self.assertIsNone(alt_venv.script_metadata(
+            "# /// pyproject\n"
+            "# [tool.something]\n"
+            "# ///\n"
+            "# /// script\n"
+            "# dependencies = []\n"
+            "# ///\n"))
+
+    def test_two_blocks_are_an_error(self) -> None:
+        """PEP 723 allows one `script` block, so two is a mistake."""
+        # Separated by code, which is how the regex sees two of them.
+        with self.assertRaises(ValueError) as caught:
+            alt_venv.script_metadata(
+                "# /// script\n"
+                "# dependencies = []\n"
+                "# ///\n"
+                "print('between')\n"
+                "# /// script\n"
+                '# dependencies = ["widget"]\n'
+                "# ///\n")
+        self.assertIn("2 PEP 723 script blocks", str(caught.exception))
+
+    def test_two_adjacent_blocks_are_an_error_too(self) -> None:
+        """Duplicates are caught whether or not the regex merges them.
+
+        Two blocks with nothing between them match as a single block,
+        so counting matches would call this one block with unparseable
+        TOML.  `FENCE` counts the openers instead, which is why the
+        complaint names the real problem.
+        """
+        # The diagnosis is the point: the author wrote two blocks.
+        with self.assertRaises(ValueError) as caught:
+            alt_venv.script_metadata(
+                "# /// script\n"
+                "# dependencies = []\n"
+                "# ///\n"
+                "# /// script\n"
+                '# dependencies = ["widget"]\n'
+                "# ///\n")
+        self.assertIn("2 PEP 723 script blocks", str(caught.exception))
+
+    def test_bad_toml_is_an_error(self) -> None:
+        """A block that is not TOML is the author's mistake."""
+        # Silence here would install nothing and explain nothing.
+        with self.assertRaises(ValueError) as caught:
+            alt_venv.script_metadata(
+                "# /// script\n"
+                "# dependencies = [\n"
+                "# ///\n")
+        self.assertIn("not valid TOML", str(caught.exception))
+
+    def test_an_unclosed_block_is_no_block(self) -> None:
+        """Without the closing `# ///` there is nothing to read.
+
+        This is the PEP's regex being taken literally rather than
+        guessing where the author meant the block to stop.
+        """
+        # A program that happens to start with a comment is the risk.
+        self.assertIsNone(alt_venv.script_metadata(
+            "# /// script\n"
+            "# dependencies = []\n"
+            "print('hello')\n"))
+
+    def test_our_own_block_reads_back(self) -> None:
+        """`alt_venv.py`'s own block parses, and says 3.11.
+
+        This is the dogfooding of 6.7.5 with a consequence attached: if
+        the parser breaks, or the block is edited into something no tool
+        would accept, this test fails rather than the block quietly
+        becoming decoration.
+        """
+        # Read from disk, because the comment is gone at run time.
+        source: Path = Path(__file__).resolve().parent / f"{MODULE}.py"
+        found: dict[str, Any] | None = alt_venv.script_metadata(
+            source.read_text(encoding="utf-8"))
+        assert found is not None
+        self.assertEqual(found["requires-python"], FLOOR)
+        self.assertEqual(found["dependencies"], [])
 
 
 class LocatorTest(unittest.TestCase):

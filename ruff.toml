@@ -1,0 +1,13 @@
+# Configuration for `ruff`, which this project had none of until the
+# Python floor became a real constraint.
+#
+# Without a target version `ruff` assumes 3.10, and so does not believe
+# `tomllib` is in the standard library: it sorted the import into the
+# third party block, which would have been wrong and would have stayed
+# wrong silently.  Step 6.7.7 in `LOGBOOK.md` set the floor at 3.11, and
+# this is the linter being told the same thing.
+#
+# Keep this in step with `alt_venv.py`'s own PEP 723 block, with `FLOOR`
+# in `alt_venv_test.py`, and with `mypy.ini`.  Step 6.7.9 is meant to
+# leave one of them the authority and derive the rest.
+target-version = "py311"
