@@ -82,6 +82,12 @@ MODULE: str = "alt_venv"
 VERSION: str = alt_venv.__version__
 SUMMARY: str = "Fetch Python packages that are not preinstalled."
 
+# The lowest Python `alt_venv.py` runs on, written into the wheel as
+# `Requires-Python`.  It is 3.10 because annotations such as
+# `Path | None` are evaluated at run time and `bootstrap.py` uses
+# `match`; nothing here needs 3.11 or 3.12.  See Step 6.7.5.
+FLOOR: str = ">=3.10"
+
 # Which cases the all-case tests exercise.  The full dozen costs most of
 # a minute in virtual environment building, so the default is a subset
 # that still covers every distinct mechanism: case 3 fetches with
@@ -203,7 +209,8 @@ def escaped_name(distribution: str) -> str:
 def build_wheel(module: Path, distribution: str, version: str,
                 summary: str, directory: Path,
                 tag: str = "py3-none-any",
-                requires: Sequence[str] = ()) -> Path:
+                requires: Sequence[str] = (),
+                floor: str = "") -> Path:
     """Build a pure Python wheel holding one module.
 
     A wheel is a zip archive with an agreed layout, so building one
@@ -242,6 +249,13 @@ def build_wheel(module: Path, distribution: str, version: str,
       builds is a leaf, `pip` never pulls anything along, and the
       distinction between what was asked for and what merely arrived
       cannot be exercised at all.
+    * `floor` (`str`):
+      The lowest Python this wheel runs on, as a specifier such as
+      `>=3.10`, written into `METADATA` as `Requires-Python`.  Empty,
+      the default, claims nothing.  With it, `pip` refuses the wheel on
+      an interpreter that cannot run it and says why; without it the
+      install succeeds and the program fails later with a `SyntaxError`
+      that explains nothing.
 
     Returns:
     * (`Path`): The wheel that was written.
@@ -254,6 +268,7 @@ def build_wheel(module: Path, distribution: str, version: str,
         f"{info}/METADATA": (
             f"Metadata-Version: 2.1\nName: {distribution}\n"
             f"Version: {version}\nSummary: {summary}\n"
+            + (f"Requires-Python: {floor}\n" if floor else "")
             + "".join(f"Requires-Dist: {one}\n"
                       for one in requires)).encode(),
         f"{info}/WHEEL": (b"Wheel-Version: 1.0\n"
@@ -775,13 +790,14 @@ class AltVEnvTest(unittest.TestCase):
         cls.root = Path(tempfile.mkdtemp(prefix="alt_venv-"))
         module: Path = Path(__file__).resolve().parent / f"{MODULE}.py"
         cls.wheel = build_wheel(module, DISTRIBUTION, VERSION, SUMMARY,
-                                cls.root / "dist")
+                                cls.root / "dist", floor=FLOOR)
         # A second wheel, wearing this interpreter's compiled tag and
         # carrying a `.data/purelib` member.  Cases 3 and 12 prefer it,
         # which is the only way to reach their platform branch and their
         # `.data` move; see Step 6.5.11 in `LOGBOOK.md`.
         cls.tagged = build_wheel(module, DISTRIBUTION, VERSION, SUMMARY,
-                                 cls.root / "dist", tag=platform_tag())
+                                 cls.root / "dist", tag=platform_tag(),
+                                 floor=FLOOR)
         add_data_member(cls.tagged, "purelib", "beside_alt_venv.py",
                         "BESIDE = True\n")
         cls.index = build_index([cls.wheel, cls.tagged],
@@ -824,8 +840,12 @@ class AltVEnvTest(unittest.TestCase):
         * (`subprocess.CompletedProcess[str]`): The finished child.
         """
         # Steer pip entirely through the environment, then run it.
+        # `extra` is applied last, so a caller naming `PIP_INDEX_URL`
+        # itself overrides this class's index rather than colliding
+        # with it.
         environment: dict[str, str] = dict(
-            os.environ, PIP_INDEX_URL=self.index_url, **(extra or {}))
+            os.environ, PIP_INDEX_URL=self.index_url)
+        environment.update(extra or {})
         environment.pop("VIRTUAL_ENV", None)
         return subprocess.run(
             [sys.executable, "-m", "pip", "install", "--quiet", "--no-input",
@@ -847,6 +867,49 @@ class AltVEnvTest(unittest.TestCase):
         self.assertEqual(names, {f"{MODULE}.py", f"{info}/METADATA",
                                  f"{info}/WHEEL", f"{info}/RECORD"})
         self.assertIn(f"{MODULE}.py,sha256=", record)
+
+    def test_the_wheel_declares_its_python_floor(self) -> None:
+        """The wheel says which Pythons it runs on, so `pip` can refuse.
+
+        Without it an old interpreter installs the wheel happily and the
+        program then fails with a `SyntaxError` from an annotation, which
+        explains nothing.  Measured 2026-09-27: `pip` refuses a wheel it
+        cannot satisfy with
+        `requires a different Python: 3.12.3 not in '>=3.99'`.
+        """
+        # The floor is in the metadata of the real wheel.
+        archive: zipfile.ZipFile
+        escaped: str = escaped_name(DISTRIBUTION)
+        with zipfile.ZipFile(self.wheel) as archive:
+            text: str = archive.read(
+                f"{escaped}-{VERSION}.dist-info/METADATA").decode()
+        self.assertIn(f"Requires-Python: {FLOOR}", text)
+
+    def test_a_floor_this_python_fails_is_refused(self) -> None:
+        """`pip` turns away a wheel this interpreter cannot run.
+
+        This is what the metadata buys, and it is why claiming a floor is
+        worth the line.
+        """
+        # A wheel claiming a Python nobody has yet.
+        module: Path = Path(__file__).resolve().parent / f"{MODULE}.py"
+        absurd: Path = build_wheel(module, DISTRIBUTION, VERSION, SUMMARY,
+                                   self.root / "absurd-dist",
+                                   floor=">=3.99")
+        index: Path = build_index([absurd], self.root / "absurd-index")
+        server: _IndexServer
+        url: str
+        server, url = serve_index(index)
+        self.addCleanup(server.server_close)
+        self.addCleanup(server.shutdown)
+
+        # `pip` says which Python is wanted rather than failing later.
+        done: subprocess.CompletedProcess[str] = self.pip_install(
+            self.root / "absurd-target", DISTRIBUTION,
+            {"PIP_INDEX_URL": url})
+        self.assertNotEqual(done.returncode, 0)
+        self.assertIn("requires a different Python", done.stderr)
+        self.assertIn(">=3.99", done.stderr)
 
     def test_wheel_is_named_correctly(self) -> None:
         """The wheel filename escapes the hyphen and carries the tag."""

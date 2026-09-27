@@ -1402,23 +1402,48 @@ expected every time the order changes, and is Claude's job.
   primitive for free.  And both `README.md` files are last for the
   matching reason: the usage they describe changes here, and writing
   them earlier means writing them twice.
-  * 6.7.1 - PEP 723 rather than a format of our own, decided
-    2026-09-26.  Requirements do belong in the program, which was the
-    proposal; the only question was the syntax, and PEP 723 is final,
-    is what `uv` and `pipx` already read, and costs nothing to parse.
-  * 6.7.2 - Not the module docstring, for two measured reasons.  `-OO`
-    strips docstrings: `python3 -OO` printed `doc is None` where
-    `python3` printed the text, so requirements read from `__doc__`
-    would vanish under optimisation, exactly as the `README.md` text
-    already can.  And a machine readable block in a docstring turns up
-    in `help(module)`, which is why the PEP uses comments.  Scanning the
-    source text sidesteps the first but not the second.
+  * 6.7.1 - Implement PEP 723 support.
+    A different format was considered but rejected.  PEP 723 is final.
+  * 6.7.2 - PEP 723 goes in `#` comments, and the block is read from the
+    file's source text rather than from anything the interpreter keeps.
+    Nothing else works: `python3 -OO` strips docstrings, so `__doc__` may
+    be `None`, and comments never exist at run time at all, being dropped
+    at compile time.  Reading the source makes both available, and the
+    remaining reason to prefer comments is that a TOML block inside a
+    docstring turns up in `help(module)`, which is why the PEP chose
+    comments.
   * 6.7.3 - Parsing costs no dependency.  `tomllib` has been in the
     standard library since 3.11 and is in `libpython3.12-stdlib` here,
     not in a separable package.  It does raise the floor from 3.10,
     which `X | Y` and `match` already set, to 3.11; worth saying out
     loud before it is discovered.
   * 6.7.4 - Wants the shared locator described in 6.11.1.
+
+  * 6.7.5 - The floor is stated, and it is as low as the code allows.
+    Decided 2026-09-27: `>=3.10`, because annotations such as
+    `Path | None` are evaluated at run time and `bootstrap.py` uses
+    `match`, and because **nothing here needs 3.11 or 3.12**.  Importing
+    `tomllib` for this step moves it to `>=3.11`, and that is the whole
+    cost of doing so.
+
+    Raising it further was considered and declined.  Every version
+    excluded is a machine that cannot run the thing, which is what this
+    project is about: from recollection rather than measurement, Ubuntu
+    22.04 LTS ships 3.10 and is supported to April 2027, Debian 12 ships
+    3.11, and RHEL 9 ships 3.9 and is supported to 2032.  Requiring 3.12
+    would turn all three away and buy nothing, since no 3.12 feature is
+    used.  What distributions actually ship is `2hmmdrpe`, still
+    unmeasured.
+
+    Until now the floor was stated nowhere at all, which is ironic for a
+    step about reading other people's `requires-python`.  The wheel now
+    carries `Requires-Python`, and that is worth the line: measured
+    2026-09-27, `pip` refuses a wheel it cannot satisfy with
+    `requires a different Python: 3.12.3 not in '>=3.99'`, where without
+    it the install succeeds and the program dies later on a `SyntaxError`
+    from an annotation, explaining nothing.  `build_wheel` takes a
+    `floor`, the `alt-venv` wheels pass `FLOOR`, and the throwaway test
+    packages claim nothing.
 
 * Step 6.8: `.pth` files, which is `3pfaibne`.  `install` uses
   `sys.path.insert`, which never executes a `.pth` file, so a package
