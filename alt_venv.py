@@ -51,7 +51,7 @@ import zipfile
 from collections.abc import Sequence
 from pathlib import Path
 from types import ModuleType
-from typing import overload
+from typing import IO, overload
 
 # The one place the version is written down.  `bootstrap.py`
 # prints it after importing, and the test suite stamps it into
@@ -263,6 +263,37 @@ class AltVEnv:
             made[-1].mkdir(parents=True, exist_ok=True)
         return made[0], made[1], made[2], made[3]
 
+    def digest(self, wheel: Path) -> str:
+        """Return the SHA-256 of a wheel, as hexadecimal.
+
+        The hash is of the file that arrived, not of whatever the index
+        claimed, which is the better of the two and the only one
+        available: `pip download` does not accept `--report`.  See Step
+        6.3.7 in `LOGBOOK.md`.  This is the identity Step 6.6 approves,
+        and the only thing that can notice a distribution being
+        re-uploaded under a version it already used.
+
+        The file is read in blocks, because a wheel with compiled
+        extensions can be tens of megabytes.
+
+        Arguments:
+        * `wheel` (`Path`):
+          Any file, though in practice a wheel.
+
+        Returns:
+        * (`str`): Sixty-four hexadecimal characters.
+        """
+        # Read in blocks rather than whole, because a wheel carrying
+        # compiled extensions runs to tens of megabytes.  64 KiB is
+        # large enough that the loop is not the cost.
+        running: hashlib._Hash = hashlib.sha256()
+        opened: IO[bytes]
+        block: bytes
+        with wheel.open("rb") as opened:
+            while block := opened.read(65536):
+                running.update(block)
+        return running.hexdigest()
+
     def version_key(self, wheel: Path) -> str:
         """Return the directory name an unpacked wheel belongs in.
 
@@ -406,8 +437,11 @@ class AltVEnv:
             shutil.rmtree(staging, ignore_errors=True)
             return target
 
-        # Keep the artifact, which is what Step 6.5 approves.
-        wheel.rename(wheels / wheel.name)
+        # Keep the artifact, and beside it the hash of what arrived,
+        # which is what Step 6.6 approves.
+        kept: Path = wheels / wheel.name
+        wheel.rename(kept)
+        kept.with_suffix(".sha256").write_text(f"{self.digest(kept)}\n")
         return target
 
     # What `install` accepts: a requirement as `pip` spells it, or a
@@ -575,7 +609,7 @@ class AltVEnv:
         never a partial one.  Two writers recording the *same* request
         may legitimately disagree, if the index gained a release between
         them; one wins, both trees exist, and the loser's becomes
-        garbage for Step 6.9 to cull.
+        garbage for Step 6.10 to cull.
 
         The request is stored inside the file as well as hashed into its
         name, so that a record can be read by a person and so that a

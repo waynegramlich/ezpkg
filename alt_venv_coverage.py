@@ -63,6 +63,7 @@ SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 """
 # SPDX-License-Identifier: MIT-0
 
+import os
 import sys
 import tempfile
 import threading
@@ -128,24 +129,87 @@ def report(tracer: trace.Trace, coverdir: Path) -> None:
     print(f"\nannotated sources in {coverdir}", file=sys.stderr)
 
 
+def trace_children(counts: Path) -> None:
+    """Arrange for child processes to be traced as well.
+
+    Most of what this suite does happens in children: every `pip`, and
+    `bootstrap.py` four or twelve times over.  `trace` follows neither
+    those nor threads by itself, so `bootstrap.py` reads as about 7%
+    however thoroughly its cases are exercised.
+
+    The only hook that reaches a process nobody wrote the command line
+    for is `sitecustomize`, which Python imports at startup from
+    `sys.path`.  `trace_hook/` holds one, and is put on `PYTHONPATH`
+    here rather than living anywhere Python would find on its own.
+
+    Arguments:
+    * `counts` (`Path`):
+      Where each child should leave its counts.  Created if needed.
+    """
+    # Children inherit the environment, so setting it here is enough.
+    counts.mkdir(parents=True, exist_ok=True)
+    hook: Path = Path(__file__).resolve().parent / "trace_hook"
+    existing: str = os.environ.get("PYTHONPATH", "")
+    os.environ["PYTHONPATH"] = (f"{hook}{os.pathsep}{existing}"
+                                if existing else str(hook))
+    os.environ["ALT_VENV_COVER"] = str(counts)
+
+
+def merge_children(tracer: trace.Trace, counts: Path) -> int:
+    """Fold every child's counts into this process's results.
+
+    `trace` can do this itself: `CoverageResults` reads a saved count
+    file through `infile` and merges another through `update`.  Each
+    child writes its own file, named after its process id, so no two
+    writers ever touch one path and nothing can be lost.
+
+    Arguments:
+    * `tracer` (`trace.Trace`):
+      The tracer that has finished running.
+    * `counts` (`Path`):
+      The directory the children wrote into.
+
+    Returns:
+    * (`int`): How many child count files were folded in.
+    """
+    # Merge into this process's own results, one child at a time.
+    mine: Any = tracer.results()
+    found: int = 0
+    child: Path
+    for child in sorted(counts.iterdir()):
+        mine.update(trace.CoverageResults(infile=str(child)))
+        found += 1
+    return found
+
+
 def main() -> None:
     """Measure the suite and report on it.
 
-    An optional first argument names the directory for the annotated
-    files.  Without one a temporary directory is made and its path is
-    printed, so that nothing is written into the project tree.
+    Arguments come in any order.  A directory names where the annotated
+    files go; without one a temporary directory is made and its path
+    printed, so nothing lands in the project tree.  `--children` also
+    traces child processes, which is the only way to see
+    `bootstrap.py` at all and costs several minutes.
     """
-    # Let the caller choose where annotations go, or make somewhere.
-    coverdir: Path = (Path(sys.argv[1]) if len(sys.argv) > 1
+    # Sort the arguments into the flag and the directory.
+    wanted: list[str] = [word for word in sys.argv[1:] if word != "--children"]
+    children: bool = "--children" in sys.argv[1:]
+    coverdir: Path = (Path(wanted[0]) if wanted
                       else Path(tempfile.mkdtemp(prefix="cover-")))
 
     # This directory has to be importable for the suite to be found.
     sys.path.insert(0, str(Path(__file__).resolve().parent))
+    counts: Path = coverdir / "child-counts"
+    if children:
+        trace_children(counts)
 
     # Instrument the worker threads as well as this one, then run.
     tracer: trace.Trace = build_tracer()
     threading.settrace(tracer.globaltrace)
     tracer.runfunc(run_suite)
+    folded: int = merge_children(tracer, counts) if children else 0
+    if children:
+        print(f"folded in {folded} child processes", file=sys.stderr)
     report(tracer, coverdir)
 
 

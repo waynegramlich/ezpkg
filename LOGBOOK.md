@@ -1050,7 +1050,7 @@ expected every time the order changes, and is Claude's job.
   * 6.2.4 - Validate locally what can be validated locally.  A
     requirement beginning with `-` is the one that matters: it would be
     read as an option, so `install("--index-url=...")` could repoint
-    the fetch at somebody else's index, which belongs with Step 6.5.
+    the fetch at somebody else's index, which belongs with Step 6.6.
     Requirement syntax is not ours to check: measured 2026-09-26, `pip`
     rejects `bad name with spaces` in 0.59 s with
     `ERROR: Invalid requirement`, locally, without touching the
@@ -1063,11 +1063,12 @@ expected every time the order changes, and is Claude's job.
     and is surfaced with pip's own words.  The one discrimination that
     really matters, first fetch versus staleness check in 6.3.8, comes
     from whether the cache is populated, which is known locally.
-* Step 6.3: A versioned cache built out of the wheels themselves.  This
-  is the fix for `0nicav`, priority 0 because the cache path carries no
-  version, interpreter or platform, so the same directory reached by a
-  different Python loads whatever the last one left.  It also settles
-  where the cache lives, `2wscdl`, and it carries the jail that Step 6.5
+* Step 6.3: A versioned cache built out of the wheels themselves.
+  (DONE 2026-09-26.)  This is the fix for `0nicav`, priority 0 because
+  the cache path carries no version, interpreter or platform, so the
+  same directory reached by a different Python loads whatever the last
+  one left.  It also settles
+  where the cache lives, `2wscdl`, and it carries the jail that Step 6.6
   needs.
 
   The pipeline is download, approve, unpack, import.  `pip download`
@@ -1119,9 +1120,12 @@ expected every time the order changes, and is Claude's job.
     2026-09-26: exit 2, it is an `install` option.  So hash the wheel
     that arrived rather than trusting what the index claimed, which is
     the better of the two anyway.  That hash is also the identity Step
-    6.5 approves.
+    6.6 approves.  Done: `AltVEnv.digest` reads the file in 64 KiB
+    blocks, and `unpack` writes the hexadecimal beside the kept wheel as
+    `<name>.sha256`.  It is the only thing that could notice a
+    distribution re-uploaded under a version it had already used.
   * 6.3.8 - Download **with** dependencies, not `--no-deps`.  The
-    transitive closure landing in `pending/` is exactly what Step 6.5.4
+    transitive closure landing in `pending/` is exactly what Step 6.6.4
     wants the user to see, and it is the thing nobody ever looks at.
   * 6.3.9 - Approval is a rename from `pending/` into `versions/`, which
     is atomic within one filesystem.  That gives Step 6.4 its answer for
@@ -1143,7 +1147,7 @@ expected every time the order changes, and is Claude's job.
     collision cannot pass as a hit.  Two writers recording the *same*
     request may honestly disagree, if the index gained a release between
     them; one wins, both trees exist, and the loser's is garbage for
-    Step 6.9.
+    Step 6.10.
   * 6.3.10 - The same failure wants opposite handling.  On a first fetch
     there is no cache, so an unreachable index must say so and stop; on
     a staleness check there is one, so it must be shrugged off, because
@@ -1164,7 +1168,8 @@ expected every time the order changes, and is Claude's job.
     `3pfaibne`.  For a pure Python wheel it is the `purelib` move and
     little else, but it is a real scope increase and should be entered
     knowingly.  Cases 3 and 12 already do this much.
-* Step 6.4: Concurrent installs.  Mostly answered by Step 6.3's
+* Step 6.4: Concurrent installs.  (DONE 2026-09-26.)  Mostly answered by
+  Step 6.3's
   construction rather than by a mechanism of its own, because nothing
   installs into a shared directory any more.  Done: a download directory
   per call, so two programs never share a staging area; unpacking inside
@@ -1176,20 +1181,118 @@ expected every time the order changes, and is Claude's job.
     removed it, and the second raised `FileNotFoundError` out of a
     constructor.  `unlink(missing_ok=True)` now, with a test that makes
     the read delete the file as a rival would have.
-  * 6.4.2 - Still open: a program killed mid-unpack leaves an
-    `unpacking-` directory under `pending/`, and a killed download
-    leaves its own.  Neither is importable, so neither is a correctness
-    problem, but they accumulate and belong to Step 6.9.
-  * 6.4.3 - Still open: every concurrency test here is one process,
-    using threads or a forced `OSError`.  A genuine two process test
-    would be stronger, and is the one thing that could still surprise
-    us.
-* Step 6.5: Security, and the Scavenger Hunt.  The architecture is in
+  * 6.4.2 - Carried to Step 6.10 rather than left open here: a program
+    killed mid-unpack leaves an `unpacking-` directory under
+    `pending/`, and a killed download leaves its own.  Neither is
+    importable, so neither is a correctness problem; they only
+    accumulate, which is culling work.
+  * 6.4.3 - Done 2026-09-26, and it took three tries to make it mean
+    anything.  `test_four_processes_share_one_cache` runs four real
+    programs against one cache and checks that one of everything comes
+    out, with the index made `slow` so the fetches overlap.  But
+    deleting the lost race recovery did not make it fail: the window
+    between asking whether a tree exists and renaming one into place is
+    a millisecond or two, and four processes drift further apart than
+    that while `pip` runs.  Moving the delay from the project page to
+    the wheel did not help either.
+  * 6.4.4 - What worked was a barrier.
+    `test_four_processes_collide_on_one_unpack` has each process
+    download first, wait until every one of them has arrived, and only
+    then unpack, which puts them inside the window deliberately.  With
+    four racers, deleting the recovery was caught two runs in three and
+    then none in five, which is variance rather than a test.  With
+    eight it was caught six times out of six, and the correct code
+    passes every time.  Both tests are worth keeping: the first shows
+    the outcome under honest concurrency, the second exercises the
+    race.
+  * 6.4.5 - The lesson, which cost most of the time here: a concurrency
+    test that passes proves nothing until the fix it guards has been
+    removed and the test has been seen to fail.  Timing tests are
+    especially good at passing for no reason.
+* Step 6.5: Coverage of child processes.  (DONE 2026-09-26.)  Most of
+  what this suite does happens in children, and `trace` follows
+  neither those nor threads, so `bootstrap.py` read as 7% however
+  thoroughly its twelve cases were exercised.
+  * 6.5.1 - `trace` merges its own results: `CoverageResults` reads a
+    saved count file through `infile` and folds another in through
+    `update`, so no third party tool is wanted.  Each child writes its
+    own file named after its process id, so there is no shared file for
+    two writers to lose an entry in.
+  * 6.5.2 - The only hook that reaches a process nobody wrote the
+    command line for is `sitecustomize`, which Python imports from
+    `sys.path` at startup.  It lives in `trace_hook/`, which is **not**
+    anywhere Python looks by default: `alt_venv_coverage.py --children`
+    puts it on `PYTHONPATH`.  A `sitecustomize.py` in the project root
+    would quietly affect every interpreter started from that directory.
+  * 6.5.3 - Two mistakes worth not repeating.  Reading the counts while
+    the tracer still runs raises
+    `RuntimeError: dictionary changed size during iteration`, so
+    tracing has to be switched off first.  And
+    `CoverageResults.write_results` also writes annotated `.cover` files
+    into the working directory, which littered the project root; the
+    counts are pickled directly instead.
+  * 6.5.4 - `pip` is skipped by the hook.  It is nobody here's code and
+    it is most of the cost: case 6, which runs `pip._internal` in
+    process, went from 1.21 s to 10.33 s traced, where case 3 went from
+    0.16 s to 0.29 s.
+  * 6.5.5 - The result on the fast suite: `bootstrap.py` 7% to 41%,
+    113 child processes folded in, 60 tests in 357 s against 70 s.
+  * 6.5.6 - **`2wtmifs` is now measured rather than argued.**  Cases 3
+    and 12 each have exactly seven uncovered lines, the same seven: the
+    wheel tag matcher's platform branch,
+    `or (machine in name and "linux" in name and sys.platform ==
+    "linux")`, has **never executed**, and neither has
+    `raise RuntimeError("no compatible wheel found")`.  The issue said
+    the matcher "agreed with pip for one package on one platform"; the
+    interesting half of it has never run at all.
+  * 6.5.7 - The `.data/purelib` and `.data/platlib` move in cases 3 and
+    12 has never executed either, for the same reason it had never
+    executed in `AltVEnv.unpack`: no wheel the suite builds has a
+    `.data` tree.  That gap hid a real bug in the second stage, a
+    `.data` directory left behind after the move, found the same day.
+    The pasted code has the identical blind spot.
+  * 6.5.8 - What is not a defect: on the fast suite, cases 1, 2, 4, 5
+    and 7 to 10 are barely covered because `FAST` selects only 3, 6, 11
+    and 12, and 98 module level lines are `run_tests`,
+    `measure_source`, `format_table` and `directory_size`, which run
+    only when `bootstrap.py` is invoked from the command line.
+  * 6.5.9 - The complete run settles it.  `ALT_VENV_TEST=COMPLETE` with
+    children traced: 60 tests in 837 s, 184 child processes, and
+    `bootstrap.py` at 72%.  **Ten of the twelve cases are covered
+    completely, 0 lines missed.**  The only dead code inside any pasted
+    case is the seven lines in each of cases 3 and 12 named above: the
+    matcher's platform branch, its `raise`, and the `.data` move.  The
+    remaining 98 are the measurement harness, which runs from the
+    command line and produced the Task 5 chart by hand.
+  * 6.5.10 - So the hook is worth keeping.  It turned one open issue
+    into a measurement, found the same `.data` blind spot in the pasted
+    code that had just hidden a real bug in the second stage, and
+    cleared ten of twelve cases outright.  Nothing else here could have
+    said any of that.
+  * 6.5.11 - Done 2026-09-26.  `build_wheel` gained a `tag`, the index
+    publishes a second `alt-venv` wheel wearing this interpreter's
+    compiled tag and carrying a `.data/purelib` member, and a third
+    test serves one `cp312-cp312-win_amd64` wheel so that nothing
+    matches.  Cases 3 and 12 prefer the tagged wheel, move its `.data`
+    member up beside the module, and refuse the Windows one with
+    `no compatible wheel found` and no traceback.  `bootstrap.py` is at
+    75% and **all twelve pasted cases are covered completely**; the
+    remaining 98 lines are the command line measurement harness.
+  * 6.5.12 - No new bug was found in that round, which is worth
+    recording as a result rather than a disappointment.  The matcher
+    behaved correctly for all three shapes a Linux machine can build.
+    The earlier rounds did find three: the stray `.data` directory, the
+    `repair_module_layout` unlink race, and a jail boundary crossed
+    while staging.  Cost to keep: 62 tests in 87 s normally, about
+    seventeen minutes with `--children` on `COMPLETE`, and the hook is
+    off unless asked for.
+
+* Step 6.6: Security, and the Scavenger Hunt.  The architecture is in
   `README.md`, written as the page a stranger lands on: unapproved
   packages are downloaded to a holding area, the user is shown what
   arrived and approves it, and only then is anything installed and
   imported.  Approval is once per program rather than once per run.
-  * 6.5.1 - Write the threat model down first, because the claim has to
+  * 6.6.1 - Write the threat model down first, because the claim has to
     be narrow to be true.  A malicious program author gets no
     protection at all, since the bootstrap is their code and they can
     delete the prompt.  A typosquatted package gets very little:
@@ -1199,51 +1302,51 @@ expected every time the order changes, and is Claude's job.
     hashes, not ceremony.  What the Hunt genuinely defends is
     inattention to the dependency set, and that is worth saying
     plainly; claiming more would make it theatre.
-  * 6.5.2 - The real guarantee is the ordering:  download, approve,
+  * 6.6.2 - The real guarantee is the ordering:  download, approve,
     install.  With `--only-binary :all:` a wheel is an inert zip, so no
     third party code has run at the moment the user is asked.  Neither
     `uv run` nor `pip-run` can make that claim, and it should be stated
     as the architectural promise rather than left as an aside.
-  * 6.5.3 - Refuse sdists.  `--only-binary :all:` is the one lever
+  * 6.6.3 - Refuse sdists.  `--only-binary :all:` is the one lever
     worth more than all the rest, because an sdist runs arbitrary code
     at install time through `setup.py` and a wheel does not.
-  * 6.5.4 - Show the transitive closure.  Nobody ever looks at what
+  * 6.6.4 - Show the transitive closure.  Nobody ever looks at what
     `pip install requests` actually pulls in, and a list the user must
     page through is the first time most people would see the number.
     That alone justifies the mechanism.
-  * 6.5.5 - Approve a hash, not a name.  Approving "coverage" means
+  * 6.6.5 - Approve a hash, not a name.  Approving "coverage" means
     nothing; approving `coverage 7.16.1 sha256=e82e10b9...` is a real
     decision, and a version bump then correctly re-prompts.  The
     identity to record is the one Step 6.3 already fetches.
-  * 6.5.6 - Non-interactive execution is a hard requirement, not an
+  * 6.6.6 - Non-interactive execution is a hard requirement, not an
     edge case.  A program under cron, CI, systemd, a pipe or a
     double-clicked launcher has no tty, and the Hunt would hang or
     crash.  Needs `sys.stdin.isatty()`, a documented approval file or
     environment variable for that case, and a clear message when
     neither is present.
-  * 6.5.7 - Habituation is the standing objection and deserves an
+  * 6.6.7 - Habituation is the standing objection and deserves an
     answer in the `README.md`.  Every repeated confirmation ritual
     decays into muscle memory, as certificate warnings and UAC did.
     Once per program rather than once per run is the mitigation, and
     saying so is the reply.
-  * 6.5.8 - One prompt for the whole set, not `N` title pastes, is
+  * 6.6.8 - One prompt for the whole set, not `N` title pastes, is
     worth considering.  The same visibility at a tenth of the tedium,
     and the title paste is the part that buys least.  The cost lands on
     the person who did not choose the dependencies, and `uv run` asks
     them for nothing.
-  * 6.5.9 - The approval store is a local allowlist, so anything
+  * 6.6.9 - The approval store is a local allowlist, so anything
     running as the user can pre-approve itself.  Probably acceptable,
     since malware with write access to a home directory has better
     options, but it should be a stated decision rather than an
     oversight.
-  * 6.5.10 - Typosquatting lands in the gap between the distribution
+  * 6.6.10 - Typosquatting lands in the gap between the distribution
     name and the import name in `install`, because `pip install` takes
     the name nobody reads.  PEP 503 indexes publish `#sha256=`
     fragments, so hashes can be pinned as well.
-  * 6.5.11 - `README.md` still has `## Security Issues of Executing
+  * 6.6.11 - `README.md` still has `## Security Issues of Executing
     Unvetted Code` marked TBD, and it is the section the whole feature
     rests on.  The sub-items above are its outline.
-* Step 6.6: Find the bootstrap, and notice when it is stale.  Python has
+* Step 6.7: Find the bootstrap, and notice when it is stale.  Python has
   a great many introspection facilities, and the direct one is
   `sys.modules["__main__"].__file__` rather than walking frames with
   `inspect`.  Read that file and look for the bootstrap.  It has to
@@ -1256,7 +1359,7 @@ expected every time the order changes, and is Claude's job.
   unknown hash is somebody's edited copy and should be passed over in
   silence.  What to do about a stale bootstrap -- warn, refuse, or offer
   to rewrite the file -- is a separate decision.
-* Step 6.7: Messages.  When should anything be said: on creating the
+* Step 6.8: Messages.  When should anything be said: on creating the
   directory, on each download, on a stale bootstrap?  One constraint is
   hard.  A library must never write to standard output, because the
   host program's output may be piped or parsed.  `logging` with a
@@ -1269,34 +1372,42 @@ expected every time the order changes, and is Claude's job.
   keeps the `raise` on one source line at 73 columns, where inlining it
   is 121 and wrapping it costs two, so `SHARED_LINES` would go from 7
   to 8.  Not done, because the URL depends on the repository name.
-* Step 6.8: Declared requirements, which is `2hsrpbd`.  Read the
+* Step 6.9: Declared requirements, which is `2hsrpbd`.  Read the
   calling script's PEP 723 `# /// script` block instead of a package
   name written into the bootstrap.  It builds on Step 6.2, and it
   makes the same file work under `uv run` for nothing, which is worth a
   great deal given that prior art is why this project has to justify
   itself at all.
-* Step 6.9: Garbage collection.  Cull packages that have not been used
+* Step 6.10: Garbage collection.  Cull packages that have not been used
   for a while.  Not by access time: nearly every Linux filesystem
   mounts `relatime`, so `atime` updates at most once a day and not on
   ordinary reads, and `noatime` switches it off altogether, so culling
   on it would delete packages in daily use.  `install` is the only
   thing that reads the cache, so have it record use in a sidecar file
   and cull on that.
-* Step 6.10: `.pth` files, which is `3pfaibne`.  `install` uses
+
+  Two kinds of litter arrive here from Step 6.4.2.  A program killed
+  mid-unpack leaves an `unpacking-` directory under `pending/`, and a
+  killed download leaves its own temporary directory beside it.  Neither
+  is importable and neither is a correctness problem, so culling is the
+  whole of the fix; the `unpacking-` prefix is there to make them
+  identifiable.  A tree in `versions/` that no request record names any
+  longer is the third kind, and arrives from Step 6.3.13.
+* Step 6.11: `.pth` files, which is `3pfaibne`.  `install` uses
   `sys.path.insert`, which never executes a `.pth` file, so a package
   relying on one is quietly half installed.  `site.addsitedir` is the
   experiment.
-* Step 6.11: The `README.md` text.  What it should say needs discussing,
+* Step 6.12: The `README.md` text.  What it should say needs discussing,
   and it has to describe the versioned layout once Step 6.3 lands.
   Note the current behaviour: it is rewritten on every construction
   rather than only when absent, which makes writing a file a side
   effect of making an object and will surprise somebody.
-* Step 6.12: A fetch from the real PyPI, carried over from Task 5.  It is
+* Step 6.13: A fetch from the real PyPI, carried over from Task 5.  It is
   the only thing that can settle Task 3's conclusion that a bootstrap
   needs `python3-pip` plus a TLS trust store, since that claim is about
   trusting the public certificate authorities and a private certificate
   tests the opposite.  It is also just `install` against the real index.
-* Step 6.13: And more.  A place holder for additional steps.
+* Step 6.14: And more.  A place holder for additional steps.
 
 ### Step 6.1: Error on a failed fetch  (DONE 2026-09-26)
 
@@ -1531,6 +1642,30 @@ Not yet started, in priority order.
 
   Various thoughts:
   * Wayne (2026-09-22): Let's revisit this issue after Experiment 2.
+  * Claude (2026-09-26): Measured, by tracing child processes; see Step
+    6.5.  The matcher's platform branch,
+    `or (machine in name and "linux" in name and sys.platform ==
+    "linux")`, has **never executed** in any test, and neither has
+    `raise RuntimeError("no compatible wheel found")`.  So the worry was
+    not merely that the matcher is a stand-in: the half of it that would
+    pick a compiled wheel has never been run at all, and the tests have
+    only ever exercised the `py3-none-any` path.  Reaching it needs a
+    platform tagged wheel in the test index, which is Step 6.5.11.
+    The complete run confirms it: with all twelve cases exercised, ten
+    are covered completely and these seven lines are the only dead code
+    in any of them.
+  * Claude (2026-09-26): And now exercised, by Step 6.5.11, which
+    publishes a wheel wearing this interpreter's compiled tag alongside
+    the pure one.  The matcher **behaved correctly**: it preferred the
+    tagged wheel, moved its `.data/purelib` member up beside the module,
+    and refused a `cp312-cp312-win_amd64` wheel with
+    `no compatible wheel found` rather than installing it.  So the
+    predicted failure did not appear for any shape a Linux machine can
+    build.  What remains unverified is narrower than the issue as
+    written: musl against glibc, which needs an Alpine machine, and
+    whether a genuinely compiled wheel imports, which a pure Python
+    wheel wearing a compiled name cannot show.  Wayne's call whether
+    that is still a priority 2.
 
 * **`.pth` files are installed but never executed. (3pfaibne)**  Every case
   writes coverage's `a1_coverage.pth`, its hook for measuring

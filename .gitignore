@@ -8,6 +8,9 @@ test_results.txt
 .hgignore
 .hgtags
 
+# Stuff left over by testing.
+trace_hook/
+
 # Some Python testing leaves stuff behind that needs to be ignored.
 __pycache__/
 

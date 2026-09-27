@@ -88,6 +88,31 @@ SUMMARY: str = "Fetch Python packages that are not preinstalled."
 # run used to fail.
 FAST_CASES: tuple[str, ...] = ("3", "6", "11", "12")
 
+def platform_tag() -> str:
+    """Return a compatibility tag this interpreter would accept.
+
+    Built from the running interpreter rather than written down, so the
+    wheel it names is one `pip` will install and one the matcher in
+    cases 3 and 12 of `bootstrap.py` will recognise: that matcher looks
+    for `cp312-cp312-`, then for the machine name and `linux` in the
+    same filename.
+
+    Returns:
+    * (`str`): Something like `cp312-cp312-linux_x86_64`.
+    """
+    # A wheel filename may not contain a hyphen inside a field.
+    release: str = f"{sys.version_info.major}{sys.version_info.minor}"
+    implementation: str = ("cp" if sys.implementation.name == "cpython"
+                           else "py")
+    machine: str = sysconfig.get_platform().replace("-", "_")
+    machine = machine.replace(".", "_")
+    return f"{implementation}{release}-{implementation}{release}-{machine}"
+
+
+# How long the `slow` fault waits.  Long enough that several processes
+# fetching at once overlap, short enough not to lengthen the suite.
+SLOW_SECONDS: float = 0.4
+
 # How long the `hang` fault waits.  Longer than the client timeouts the
 # failure tests set, and short enough not to slow the suite down.
 HANG_SECONDS: float = 3.0
@@ -174,7 +199,8 @@ def escaped_name(distribution: str) -> str:
 
 
 def build_wheel(module: Path, distribution: str, version: str,
-                summary: str, directory: Path) -> Path:
+                summary: str, directory: Path,
+                tag: str = "py3-none-any") -> Path:
     """Build a pure Python wheel holding one module.
 
     A wheel is a zip archive with an agreed layout, so building one
@@ -185,9 +211,14 @@ def build_wheel(module: Path, distribution: str, version: str,
     with both fields left empty, because it cannot contain its own
     digest.
 
-    The tag is `py3-none-any`, meaning any Python 3, any ABI, any
-    platform.  That is what makes the wheel `pip` installable
-    everywhere without a compiled component.
+    The default tag is `py3-none-any`, meaning any Python 3, any ABI,
+    any platform, which is what makes a wheel `pip` installable
+    everywhere without a compiled component.  Another tag can be given,
+    and then the wheel is pure Python wearing a compiled wheel's name.
+    That is a faithful input for anything which reads wheel filenames,
+    such as the matcher in cases 3 and 12 of `bootstrap.py`, because
+    that code never opens the archive; it is not a substitute for a
+    genuinely compiled wheel.  See Step 6.5.11 in `LOGBOOK.md`.
 
     Arguments:
     * `module` (`Path`):
@@ -200,6 +231,8 @@ def build_wheel(module: Path, distribution: str, version: str,
       The one line summary for `METADATA`.
     * `directory` (`Path`):
       Where to write the wheel.  Created if it does not exist.
+    * `tag` (`str`):
+      The compatibility tag, as a wheel filename spells it.
 
     Returns:
     * (`Path`): The wheel that was written.
@@ -214,7 +247,8 @@ def build_wheel(module: Path, distribution: str, version: str,
             f"Version: {version}\nSummary: {summary}\n").encode(),
         f"{info}/WHEEL": (b"Wheel-Version: 1.0\n"
                           b"Generator: alt_venv_test\n"
-                          b"Root-Is-Purelib: true\nTag: py3-none-any\n"),
+                          b"Root-Is-Purelib: true\n"
+                          + f"Tag: {tag}\n".encode()),
     }
 
     # Hash every member, then append the self referential RECORD row.
@@ -232,7 +266,7 @@ def build_wheel(module: Path, distribution: str, version: str,
 
     # A wheel is just a zip archive; write every member into one.
     directory.mkdir(parents=True, exist_ok=True)
-    wheel: Path = directory / f"{escaped}-{version}-py3-none-any.whl"
+    wheel: Path = directory / f"{escaped}-{version}-{tag}.whl"
     archive: zipfile.ZipFile
     with zipfile.ZipFile(wheel, "w", zipfile.ZIP_DEFLATED) as archive:
         for path, content in members.items():
@@ -352,8 +386,11 @@ class _IndexServer(http.server.ThreadingHTTPServer):
       Maps a path suffix to what should go wrong for a request whose
       path ends that way.  The fault names are `truncate`, which sends
       half the file and a `Content-Length` that agrees with the half,
-      `missing`, which answers 404, `error`, which answers 500, and
-      `hang`, which waits `HANG_SECONDS` and then answers normally.
+      `missing`, which answers 404, `error`, which answers 500,
+      `hang`, which waits `HANG_SECONDS` and then answers normally,
+      and `slow`, which waits `SLOW_SECONDS` and then answers
+      normally.  `slow` exists so that several processes fetching at
+      once genuinely overlap rather than finishing one after another.
       An empty table, which is the default, serves everything
       correctly.
 
@@ -445,13 +482,13 @@ class _IndexHandler(http.server.SimpleHTTPRequestHandler):
 
         Arguments:
         * `fault` (`str`):
-          One of `truncate`, `missing`, `error` or `hang`.  See
+          One of `truncate`, `missing`, `error`, `hang` or `slow`.  See
           `_IndexServer.faults`.
 
         Returns:
         * (`bool`): True when the request has been answered and the
-          caller should stop.  `hang` returns False, because it delays
-          a correct answer rather than replacing it.
+          caller should stop.  `hang` and `slow` return False, because
+          they delay a correct answer rather than replacing it.
         """
         # Two of the faults are nothing but a status code.
         if fault == "missing":
@@ -461,9 +498,13 @@ class _IndexHandler(http.server.SimpleHTTPRequestHandler):
             self.send_error(500, "fault: error")
             return True
 
-        # A hang delays the real answer rather than replacing it.
+        # A hang or a slow answer delays the real one rather than
+        # replacing it.
         if fault == "hang":
             time.sleep(HANG_SECONDS)
+            return False
+        if fault == "slow":
+            time.sleep(SLOW_SECONDS)
             return False
 
         # A truncated file is the interesting one: the download looks
@@ -632,6 +673,52 @@ def serve_index(root: Path,
     return server, f"{server.scheme}://{address[0]}:{address[1]}/"
 
 
+def with_path(*entries: Path) -> str:
+    """Return `PYTHONPATH` with `entries` put in front of it.
+
+    Replacing `PYTHONPATH` outright would discard whatever is already
+    there, and what is already there may be the `trace_hook` directory
+    that `alt_venv_coverage.py` uses to measure this very child; see
+    Step 6.6 in `LOGBOOK.md`.
+
+    Arguments:
+    * `entries` (`Path`):
+      Directories to put first, in order.
+
+    Returns:
+    * (`str`): A value for `PYTHONPATH`.
+    """
+    # Keep whatever was inherited, behind what the caller asked for.
+    inherited: str = os.environ.get("PYTHONPATH", "")
+    wanted: list[str] = [str(entry) for entry in entries]
+    if inherited:
+        wanted.append(inherited)
+    return os.pathsep.join(wanted)
+
+
+def inject(case: unittest.TestCase, server: _IndexServer, suffix: str,
+           fault: str) -> None:
+    """Make a server misbehave for the rest of one test only.
+
+    The entry is removed by a cleanup rather than by the test, so a
+    failing assertion cannot leave the fault in place for whatever test
+    `unittest` runs next.  Shared by every class that runs a server.
+
+    Arguments:
+    * `case` (`unittest.TestCase`):
+      The test, which the cleanup is registered on.
+    * `server` (`_IndexServer`):
+      The server to afflict.
+    * `suffix` (`str`):
+      The path suffix to afflict, such as `.whl`.
+    * `fault` (`str`):
+      The fault name.  See `_IndexServer.faults`.
+    """
+    # Register the removal first, so an exception cannot skip it.
+    case.addCleanup(server.faults.pop, suffix, None)
+    server.faults[suffix] = fault
+
+
 class AltVEnvTest(unittest.TestCase):
     """Build, exercise and discard the Experiment 2 pipeline.
 
@@ -648,8 +735,11 @@ class AltVEnvTest(unittest.TestCase):
       The temporary directory holding everything this class builds.
     * `server` (`_IndexServer`):
       The server publishing `index`.
+    * `tagged` (`Path`):
+      A second wheel of the same package, wearing this interpreter's
+      compiled tag and carrying a `.data/purelib` member.
     * `wheel` (`Path`):
-      The wheel built from `alt_venv.py`.
+      The wheel built from `alt_venv.py`, tagged `py3-none-any`.
 
     Constructor:
     * `AltVEnvTest()`, by `unittest` rather than by hand.
@@ -660,17 +750,27 @@ class AltVEnvTest(unittest.TestCase):
     index_url: str
     root: Path
     server: _IndexServer
+    tagged: Path
     wheel: Path
 
     @classmethod
     def setUpClass(cls) -> None:
-        """Build the wheel and the index, then publish it over HTTP."""
+        """Build the wheels and the index, then publish it over HTTP."""
         # Publish this project into a throwaway index.
         cls.root = Path(tempfile.mkdtemp(prefix="alt_venv-"))
         module: Path = Path(__file__).resolve().parent / f"{MODULE}.py"
         cls.wheel = build_wheel(module, DISTRIBUTION, VERSION, SUMMARY,
                                 cls.root / "dist")
-        cls.index = build_index([cls.wheel], cls.root / "index")
+        # A second wheel, wearing this interpreter's compiled tag and
+        # carrying a `.data/purelib` member.  Cases 3 and 12 prefer it,
+        # which is the only way to reach their platform branch and their
+        # `.data` move; see Step 6.5.11 in `LOGBOOK.md`.
+        cls.tagged = build_wheel(module, DISTRIBUTION, VERSION, SUMMARY,
+                                 cls.root / "dist", tag=platform_tag())
+        add_data_member(cls.tagged, "purelib", "beside_alt_venv.py",
+                        "BESIDE = True\n")
+        cls.index = build_index([cls.wheel, cls.tagged],
+                                cls.root / "index")
 
         # Start the server last, so nothing can fail after it is up.
         cls.server, cls.index_url = serve_index(cls.index)
@@ -788,11 +888,7 @@ class AltVEnvTest(unittest.TestCase):
         return run_bootstrap_case(label, home, self.index_url)
 
     def inject(self, suffix: str, fault: str) -> None:
-        """Make the server misbehave for the rest of one test only.
-
-        The entry is removed by a cleanup rather than by the test, so a
-        failing assertion cannot leave the fault in place for whatever
-        test `unittest` runs next.
+        """Make this class's server misbehave for one test only.
 
         Arguments:
         * `suffix` (`str`):
@@ -800,9 +896,8 @@ class AltVEnvTest(unittest.TestCase):
         * `fault` (`str`):
           The fault name.  See `_IndexServer.faults`.
         """
-        # Register the removal first, so an exception cannot skip it.
-        self.addCleanup(self.server.faults.pop, suffix, None)
-        self.server.faults[suffix] = fault
+        # The shared helper does the work; see `inject` above.
+        inject(self, self.server, suffix, fault)
 
     def test_a_truncated_wheel_fails_the_install(self) -> None:
         """Half a wheel is refused rather than half installed."""
@@ -886,9 +981,15 @@ class AltVEnvTest(unittest.TestCase):
         payload: dict[str, Any]
         with urllib.request.urlopen(url, timeout=30) as response:
             payload = json.load(response)
-        self.assertEqual(len(payload["urls"]), 1)
-        self.assertEqual(payload["urls"][0]["filename"], self.wheel.name)
-        self.assertTrue(payload["urls"][0]["url"].endswith(self.wheel.name))
+
+        # Both wheels are listed, the pure one and the tagged one, so
+        # that cases 3 and 12 have something to choose between.
+        listed: list[str] = sorted(entry["filename"]
+                                   for entry in payload["urls"])
+        self.assertEqual(listed, sorted([self.wheel.name, self.tagged.name]))
+        entry: dict[str, Any]
+        for entry in payload["urls"]:
+            self.assertTrue(entry["url"].endswith(entry["filename"]))
 
     def test_json_api_reports_a_missing_project(self) -> None:
         """A project the index does not hold is a 404, as on PyPI."""
@@ -954,6 +1055,69 @@ class AltVEnvTest(unittest.TestCase):
         source: Path = Path(__file__).resolve().parent / f"{MODULE}.py"
         alt_venv.AltVEnv(self.root / "elsewhere")
         self.assertTrue(source.is_file())
+
+    def test_the_stdlib_cases_choose_the_tagged_wheel(self) -> None:
+        """Cases 3 and 12 prefer the compiled tag, and move its `.data`.
+
+        Both regions were dead until the index carried a wheel with this
+        interpreter's tag: the matcher's platform branch short-circuits
+        on `py3-none-any`, and its `.data` move needs a wheel with a
+        `.data` tree.  See `2wtmifs` and Step 6.5.11.
+
+        What this cannot check is that a genuinely compiled wheel would
+        import, since ours is pure Python wearing a compiled name.
+        """
+        # The `.data/purelib` member is the evidence: it only appears
+        # beside the module if the move ran.
+        label: str
+        home: Path
+        done: subprocess.CompletedProcess[str]
+        for label in ("3", "12"):
+            with self.subTest(case=label):
+                home = Path(tempfile.mkdtemp(prefix=f"tagged-{label}-",
+                                             dir=self.root))
+                done = run_bootstrap_case(label, home, self.index_url)
+                self.assertEqual(done.returncode, 0, done.stderr[-400:])
+                moved: list[Path] = list(
+                    (home / ".alt_venv").rglob("beside_alt_venv.py"))
+                self.assertEqual(len(moved), 1, done.stdout)
+                self.assertNotIn(".data", str(moved[0]))
+
+    def test_no_compatible_wheel_is_reported(self) -> None:
+        """A wheel for another platform is refused, not installed.
+
+        The `raise RuntimeError("no compatible wheel found")` in cases 3
+        and 12 had never executed.  This is as close as a Linux machine
+        can get to the failure `2wtmifs` predicts, which is a manylinux
+        wheel being taken on Alpine: here the only wheel on offer is
+        tagged for Windows, so nothing matches.
+        """
+        # An index of its own, holding one wheel for the wrong platform.
+        module: Path = Path(__file__).resolve().parent / f"{MODULE}.py"
+        wrong: Path = build_wheel(module, DISTRIBUTION, VERSION, SUMMARY,
+                                  self.root / "wrong-dist",
+                                  tag="cp312-cp312-win_amd64")
+        index: Path = build_index([wrong], self.root / "wrong-index")
+        server: _IndexServer
+        url: str
+        server, url = serve_index(index)
+        self.addCleanup(server.server_close)
+        self.addCleanup(server.shutdown)
+
+        # Both cases read the JSON API, so both see the tag and give
+        # up.  Case 12 as well as case 3, because each carries its own
+        # copy of the matcher and its own `raise`.
+        label: str
+        home: Path
+        done: subprocess.CompletedProcess[str]
+        for label in ("3", "12"):
+            with self.subTest(case=label):
+                home = Path(tempfile.mkdtemp(prefix=f"wrong-{label}-",
+                                             dir=self.root))
+                done = run_bootstrap_case(label, home, url)
+                self.assertNotEqual(done.returncode, 0)
+                self.assertIn("no compatible wheel found", done.stderr)
+                self.assertNotIn("Traceback", done.stderr)
 
     def test_json_api_cases_bootstrap_end_to_end(self) -> None:
         """Cases 3 and 12 fetch and import through the JSON API."""
@@ -1125,7 +1289,7 @@ class AltVEnvTest(unittest.TestCase):
         done: subprocess.CompletedProcess[str] = subprocess.run(
             [sys.executable, "-c",
              f"import {MODULE}; print({MODULE}.AltVEnv())"],
-            env=dict(os.environ, PYTHONPATH=str(target),
+            env=dict(os.environ, PYTHONPATH=with_path(target),
                      HOME=str(self.root / "fake_home")),
             capture_output=True, text=True, check=False)
         self.assertEqual(done.returncode, 0, done.stderr)
@@ -1394,7 +1558,7 @@ class InstallTest(unittest.TestCase):
             "    print(one.__name__, one.__version__)")
         environment: dict[str, str] = dict(
             os.environ, PIP_INDEX_URL=self.index_url,
-            PYTHONPATH=str(Path(__file__).resolve().parent),
+            PYTHONPATH=with_path(Path(__file__).resolve().parent),
             HOME=str(self.root / "home"))
         done: subprocess.CompletedProcess[str] = subprocess.run(
             [sys.executable, "-c", script], env=environment,
@@ -1565,8 +1729,9 @@ class InstallTest(unittest.TestCase):
 
         # The artifact is kept, the tree is unpacked, the holding area
         # is empty, and only the tree is on the path.
-        self.assertEqual([p.name for p in wheels.iterdir()],
-                         ["widget-1.2.3-py3-none-any.whl"])
+        self.assertEqual([p.name for p in sorted(wheels.iterdir())],
+                         ["widget-1.2.3-py3-none-any.sha256",
+                          "widget-1.2.3-py3-none-any.whl"])
         self.assertEqual(len(list(versions.iterdir())), 1)
         self.assertEqual(list(pending.iterdir()), [])
         tree: Path = next(versions.iterdir())
@@ -1583,7 +1748,7 @@ class InstallTest(unittest.TestCase):
         # Unpacking happens inside the jail, so `versions` holds only
         # finished trees and never a partial one.
         self.assertEqual([p.name for p in versions.iterdir()],
-                         [venv.version_key(next(wheels.iterdir()))])
+                         [venv.version_key(next(wheels.glob("*.whl")))])
 
     def test_unpack_moves_a_data_purelib_beside_the_modules(self) -> None:
         """A wheel's `.data/purelib` contents land beside its modules.
@@ -1631,7 +1796,7 @@ class InstallTest(unittest.TestCase):
         requests: Path
         pending, wheels, versions, requests = venv.paths()
         self.assertEqual(len(list(versions.iterdir())), 1)
-        self.assertEqual([p.name for p in wheels.iterdir()],
+        self.assertEqual([p.name for p in wheels.glob("*.whl")],
                          ["sprocket-1.0.0-py3-none-any.whl"])
         self.assertEqual(list(pending.iterdir()), [])
         self.assertEqual(len(venv.remember("sprocket<2") or []), 1)
@@ -1734,6 +1899,167 @@ class InstallTest(unittest.TestCase):
             self.assertIsNotNone(venv.remember("widget"))
             shutil.rmtree(next(venv.paths()[2].iterdir()))
             self.assertIsNone(venv.remember("widget"))
+
+    def test_four_processes_share_one_cache(self) -> None:
+        """Four real programs fetching at once leave one of everything.
+
+        Everything else here proves concurrency with threads or a forced
+        `OSError`, which is simulation; this is observation.  The index
+        is made slow on purpose, so the four genuinely overlap rather
+        than finishing one after another, and they are started before
+        any of them can finish.
+        """
+        # Delay the wheel itself, not the project page.  The page is
+        # read during resolution, long before anything is unpacked, so
+        # delaying it lets the four drift apart again; delaying the
+        # wheel is what makes them arrive at the unpacking together.
+        inject(self, self.server, ".whl", "slow")
+        cache: Path = self.root / "four_ways"
+        here: str = str(Path(__file__).resolve().parent)
+        script: str = (
+            "import sys\n"
+            f"sys.path.insert(0, {here!r})\n"
+            "import alt_venv\n"
+            "from pathlib import Path\n"
+            f"cache = Path({str(cache)!r})\n"
+            "one = alt_venv.AltVEnv(cache).install('sprocket<2')\n"
+            "print(one.__version__)\n")
+        environment: dict[str, str] = dict(
+            os.environ, PIP_INDEX_URL=self.index_url,
+            HOME=str(self.root / "four_home"))
+        environment.pop("VIRTUAL_ENV", None)
+
+        # Start all four, then wait: none can finish before the last
+        # one has started.
+        started: list[subprocess.Popen[str]] = [
+            subprocess.Popen([sys.executable, "-c", script],
+                             env=environment, stdout=subprocess.PIPE,
+                             stderr=subprocess.PIPE, text=True)
+            for _ in range(4)]
+        finished: list[tuple[int, str, str]] = []
+        child: subprocess.Popen[str]
+        for child in started:
+            out: str
+            err: str
+            out, err = child.communicate(timeout=300)
+            finished.append((child.returncode, out.strip(), err.strip()))
+
+        # Every one of them has to succeed, with the same answer.
+        code: int
+        out_text: str
+        err_text: str
+        for code, out_text, err_text in finished:
+            self.assertEqual(code, 0, err_text[-400:])
+            self.assertEqual(out_text, "1.0.0")
+
+        # And the cache has to hold exactly one of everything.
+        venv: alt_venv.AltVEnv = alt_venv.AltVEnv(cache)
+        pending: Path
+        wheels: Path
+        versions: Path
+        requests: Path
+        pending, wheels, versions, requests = venv.paths()
+        self.assertEqual(len(list(versions.iterdir())), 1)
+        self.assertEqual([p.name for p in wheels.glob("*.whl")],
+                         ["sprocket-1.0.0-py3-none-any.whl"])
+        self.assertEqual(len(list(requests.iterdir())), 1)
+        self.assertEqual(list(pending.iterdir()), [])
+
+    def test_four_processes_collide_on_one_unpack(self) -> None:
+        """Four processes entering `unpack` together leave one tree.
+
+        The test above shows four real programs sharing a cache, but it
+        does not reach the rename race: the window between asking
+        whether a tree exists and renaming one into place is a
+        millisecond or two, and four processes started together drift
+        further apart than that while `pip` runs.
+
+        So each process downloads first, then waits at a barrier until
+        every one of them has arrived, and only then unpacks.  That puts
+        them inside the window on purpose.  See Step 6.4.3.
+        """
+        # Each child downloads, waits for the others, then unpacks.
+        # More racers than four, because the window is a millisecond or
+        # two wide and the odds of two landing in it rise with the count.
+        racers: int = 8
+        cache: Path = self.root / "collide"
+        here: str = str(Path(__file__).resolve().parent)
+        script: str = (
+            "import os, sys, time\n"
+            f"sys.path.insert(0, {here!r})\n"
+            "from pathlib import Path\n"
+            "import alt_venv\n"
+            f"cache = Path({str(cache)!r})\n"
+            "venv = alt_venv.AltVEnv(cache)\n"
+            "arrived = venv.download(['sprocket<2'])\n"
+            "gate = cache / 'gate'\n"
+            "gate.mkdir(exist_ok=True)\n"
+            "(gate / str(os.getpid())).touch()\n"
+            f"while len(list(gate.iterdir())) < {racers}:\n"
+            "    time.sleep(0.005)\n"
+            "trees = [venv.unpack(one) for one in arrived]\n"
+            "print(trees[0].name)\n")
+        environment: dict[str, str] = dict(
+            os.environ, PIP_INDEX_URL=self.index_url,
+            HOME=str(self.root / "collide_home"))
+        environment.pop("VIRTUAL_ENV", None)
+
+        # Start all four and collect what each of them said.
+        started: list[subprocess.Popen[str]] = [
+            subprocess.Popen([sys.executable, "-c", script],
+                             env=environment, stdout=subprocess.PIPE,
+                             stderr=subprocess.PIPE, text=True)
+            for _ in range(racers)]
+        answers: list[str] = []
+        child: subprocess.Popen[str]
+        for child in started:
+            out: str
+            err: str
+            out, err = child.communicate(timeout=300)
+            self.assertEqual(child.returncode, 0, err[-500:])
+            answers.append(out.strip())
+
+        # Every one of them names the same tree, and there is one.
+        venv: alt_venv.AltVEnv = alt_venv.AltVEnv(cache)
+        versions: Path = venv.paths()[2]
+        self.assertEqual(len(set(answers)), 1, answers)
+        self.assertEqual([p.name for p in versions.iterdir()], answers[:1])
+
+    def test_a_kept_wheel_records_its_hash(self) -> None:
+        """The hash of what arrived is written down beside the wheel.
+
+        Not what the index claimed, which is unavailable anyway since
+        `pip download` refuses `--report`; see Step 6.3.7.  This is the
+        identity Step 6.6 approves, and the only thing that could notice
+        a distribution re-uploaded under a version it had already used.
+        """
+        # Install, then check the sidecar against the file itself.
+        cache: Path = self.root / "hashed"
+        self.addCleanup(self.forget, str(cache), "widget")
+        venv: alt_venv.AltVEnv = alt_venv.AltVEnv(cache)
+        with unittest.mock.patch.dict(
+                os.environ, {"PIP_INDEX_URL": self.index_url}):
+            venv.install("widget")
+        wheels: Path = venv.paths()[1]
+        wheel: Path = next(wheels.glob("*.whl"))
+        sidecar: Path = wheel.with_suffix(".sha256")
+        self.assertTrue(sidecar.is_file())
+        self.assertEqual(sidecar.read_text().strip(), venv.digest(wheel))
+        self.assertEqual(len(sidecar.read_text().strip()), 64)
+
+    def test_a_wrong_import_name_is_reported(self) -> None:
+        """`pip` succeeding and the import failing is its own error.
+
+        `python-gadget` fetches, and its import name is guessed as
+        `python_gadget`, but the module inside is `gadgetlib`.  This is
+        the mistake a user will actually make, and until now the error
+        they would see was never checked.
+        """
+        # The fetch succeeds; only the import is wrong.
+        output: str = self.install(self.root / "wrong_name",
+                                   ["python-gadget"])
+        self.assertIn("ModuleNotFoundError", output)
+        self.assertIn("python_gadget", output)
 
     def test_install_takes_the_newest_version_by_default(self) -> None:
         """With no constraint, `pip` picks the highest version published."""
