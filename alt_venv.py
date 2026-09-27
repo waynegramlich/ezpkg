@@ -4,7 +4,7 @@
 # ///
 #
 # The block above is this project eating its own cooking, and it is the
-# one place the Python floor is written down.  See Step 6.7.5 in
+# one place the Python floor is written down.  See Step 6.7.4 in
 # `LOGBOOK.md`: 3.10, because `Path | None` is evaluated at run time and
 # `bootstrap.py` uses `match`, and no higher because nothing here needs
 # 3.11 or 3.12.  `dependencies` is empty on purpose and says so: a
@@ -123,6 +123,71 @@ def import_name(requirement: str) -> str:
     # Everything from the first constraint, extra or marker onwards is
     # about which version to fetch, not about what to import.
     return re.sub(r"[-.]+", "_", requirement_name(requirement))
+
+
+def main_path() -> Path | None:
+    """Return the file the running program was started from.
+
+    `sys.modules["__main__"].__file__` rather than walking frames with
+    `inspect`, because the main module is exactly what is wanted and
+    asking for it directly cannot pick the wrong frame.
+
+    There is often no such file.  The interpreter prompt and `python3
+    -c` leave `__main__` without a `__file__` at all, and then there is
+    nothing to find.  Every caller has to cope with that rather than
+    assume a program has a file; see Step 6.11.1 in `LOGBOOK.md`.
+
+    Worse, a `__file__` that is present is not necessarily a file.  A
+    program piped in as `python3 - < program.py` gets the literal
+    `<stdin>`, `exec` of a string gets `<string>`, and a frozen
+    interpreter gets something under `<frozen ...>`; resolving any of
+    those yields a plausible looking path in the working directory that
+    names nothing.  So the file has to exist to count, which also
+    rejects a program deleted from under itself.
+
+    Returns:
+    * (`Path | None`): The program's file, resolved, or `None` when the
+      program does not have a file that exists.
+    """
+    # A module with no file is the normal case at a prompt.
+    main: ModuleType | None = sys.modules.get("__main__")
+    where: str | None = getattr(main, "__file__", None)
+    if where is None:
+        return None
+
+    # `<stdin>` and its relatives resolve to paths that name nothing.
+    found: Path = Path(where).resolve()
+    if not found.is_file():
+        return None
+    return found
+
+
+def main_source() -> tuple[Path, str] | None:
+    """Return the running program's file and its text.
+
+    Three things want this: the PEP 723 block of Step 6.7, the bootstrap
+    that Step 6.11 looks for, and the approvals file of Step 6.6, which
+    needs only the path.  One function so that the awkward cases are got
+    right once and tested once.
+
+    The **text** is what callers read, never the module's own attributes.
+    `python3 -O` and `-OO` change what the interpreter keeps -- `-OO`
+    discards docstrings entirely -- and comments never survive compiling
+    at all.  Only the source has everything that was written.
+
+    Returns:
+    * (`tuple[Path, str] | None`): The program's file and its contents,
+      or `None` when there is no file or it cannot be read.
+    """
+    # A file that has been moved or deleted since the program started
+    # is as good as absent.
+    where: Path | None = main_path()
+    if where is None:
+        return None
+    try:
+        return where, where.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return None
 
 
 class AltVEnv:
@@ -306,11 +371,10 @@ class AltVEnv:
           program has no file to put them beside.
         """
         # The main program is what the approvals belong to.
-        main: ModuleType | None = sys.modules.get("__main__")
-        where: str | None = getattr(main, "__file__", None)
+        where: Path | None = main_path()
         if where is None:
             return None
-        return Path(where).resolve().with_suffix(".altvenv")
+        return where.with_suffix(".altvenv")
 
     def approved(self) -> dict[str, str] | None:
         """Read the approvals, as a mapping from wheel name to digest.

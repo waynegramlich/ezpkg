@@ -71,7 +71,7 @@ import zipfile
 from collections.abc import Sequence
 from pathlib import Path, PurePath
 from types import ModuleType
-from typing import Any, cast
+from typing import IO, Any, cast
 
 import alt_venv
 import bootstrap
@@ -85,16 +85,19 @@ SUMMARY: str = "Fetch Python packages that are not preinstalled."
 # The lowest Python `alt_venv.py` runs on, written into the wheel as
 # `Requires-Python`.  It is 3.10 because annotations such as
 # `Path | None` are evaluated at run time and `bootstrap.py` uses
-# `match`; nothing here needs 3.11 or 3.12.  See Step 6.7.5.
+# `match`; nothing here needs 3.11 or 3.12.  See Step 6.7.4.
 FLOOR: str = ">=3.10"
 
-# Which cases the all-case tests exercise.  The full dozen costs most of
-# a minute in virtual environment building, so the default is a subset
-# that still covers every distinct mechanism: case 3 fetches with
-# `urllib` and no virtual environment, case 6 with `pip` in process,
-# case 12 with `urllib` inside one, and case 11 is the one whose second
-# run used to fail.
-FAST_CASES: tuple[str, ...] = ("3", "6", "11", "12")
+# Which cases the all-case tests exercise.  The default is one case, on
+# the grounds that this project is not shipping a virtual environment
+# and the quick run should exercise the case most likely to be the
+# product.  Case 7 is it: the shortest paste at fifteen lines, tied with
+# 6, 9 and 10 but preferred over all three, because 6 and 9 run `pip` in
+# process and leave 451 of its modules and three handlers on the root
+# logger behind, and 10 adds `--no-compile` for 60 KB.  The other
+# eleven, including the no-`pip` case 3, run under
+# `ALT_VENV_TEST=COMPLETE`, which is what the end of a task gets.
+FAST_CASES: tuple[str, ...] = ("7",)
 
 def platform_tag() -> str:
     """Return a compatibility tag this interpreter would accept.
@@ -2672,6 +2675,191 @@ class InstallTest(unittest.TestCase):
         self.assertFalse(venv.contains("widget"))
         self.install(target, "widget")
         self.assertTrue(venv.contains("widget"))
+
+
+class LocatorTest(unittest.TestCase):
+    """Exercise `main_path` and `main_source`.
+
+    Every test here runs a child process, because what is being tested
+    is what the interpreter puts in `__main__.__file__`, and this test
+    suite's own `__main__` is `unittest`.  A child is the only way to
+    control that.  Nothing here needs an index or a network.
+
+    Attributes:
+    * `root` (`Path`):
+      A temporary directory for the throwaway programs.
+
+    Constructor:
+    * `LocatorTest()`, by `unittest` rather than by hand.
+    """
+
+    # One directory per test, removed by a cleanup.
+    root: Path
+
+    def setUp(self) -> None:
+        """Make a directory for this test's programs."""
+        # `addCleanup` rather than `tearDown`, so a failure still tidies.
+        self.root = Path(tempfile.mkdtemp(prefix="locator-"))
+        self.addCleanup(shutil.rmtree, self.root, ignore_errors=True)
+
+    def program(self, name: str, body: str) -> Path:
+        """Write a program that reports what the locator found.
+
+        The marker comment matters: comments do not survive compiling,
+        so finding it in what `main_source` returned proves the text
+        came from the file rather than from the module object.
+
+        Arguments:
+        * `name` (`str`):
+          The file name to write, without its suffix.
+        * `body` (`str`):
+          Statements to run before reporting, or the empty string.
+
+        Returns:
+        * (`Path`): The program that was written.
+        """
+        # `sys.path` first, since `alt_venv` is not installed here.
+        here: str = str(Path(__file__).resolve().parent)
+        where: Path = self.root / f"{name}.py"
+        where.write_text(
+            "import sys\n"
+            f"sys.path.insert(0, {here!r})\n"
+            "import alt_venv\n"
+            "# MARKER: a comment, which compiling discards.\n"
+            f"{body}"
+            "found = alt_venv.main_source()\n"
+            "print('path=', alt_venv.main_path())\n"
+            "print('text=', found is not None and 'MARKER' in found[1])\n")
+        return where
+
+    def run_program(self, *arguments: str, stdin: Path | None = None,
+                    cwd: Path | None = None) -> str:
+        """Run the interpreter and return what it printed.
+
+        Arguments:
+        * `arguments` (`str`):
+          Arguments after the interpreter.
+        * `stdin` (`Path | None`):
+          A file to pipe in, for the `python3 -` case.
+        * `cwd` (`Path | None`):
+          The working directory, which defaults to this test's.
+
+        Returns:
+        * (`str`): Everything the child wrote to its standard output.
+        """
+        # A failing child is a failing test, so say what it printed.
+        source: IO[bytes] | None = None
+        if stdin is not None:
+            source = stdin.open("rb")
+            self.addCleanup(source.close)
+        done: subprocess.CompletedProcess[str] = subprocess.run(
+            [sys.executable, *arguments], stdin=source, text=True,
+            capture_output=True, cwd=str(cwd or self.root), check=False)
+        self.assertEqual(done.returncode, 0, done.stderr[-500:])
+        return done.stdout
+
+    def test_a_script_is_found(self) -> None:
+        """A program run by name reports its own file and text."""
+        # The ordinary case, and the one every other test varies.
+        program: Path = self.program("plain", "")
+        output: str = self.run_program(str(program))
+        self.assertIn(f"path= {program}", output)
+        self.assertIn("text= True", output)
+
+    def test_a_relative_invocation_is_resolved(self) -> None:
+        """The path comes back absolute however the program was named."""
+        # A cache keyed on a relative path would move with the shell.
+        program: Path = self.program("relative", "")
+        output: str = self.run_program("relative.py")
+        self.assertIn(f"path= {program}", output)
+
+    def test_dash_m_is_found(self) -> None:
+        """`python3 -m prog` still leaves a real file behind."""
+        # Worth pinning: the module machinery sets `__file__` here.
+        program: Path = self.program("moduled", "")
+        output: str = self.run_program("-m", "moduled")
+        self.assertIn(f"path= {program}", output)
+
+    def test_dash_c_has_no_program(self) -> None:
+        """`python3 -c` has no file, so there is nothing to find."""
+        # `__main__` has no `__file__` at all in this case.
+        here: str = str(Path(__file__).resolve().parent)
+        output: str = self.run_program(
+            "-c", f"import sys; sys.path.insert(0, {here!r}); "
+            "import alt_venv; print('path=', alt_venv.main_path()); "
+            "print('source=', alt_venv.main_source())")
+        self.assertIn("path= None", output)
+        self.assertIn("source= None", output)
+
+    def test_a_piped_program_has_no_program(self) -> None:
+        """`python3 - < prog.py` names `<stdin>`, which is not a file.
+
+        This is why the locator insists the path exist.  Resolving
+        `<stdin>` produces a believable path in the working directory
+        that names nothing, and an approvals file beside *that* would be
+        written into whatever directory the reader happened to be in.
+        """
+        # The file exists; it is simply not what `__file__` says.
+        program: Path = self.program("piped", "")
+        output: str = self.run_program("-", stdin=program)
+        self.assertIn("path= None", output)
+        self.assertIn("text= False", output)
+
+    def test_stripped_comments_are_still_found(self) -> None:
+        """`-OO` discards docstrings, and the text still has them.
+
+        Reading the file is the whole reason `main_source` exists: a
+        PEP 723 block is a comment, and no comment survives compiling
+        under any option at all.
+        """
+        # `-OO` is the most aggressive thing the interpreter offers.
+        program: Path = self.program("stripped", "")
+        output: str = self.run_program("-OO", str(program))
+        self.assertIn(f"path= {program}", output)
+        self.assertIn("text= True", output)
+
+    def test_a_deleted_program_is_gone(self) -> None:
+        """A program that removes its own file finds nothing."""
+        # The interpreter has read it by now; the disk has not got it.
+        program: Path = self.program(
+            "deleted", "import os; os.unlink(__file__)\n")
+        output: str = self.run_program(str(program))
+        self.assertIn("path= None", output)
+        self.assertIn("text= False", output)
+
+    def test_an_unreadable_program_has_no_text(self) -> None:
+        """A file that cannot be read is located but not quoted."""
+        # This is the `OSError` arm, which `os.chmod` is the way to
+        # reach: the interpreter read the file before the mode changed.
+        program: Path = self.program(
+            "unreadable", "import os; os.chmod(__file__, 0)\n")
+        output: str = self.run_program(str(program))
+        self.assertIn(f"path= {program}", output)
+        self.assertIn("text= False", output)
+
+    def test_approvals_sit_beside_the_program(self) -> None:
+        """`approvals` names `prog.altvenv` beside `prog.py`."""
+        # The one caller that wants the path and not the text.
+        program: Path = self.program(
+            "beside",
+            "import pathlib\n"
+            "venv = alt_venv.AltVEnv(pathlib.Path('cache'))\n"
+            "print('approvals=', venv.approvals())\n")
+        output: str = self.run_program(str(program))
+        self.assertIn(f"approvals= {program.with_suffix('.altvenv')}",
+                      output)
+
+    def test_approvals_need_a_program(self) -> None:
+        """`python3 -c` gets no approvals file, and so no verification."""
+        # Nowhere to put one means the gate cannot check anything.
+        here: str = str(Path(__file__).resolve().parent)
+        output: str = self.run_program(
+            "-c", f"import sys; sys.path.insert(0, {here!r}); "
+            "import alt_venv; "
+            "import pathlib; "
+            "venv = alt_venv.AltVEnv(pathlib.Path('cache')); "
+            "print('approvals=', venv.approvals())")
+        self.assertIn("approvals= None", output)
 
 
 def main() -> None:

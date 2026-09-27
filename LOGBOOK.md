@@ -1295,6 +1295,23 @@ expected every time the order changes, and is Claude's job.
     while staging.  Cost to keep: 62 tests in 87 s normally, about
     seventeen minutes with `--children` on `COMPLETE`, and the hook is
     off unless asked for.
+  * 6.5.13 - The quick run is one case, from 2026-09-27.  Six tests loop
+    over `cases()`, so the four `FAST_CASES` were costing 42.5 s of a
+    91.5 s run; measured with `unittest --durations`, which also named
+    `test_an_untrusted_certificate_is_refused` at 19.8 s against 5.3 s
+    for the trusted one, unexplained and worth a look, since retrying a
+    rejected certificate is wrong on its own terms.  `FAST_CASES` is now
+    case 7 alone and the suite runs in 61 s.
+
+    Case 7 because this project is not shipping a virtual environment,
+    which leaves the shortest paste, and four cases tie there at fifteen
+    lines.  Cases 6 and 9 run `pip` in process, which leaves 451 of its
+    modules in `sys.modules` and three handlers on the root logger of
+    somebody else's program; case 10 is 7 plus `--no-compile`, worth
+    60 KB.  Case 7 is what is left, and is the likeliest product.  The
+    other eleven, including the no-`pip` case 3 that is the whole point
+    of the exercise, run under `ALT_VENV_TEST=COMPLETE`, which is what
+    the end of a task gets.
 
 * Step 6.6: Security, and who approves what.
   * 6.6.1 - Write the threat model down first, because the claim has to
@@ -1417,9 +1434,7 @@ expected every time the order changes, and is Claude's job.
     not in a separable package.  It does raise the floor from 3.10,
     which `X | Y` and `match` already set, to 3.11; worth saying out
     loud before it is discovered.
-  * 6.7.4 - Wants the shared locator described in 6.11.1.
-
-  * 6.7.5 - The floor is stated, and it is as low as the code allows.
+  * 6.7.4 - The floor is stated, and it is as low as the code allows.
     Decided 2026-09-27: `>=3.10`, because annotations such as
     `Path | None` are evaluated at run time and `bootstrap.py` uses
     `match`, and because **nothing here needs 3.11 or 3.12**.  Importing
@@ -1445,7 +1460,7 @@ expected every time the order changes, and is Claude's job.
     `floor`, the `alt-venv` wheels pass `FLOOR`, and the throwaway test
     packages claim nothing.
 
-  * 6.7.6 - `alt_venv.py` carries a PEP 723 block of its own, added
+  * 6.7.5 - `alt_venv.py` carries a PEP 723 block of its own, added
     2026-09-27, so that this project eats its own cooking:
     `requires-python = ">=3.10"` and `dependencies = []`, the second
     empty on purpose, since a project about fetching packages that are
@@ -1465,6 +1480,68 @@ expected every time the order changes, and is Claude's job.
     `alt_venv.py` gets a block; `bootstrap.py` must keep a literal
     package name, because something has to fetch this file before
     anything can parse anything.
+
+  * 6.7.6 - The locator exists, built 2026-09-27: `main_path` returns
+    the running program's file and `main_source` returns that file with
+    its text, each `None` when there is nothing to find.  This is
+    6.11.1's primitive, and `approvals` was rewritten on to it, so the
+    `__main__` handling now lives in one place.  Ten tests, each in a
+    child process, because this suite's own `__main__` is `unittest`.
+
+    Writing the tests found a defect that reasoning had missed.  A
+    `__file__` that is present is not necessarily a file: measured
+    2026-09-27, `python3 - < prog.py` sets it to the literal `<stdin>`,
+    and `exec` of a string and a frozen interpreter give `<string>` and
+    `<frozen ...>`.  Resolving any of those yields a believable path in
+    the working directory that names nothing, so the first version would
+    have looked for approvals in `./<stdin>.altvenv` -- in whatever
+    directory the reader happened to be standing.  The locator now
+    insists the path exist, which rejects those three and a program
+    deleted from under itself as well.
+
+    Measured while at it, so that nobody has to guess later:
+    `python3 -m prog` does set `__file__`, a relative invocation resolves
+    to an absolute path, and `-OO` leaves the comments in the file
+    although it has stripped the docstrings from the module, which is the
+    whole reason 6.7.2 reads the source.
+
+  * 6.7.7 - **Undecided, and it blocks the parser:** what reads the TOML.
+    6.7.3 said `tomllib` raises the floor to 3.11 and 6.7.4 then set the
+    floor at `>=3.10`; both cannot hold once the import is real, so this
+    is the contradiction to settle first.  The options:
+
+    * Import `tomllib` at the top and raise the floor to 3.11, which
+      turns away Ubuntu 22.04 LTS, supported to April 2027.
+    * Import it lazily, so 3.10 keeps working until a program actually
+      has a block, and the refusal names the Python rather than failing
+      at import time.
+    * Hand-parse the two keys wanted -- `requires-python`, a string, and
+      `dependencies`, a list of strings -- and depend on no TOML reader
+      at all.
+
+  * 6.7.8 - Write the parser.  PEP 723's own regex finds the
+    `# /// script` ... `# ///` block, the `# ` prefixes come off, and
+    what is left is TOML.  Two `script` blocks in one file is an error
+    the PEP requires, as is a block that is not valid TOML.  It reads
+    the text `main_source` returns, never the module object.
+  * 6.7.9 - Decide the API: whether `install()` with no arguments means
+    "install what the program declared", or whether a separate
+    `declared()` returns the requirements and the caller passes them on.
+    Both `README.md` files describe whichever this is, so it wants
+    settling before Step 6.13.
+  * 6.7.10 - Close the dogfooding loop 6.7.5 promised.  `build_wheel`
+    takes `Requires-Python` from `alt_venv.py`'s own block, through our
+    parser, instead of from `FLOOR`, so that the floor stops being
+    written twice and a broken parser has a consequence.
+  * 6.7.11 - **Undecided, recorded rather than solved:** whether a
+    declared `requires-python` is enforced.  Comparing it means PEP 440
+    version comparison, which 6.3.3 declined to reimplement, and `pip`
+    already enforces the `Requires-Python` of each wheel it is asked
+    for.  What is unenforced is the *program's* own floor, which is
+    arguably the interpreter's business and not ours.
+  * 6.7.12 - Tests: a block present, absent, malformed and duplicated,
+    plus `-OO` and `python3 -c`.  The last two come nearly free from
+    6.7.6's child process harness.
 
 * Step 6.8: `.pth` files, which is `3pfaibne`.  `install` uses
   `sys.path.insert`, which never executes a `.pth` file, so a package
@@ -1527,7 +1604,8 @@ expected every time the order changes, and is Claude's job.
     already uses the path alone to place `prog.altvenv`.  So one small
     thing -- the program's path and text, `None` for the REPL,
     `python3 -c` and a frozen interpreter -- and one place where those
-    awkward cases are got right and tested.
+    awkward cases are got right and tested.  Built in 6.7.6, which is
+    why that step went first.
   * 6.11.2 - Nobody is messaged.  There is no channel to an author at run
     time, only whoever started the program, and a staleness report is
     useful to an author and noise to a recipient who cannot act on it.
