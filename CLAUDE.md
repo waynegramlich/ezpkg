@@ -94,6 +94,14 @@ the rules stay versioned alongside the work they govern.
    2026-09-24, and the two-marker rule replaced a one-marker version of
    it on 2026-09-25.
 
+   A task divides into numbered **steps**, written `* Step T.S:` with a
+   blank line before each, and a step's findings into sub-items written
+   `  * T.S.I - `.  Steps are mini-tasks and **do not close**: only
+   tasks do.  A step needs no marker, no summary and no date, and the
+   steps of an open task are listed highest priority first.  A step may
+   also earn a `### Step T.S:` section after the list, for what was
+   learned rather than what was intended.
+
    The point is to stop settled questions from being reopened over and
    over.
 
@@ -121,6 +129,50 @@ the rules stay versioned alongside the work they govern.
 A log where every entry is meaningful is worth more than a log that
 records everything that happened.  Mercurial already records everything
 that happened.
+
+## The code, and how to run it
+
+Five files, and it matters which is which:
+
+* `bootstrap.py` -- the twelve pasted bootstrap cases, plus the harness
+  that measures them.  Run with no arguments it prints the comparison
+  table; with a case label it runs one case, which is internal.
+* `alt_venv.py` -- the second stage, fetched as a wheel.  `AltVEnv`
+  downloads, approves, unpacks and imports.  It carries its own PEP 723
+  block, which is the one place the Python floor is written down.
+* `alt_venv_test.py` -- the whole test suite, and the local package
+  server it runs against.  Nothing in it reaches the network.
+* `alt_venv_coverage.py` -- coverage, using the standard library
+  `trace` rather than `coverage`, so the suite needs nothing installed.
+* `trace_hook/sitecustomize.py` -- how child processes get traced.  It
+  is in a directory of its own on purpose, because a `sitecustomize.py`
+  in the project root would affect every interpreter started here.
+
+Before any piece of work is called finished, all four of these are
+clean: `ruff check`, `mypy`, no line over 79 columns in any file
+including the Markdown, and the suite passing.
+
+    python3 alt_venv_test.py                  # about 90 seconds
+    ALT_VENV_TEST=COMPLETE python3 alt_venv_test.py
+
+`ALT_VENV_TEST` chooses how many of the twelve bootstrap cases the
+all-case tests exercise.  Unset or `FAST` uses four, one per distinct
+mechanism plus the one that used to fail; `COMPLETE` uses all twelve and
+takes several times longer.  Anything else is refused rather than
+quietly treated as `FAST`.
+
+    ./alt_venv_coverage.py <directory>             # this process only
+    ./alt_venv_coverage.py --children <directory>  # much slower
+
+`--children` is what makes `bootstrap.py` visible at all: its cases run
+in child interpreters, and without it the file reads as 7% however
+thoroughly it is exercised.  With `--children` and `COMPLETE` the whole
+measurement takes about twenty minutes, which is why it is off unless
+asked for.
+
+`AltVEnv` also reads `ALT_VENV_APPROVE`: unset enforces the approvals
+file beside the calling program, `write` records what arrived, and
+`skip` does neither.
 
 ## Python style
 

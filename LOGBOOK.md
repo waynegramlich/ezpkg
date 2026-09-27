@@ -1445,6 +1445,27 @@ expected every time the order changes, and is Claude's job.
     `floor`, the `alt-venv` wheels pass `FLOOR`, and the throwaway test
     packages claim nothing.
 
+  * 6.7.6 - `alt_venv.py` carries a PEP 723 block of its own, added
+    2026-09-27, so that this project eats its own cooking:
+    `requires-python = ">=3.10"` and `dependencies = []`, the second
+    empty on purpose, since a project about fetching packages that are
+    not preinstalled has none of its own.  Verified with the regex PEP
+    723 itself specifies plus `tomllib`, which reads back
+    `{'requires-python': '>=3.10', 'dependencies': []}`, and the module
+    docstring survives having comments in front of it.
+
+    Two honest limits.  Nothing reads it: a tool such as `uv` reads the
+    block of the script it is running, and this is a library that is
+    never `__main__`, so no tool and not even our own code will consult
+    it.  And the floor is now written twice, here and in `FLOOR`.  Both
+    close the same way, and it is the real dogfooding: once this step can
+    parse a block, `build_wheel` should take `Requires-Python` from
+    `alt_venv.py`'s own block, so that our metadata comes from our parser
+    reading our file, with a consequence if the parser breaks.  Only
+    `alt_venv.py` gets a block; `bootstrap.py` must keep a literal
+    package name, because something has to fetch this file before
+    anything can parse anything.
+
 * Step 6.8: `.pth` files, which is `3pfaibne`.  `install` uses
   `sys.path.insert`, which never executes a `.pth` file, so a package
   relying on one is quietly half installed.  `site.addsitedir` is the

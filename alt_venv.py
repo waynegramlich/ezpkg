@@ -1,3 +1,22 @@
+# /// script
+# requires-python = ">=3.10"
+# dependencies = []
+# ///
+#
+# The block above is this project eating its own cooking, and it is the
+# one place the Python floor is written down.  See Step 6.7.5 in
+# `LOGBOOK.md`: 3.10, because `Path | None` is evaluated at run time and
+# `bootstrap.py` uses `match`, and no higher because nothing here needs
+# 3.11 or 3.12.  `dependencies` is empty on purpose and says so: a
+# project about fetching packages that are not preinstalled has none of
+# its own.
+#
+# Nothing reads it yet.  A tool such as `uv` reads the block belonging to
+# the script it is running, and this is a library that is never
+# `__main__`, so the block is documentation until Step 6.7 can parse it.
+# At that point `build_wheel` should take `Requires-Python` from here
+# rather than keeping a second copy.
+
 """Fetch Python packages that are not preinstalled, from one file.
 
 This module is the second stage of the two stage design described in
