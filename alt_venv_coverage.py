@@ -70,7 +70,6 @@ import threading
 import trace
 import unittest
 from pathlib import Path
-from typing import Any
 
 
 def build_tracer() -> trace.Trace:
@@ -117,7 +116,7 @@ def report(tracer: trace.Trace, coverdir: Path) -> None:
     # module docstring.  A test's own teardown is the usual culprit.
     # This file goes too: the instrument does not measure itself.
     here: Path = Path(__file__).resolve()
-    results: Any = tracer.results()
+    results: trace.CoverageResults = tracer.results()
     results.counts = {key: hits for key, hits in results.counts.items()
                       if Path(key[0]).is_file()
                       and Path(key[0]).resolve() != here}
@@ -173,7 +172,7 @@ def merge_children(tracer: trace.Trace, counts: Path) -> int:
     * (`int`): How many child count files were folded in.
     """
     # Merge into this process's own results, one child at a time.
-    mine: Any = tracer.results()
+    mine: trace.CoverageResults = tracer.results()
     found: int = 0
     child: Path
     for child in sorted(counts.iterdir()):

@@ -1072,11 +1072,10 @@ expected every time the order changes, and is Claude's job.
     really matters, first fetch versus staleness check in 6.3.8, comes
     from whether the cache is populated, which is known locally.
 
-* Step 6.3: A versioned cache built out of the wheels themselves.
-  (DONE 2026-09-26.)  This is the fix for `0nicav`, priority 0 because
-  the cache path carries no version, interpreter or platform, so the
-  same directory reached by a different Python loads whatever the last
-  one left.  It also settles
+* Step 6.3: A versioned cache built out of the wheels themselves.  This
+  is the fix for `0nicav`, priority 0 because the cache path carries no
+  version, interpreter or platform, so the same directory reached by a
+  different Python loads whatever the last one left.  It also settles
   where the cache lives, `2wscdl`, and it carries the jail that Step 6.6
   needs.
 
@@ -1178,8 +1177,7 @@ expected every time the order changes, and is Claude's job.
     little else, but it is a real scope increase and should be entered
     knowingly.  Cases 3 and 12 already do this much.
 
-* Step 6.4: Concurrent installs.  (DONE 2026-09-26.)  Mostly answered by
-  Step 6.3's
+* Step 6.4: Concurrent installs.  Mostly answered by Step 6.3's
   construction rather than by a mechanism of its own, because nothing
   installs into a shared directory any more.  Done: a download directory
   per call, so two programs never share a staging area; unpacking inside
@@ -1220,10 +1218,10 @@ expected every time the order changes, and is Claude's job.
     removed and the test has been seen to fail.  Timing tests are
     especially good at passing for no reason.
 
-* Step 6.5: Coverage of child processes.  (DONE 2026-09-26.)  Most of
-  what this suite does happens in children, and `trace` follows
-  neither those nor threads, so `bootstrap.py` read as 7% however
-  thoroughly its twelve cases were exercised.
+* Step 6.5: Coverage of child processes.  Most of what this suite does
+  happens in children, and `trace` follows neither those nor threads, so
+  `bootstrap.py` read as 7% however thoroughly its twelve cases were
+  exercised.
   * 6.5.1 - `trace` merges its own results: `CoverageResults` reads a
     saved count file through `infile` and folds another in through
     `update`, so no third party tool is wanted.  Each child writes its
@@ -1298,11 +1296,7 @@ expected every time the order changes, and is Claude's job.
     seventeen minutes with `--children` on `COMPLETE`, and the hook is
     off unless asked for.
 
-* Step 6.6: Security, and who approves what.  The architecture is in
-  `README.md`, written as the page a stranger lands on: unapproved
-  packages are downloaded to a holding area, the user is shown what
-  arrived and approves it, and only then is anything installed and
-  imported.  Approval is once per program rather than once per run.
+* Step 6.6: Security, and who approves what.
   * 6.6.1 - Write the threat model down first, because the claim has to
     be narrow to be true.  A malicious program author gets no
     protection at all, since the bootstrap is their code and they can
@@ -1362,6 +1356,10 @@ expected every time the order changes, and is Claude's job.
     thereafter.  This is why approval belongs to the author and not to
     whoever happens to run the program.
 
+  * 6.6.11 - The project's `README.md` is Step 6.14's, not this step's.
+    Its `## Security Issues of Executing Unvetted Code` section is
+    outlined by the sub-items here, and by 6.6.1 above all.
+
   * 6.6.12 - The cache owns the package, not the program.  Wayne's
     sentence, 2026-09-26, and it is the reason the warm path neither
     asks nor verifies: a tree in `versions/` may have arrived on behalf
@@ -1378,9 +1376,17 @@ expected every time the order changes, and is Claude's job.
     is shown `needy` as asked for and `widget` as having come along,
     although `widget` was already there from the first program.  The
     listing therefore appears once per cache, not once per run.
-  * 6.6.11 - `README.md` still has `## Security Issues of Executing
-    Unvetted Code` marked TBD, and it is the section the whole feature
-    rests on.  The sub-items above are its outline.
+
+  * 6.6.14 - Two things the mechanism cannot do, recorded so that they
+    are decisions rather than oversights.  A declined download is
+    discarded, not kept, so `pending/` is empty afterwards and a later
+    run fetches again; a refusal means do not install this, not keep it
+    for later.  And `ALT_VENV_APPROVE=write` records what arrived
+    without judging it, so an author who runs it while pointed at an
+    index they should not trust will approve whatever that index sent,
+    and the file then vouches for it everywhere the program goes.  There
+    is no technical answer to the second: run it against an index you
+    mean to trust.
 
 * Step 6.7: Find the bootstrap, and notice when it is stale.  Python has
   a great many introspection facilities, and the direct one is
@@ -1470,11 +1476,14 @@ expected every time the order changes, and is Claude's job.
   relying on one is quietly half installed.  `site.addsitedir` is the
   experiment.
 
-* Step 6.12: The `README.md` text.  What it should say needs discussing,
-  and it has to describe the versioned layout once Step 6.3 lands.
-  Note the current behaviour: it is rewritten on every construction
-  rather than only when absent, which makes writing a file a side
-  effect of making an object and will surprise somebody.
+* Step 6.12: The cache's own `~/.alt_venv/README.md`, which
+  `AltVEnv.__init__` writes from its docstring for somebody who finds
+  the directory and wonders what it is.  Not the project's `README.md`,
+  which is Step 6.14.  What it should say needs discussing, and it has
+  to describe the versioned layout of Step 6.3.  Note the current
+  behaviour: it is rewritten on every construction rather than only when
+  absent, which makes writing a file a side effect of making an object
+  and will surprise somebody.
 
 * Step 6.13: A fetch from the real PyPI, carried over from Task 5.  It is
   the only thing that can settle Task 3's conclusion that a bootstrap
@@ -1482,9 +1491,29 @@ expected every time the order changes, and is Claude's job.
   trusting the public certificate authorities and a private certificate
   tests the opposite.  It is also just `install` against the real index.
 
-* Step 6.14: And more.  A place holder for additional steps.
+* Step 6.14: Rewrite the project's own `README.md`, the page a stranger
+  lands on after a program tells them to.  Not the cache's
+  `~/.alt_venv/README.md`, which is Step 6.12.
+  * 6.14.1 - It still describes the Scavenger Hunt, at lines 17 and 27,
+    which nothing implements any more: nobody is sent to visit web pages
+    and paste titles back.  What replaced it is that the author approves
+    once and the recipient is told, and asked at most once per cache.
+  * 6.14.2 - `## Security Issues of Executing Unvetted Code` is still
+    marked TBD, and it is the section the whole feature rests on.  The
+    sub-items of Step 6.6 are its outline, and 6.6.1 in particular: the
+    claim has to be narrow to be true, because a malicious author gets
+    no protection at all and a typosquat very little.
+  * 6.14.3 - Habituation deserves an answer here, per 6.6.7.  The
+    mitigation is real and worth stating: the question is asked once per
+    cache, not once per run, and an approvals file removes it entirely.
+  * 6.14.4 - It should say plainly that an approvals file is how a
+    guarantee is had, where a listing is only a notification, and that
+    a program started by `cron` or a build has nobody to ask and so
+    proceeds.
 
-### Step 6.1: Error on a failed fetch  (DONE 2026-09-26)
+* Step 6.15: And more.  A place holder for additional steps.
+
+### Step 6.1: Error on a failed fetch
 
 A failed fetch now exits with one line instead of a traceback, which
 closes `0whwnn`.  Measured against a dead port, before and after:
@@ -1514,7 +1543,7 @@ closes `0whwnn`.  Measured against a dead port, before and after:
   asserting the word `zipfile` from the traceback that this step
   removes.  It now reads the message.
 
-### Step 6.2: Several packages in one call  (DONE 2026-09-26)
+### Step 6.2: Several packages in one call
 
 `include` became `install`, which takes one requirement or a list and
 spends one `pip` invocation on the set.
@@ -1605,11 +1634,10 @@ rather than by thinking.
 measurement being blind rather than the code being untested: every
 approval test is a child program.
 
-Not done, and deliberately: `README.md`.  It still describes the
-Scavenger Hunt, still has `## Security Issues of Executing Unvetted
-Code` marked TBD, and carries the threat model of 6.6.1 and the
-habituation answer of 6.6.7 for an actual reader.  That is 6.6.11, and
-the step is not finished until it is written.
+What this step does not cover: the project's own `README.md`, which
+still describes the Scavenger Hunt and still has its security section
+marked TBD.  Explaining any of this to a stranger is Step 6.14, and the
+sub-items above are the outline it should follow.
 
 ### Task 6 Summary
 

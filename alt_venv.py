@@ -323,6 +323,14 @@ class AltVEnv:
         needs.  Sorted by name, so that a change shows up as a small
         diff in whatever the program is committed to.
 
+        It records what arrived without judging it, because judging it is
+        the author's part.  An author who runs this while pointed at an
+        index they should not trust will approve whatever that index
+        sent, and the file will then vouch for it on every machine the
+        program reaches.  That is the one way this mechanism can be
+        turned against itself, and there is no technical answer to it:
+        run it against an index you mean to trust.
+
         Arguments:
         * `wheels` (`Sequence[Path]`):
           The wheels to record.
@@ -949,22 +957,24 @@ class AltVEnv:
         trees: list[Path]
         if remembered is None:
             arrived: list[Path] = self.download(asking, argv)
-
-            # Say what turned up, then check it against what the author
-            # approved, and only then unpack.  Nothing in a wheel has
-            # run at the moment it is refused; see Step 6.6.
-            self.announce(arrived, asking)
-            self.gate(arrived, asking)
-
-            trees = [self.unpack(wheel) for wheel in arrived]
-            self.remember(request, [tree.name for tree in trees],
-                          [wheel.name for wheel in arrived])
-
-            # The holding directory has served its purpose once every
-            # wheel in it is either kept or already unpacked.
             holding: Path
-            for holding in {wheel.parent for wheel in arrived}:
-                shutil.rmtree(holding, ignore_errors=True)
+            try:
+                # Say what turned up, then check it against what the
+                # author approved, and only then unpack.  Nothing in a
+                # wheel has run at the moment it is refused; see 6.6.
+                self.announce(arrived, asking)
+                self.gate(arrived, asking)
+
+                trees = [self.unpack(wheel) for wheel in arrived]
+                self.remember(request, [tree.name for tree in trees],
+                              [wheel.name for wheel in arrived])
+            finally:
+                # The holding directory has served its purpose once every
+                # wheel in it is either kept or already unpacked -- and
+                # equally once one has been refused, because a refusal
+                # means do not install this, not keep it for later.
+                for holding in {wheel.parent for wheel in arrived}:
+                    shutil.rmtree(holding, ignore_errors=True)
         else:
             trees = [self.paths()[2] / key for key in remembered[0]]
 

@@ -42,6 +42,7 @@ SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 """
 # SPDX-License-Identifier: MIT-0
 
+import _csv
 import base64
 import csv
 import functools
@@ -68,7 +69,7 @@ import urllib.error
 import urllib.request
 import zipfile
 from collections.abc import Sequence
-from pathlib import Path
+from pathlib import Path, PurePath
 from types import ModuleType
 from typing import Any, cast
 
@@ -263,7 +264,7 @@ def build_wheel(module: Path, distribution: str, version: str,
 
     # Hash every member, then append the self referential RECORD row.
     record: io.StringIO = io.StringIO()
-    writer: Any = csv.writer(record, lineterminator="\n")
+    writer: _csv._writer = csv.writer(record, lineterminator="\n")
     path: str
     content: bytes
     digest: str
@@ -657,7 +658,8 @@ def serve_index(root: Path,
       base URL to hand to `PIP_INDEX_URL`.
     """
     # Bind port 0 and let the operating system choose.
-    handler: Any = functools.partial(_IndexHandler, directory=str(root))
+    handler: functools.partial[_IndexHandler] = functools.partial(
+        _IndexHandler, directory=str(root))
     server: _IndexServer = _IndexServer(("127.0.0.1", 0), handler)
     server.faults = {}
     server.scheme = "http"
@@ -677,9 +679,12 @@ def serve_index(root: Path,
 
     # The port is only knowable once the bind has happened.  The
     # standard library types `server_address` loosely, because a
-    # `socketserver` address may be a path or a string, so this reads
-    # the two fields an internet socket actually has.
-    address: Any = server.server_address
+    # `socketserver` address may be a path rather than a host and a
+    # port.  This one is an internet socket, so the host is a string,
+    # and saying so keeps the URL from ever being built out of
+    # `b'127.0.0.1'`.
+    address: tuple[str | bytes | bytearray, int] = server.server_address
+    assert isinstance(address[0], str), address
     return server, f"{server.scheme}://{address[0]}:{address[1]}/"
 
 
@@ -1851,7 +1856,7 @@ class InstallTest(unittest.TestCase):
         # Only the staging rename fails; the `.data` moves must not.
         genuine = Path.rename
 
-        def refuse(self: Path, target: Any) -> Path:
+        def refuse(self: Path, target: "str | PurePath") -> Path:
             """Fail the one rename that puts a tree into place."""
             if Path(target) == expected:
                 raise OSError("another process got there first")
@@ -2337,6 +2342,11 @@ class InstallTest(unittest.TestCase):
         self.assertIn("declined", seen)
         versions: Path = program.parent / "cache" / "versions"
         self.assertEqual(list(versions.iterdir()), [])
+
+        # And the download is discarded, because a refusal means do not
+        # install this, not keep it for later.
+        pending: Path = program.parent / "cache" / "pending"
+        self.assertEqual(list(pending.iterdir()), [])
 
     def test_an_empty_answer_declines(self) -> None:
         """Only an explicit yes goes ahead, so the default is no."""
