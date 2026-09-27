@@ -1356,7 +1356,7 @@ expected every time the order changes, and is Claude's job.
     thereafter.  This is why approval belongs to the author and not to
     whoever happens to run the program.
 
-  * 6.6.11 - The project's `README.md` is Step 6.14's, not this step's.
+  * 6.6.11 - The project's `README.md` is Step 6.13's, not this step's.
     Its `## Security Issues of Executing Unvetted Code` section is
     outlined by the sub-items here, and by 6.6.1 above all.
 
@@ -1388,72 +1388,64 @@ expected every time the order changes, and is Claude's job.
     is no technical answer to the second: run it against an index you
     mean to trust.
 
-* Step 6.7: Find the bootstrap, and notice when it is stale.  Python has
-  a great many introspection facilities, and the direct one is
-  `sys.modules["__main__"].__file__` rather than walking frames with
-  `inspect`.  Read that file and look for the bootstrap.  It has to
-  degrade silently for `python3 -c`, the REPL and a frozen interpreter,
-  none of which have a `__file__`.
-
-  Deciding what stale means is the harder half.  One approach: hash each
-  case body and keep a table of known hashes here.  A hash in the table
-  but not the current one is stale and can be reported precisely; an
-  unknown hash is somebody's edited copy and should be passed over in
-  silence.
-  * 6.7.1 - One locator, three readers.  Three steps need the main
-    program's path and its source text: this one, to find the pasted
-    case; Step 6.9, to find the requirements block; and Step 6.6, which
-    already uses the path alone to place `prog.altvenv`.  So one small
-    thing -- the program's path and text, `None` for the REPL,
-    `python3 -c` and a frozen interpreter -- and one place where those
-    awkward cases are got right and tested.
-  * 6.7.2 - Nobody is messaged.  There is no channel to an author at run
-    time, only whoever started the program, and a staleness report is
-    useful to an author and noise to a recipient who cannot act on it.
-    So the author asks rather than being told: silent by default, and a
-    report on request, in the same shape as `ALT_VENV_APPROVE=write`.
-    That removes the question of how to reach an author entirely.
-  * 6.7.3 - What to do about a stale bootstrap -- report it, refuse to
-    run, or offer to rewrite the file -- is still open, but 6.7.2 makes
-    reporting the obvious default.
-
-* Step 6.8: Messages.  When should anything be said: on creating the
-  directory, on each download, on a stale bootstrap?  One constraint is
-  hard.  A library must never write to standard output, because the
-  host program's output may be piped or parsed.  `logging` with a
-  `NullHandler` lets the host decide.  One line on standard error when a
-  download actually starts is still worth it, because several seconds
-  of silence looks like a hang.
-
-  A pointer to the `README.md` belongs in the failed fetch message from
-  Step 6.1, and costs one `paste` line: the URL in a shared constant
-  keeps the `raise` on one source line at 73 columns, where inlining it
-  is 121 and wrapping it costs two, so `SHARED_LINES` would go from 7
-  to 8.  Not done, because the URL depends on the repository name.
-
-* Step 6.9: Declared requirements, which is `2hsrpbd`.  Read the
+* Step 6.7: Declared requirements, which is `2hsrpbd`.  Read the
   calling script's PEP 723 `# /// script` block instead of a package
   name written into the bootstrap.  It builds on Step 6.2, and it makes
   the same file work under `uv run` for nothing, which is worth a great
   deal given that prior art is why this project has to justify itself at
   all.
-  * 6.9.1 - PEP 723 rather than a format of our own, decided
+
+  First of what remains, on 2026-09-27, because it is the largest change
+  to what the product is: the program declares what it needs instead of
+  somebody writing an `install` call by hand.  It also builds the
+  locator that Step 6.11 needs, so doing it first hands that step its
+  primitive for free.  And both `README.md` files are last for the
+  matching reason: the usage they describe changes here, and writing
+  them earlier means writing them twice.
+  * 6.7.1 - PEP 723 rather than a format of our own, decided
     2026-09-26.  Requirements do belong in the program, which was the
     proposal; the only question was the syntax, and PEP 723 is final,
     is what `uv` and `pipx` already read, and costs nothing to parse.
-  * 6.9.2 - Not the module docstring, for two measured reasons.  `-OO`
+  * 6.7.2 - Not the module docstring, for two measured reasons.  `-OO`
     strips docstrings: `python3 -OO` printed `doc is None` where
     `python3` printed the text, so requirements read from `__doc__`
     would vanish under optimisation, exactly as the `README.md` text
     already can.  And a machine readable block in a docstring turns up
     in `help(module)`, which is why the PEP uses comments.  Scanning the
     source text sidesteps the first but not the second.
-  * 6.9.3 - Parsing costs no dependency.  `tomllib` has been in the
+  * 6.7.3 - Parsing costs no dependency.  `tomllib` has been in the
     standard library since 3.11 and is in `libpython3.12-stdlib` here,
     not in a separable package.  It does raise the floor from 3.10,
     which `X | Y` and `match` already set, to 3.11; worth saying out
     loud before it is discovered.
-  * 6.9.4 - Wants the shared locator described in 6.7.1.
+  * 6.7.4 - Wants the shared locator described in 6.11.1.
+
+* Step 6.8: `.pth` files, which is `3pfaibne`.  `install` uses
+  `sys.path.insert`, which never executes a `.pth` file, so a package
+  relying on one is quietly half installed.  `site.addsitedir` is the
+  experiment.
+
+  Moved up sharply on 2026-09-27, because it stopped being tidiness.
+  Step 6.3 took the unpacking of wheels away from `pip` and on to us,
+  and 6.3.12 named `.pth` as part of the specification we had knowingly
+  not implemented.  The uncomfortable case is concrete: `coverage` ships
+  `a1_coverage.pth`, which is how it measures subprocesses, so anybody
+  installing `coverage` through this gets a silently half working
+  install -- and `coverage` is the package this project used as its own
+  example throughout Task 2.
+
+* Step 6.9: A fetch from the real PyPI, carried over from Task 5.  It is
+  the only thing that can settle Task 3's conclusion that a bootstrap
+  needs `python3-pip` plus a TLS trust store, since that claim is about
+  trusting the public certificate authorities and a private certificate
+  tests the opposite.  It is also just `install` against the real index.
+
+  Early rather than late, because of how much it retires at once.
+  Everything measured so far has been against wheels this project built
+  itself: real tag soup, a real transitive closure rather than the
+  synthetic `needy` and `widget`, and TLS against the public
+  authorities are all unexamined.  One opt-in test reaches all of them,
+  and settles a claim that has been open since 2026-09-24.
 
 * Step 6.10: Garbage collection.  Cull packages that have not been used
   for a while.  Not by access time: nearly every Linux filesystem
@@ -1471,47 +1463,81 @@ expected every time the order changes, and is Claude's job.
   identifiable.  A tree in `versions/` that no request record names any
   longer is the third kind, and arrives from Step 6.3.13.
 
-* Step 6.11: `.pth` files, which is `3pfaibne`.  `install` uses
-  `sys.path.insert`, which never executes a `.pth` file, so a package
-  relying on one is quietly half installed.  `site.addsitedir` is the
-  experiment.
+* Step 6.11: Find the bootstrap, and notice when it is stale.  Python has
+  a great many introspection facilities, and the direct one is
+  `sys.modules["__main__"].__file__` rather than walking frames with
+  `inspect`.  Read that file and look for the bootstrap.  It has to
+  degrade silently for `python3 -c`, the REPL and a frozen interpreter,
+  none of which have a `__file__`.
 
-* Step 6.12: The cache's own `~/.alt_venv/README.md`, which
-  `AltVEnv.__init__` writes from its docstring for somebody who finds
-  the directory and wonders what it is.  Not the project's `README.md`,
-  which is Step 6.14.  What it should say needs discussing, and it has
-  to describe the versioned layout of Step 6.3.  Note the current
-  behaviour: it is rewritten on every construction rather than only when
-  absent, which makes writing a file a side effect of making an object
-  and will surprise somebody.
+  Deciding what stale means is the harder half.  One approach: hash each
+  case body and keep a table of known hashes here.  A hash in the table
+  but not the current one is stale and can be reported precisely; an
+  unknown hash is somebody's edited copy and should be passed over in
+  silence.
+  * 6.11.1 - One locator, three readers.  Three steps need the main
+    program's path and its source text: this one, to find the pasted
+    case; Step 6.7, to find the requirements block; and Step 6.6, which
+    already uses the path alone to place `prog.altvenv`.  So one small
+    thing -- the program's path and text, `None` for the REPL,
+    `python3 -c` and a frozen interpreter -- and one place where those
+    awkward cases are got right and tested.
+  * 6.11.2 - Nobody is messaged.  There is no channel to an author at run
+    time, only whoever started the program, and a staleness report is
+    useful to an author and noise to a recipient who cannot act on it.
+    So the author asks rather than being told: silent by default, and a
+    report on request, in the same shape as `ALT_VENV_APPROVE=write`.
+    That removes the question of how to reach an author entirely.
+  * 6.11.3 - What to do about a stale bootstrap -- report it, refuse to
+    run, or offer to rewrite the file -- is still open, but 6.11.2 makes
+    reporting the obvious default.
 
-* Step 6.13: A fetch from the real PyPI, carried over from Task 5.  It is
-  the only thing that can settle Task 3's conclusion that a bootstrap
-  needs `python3-pip` plus a TLS trust store, since that claim is about
-  trusting the public certificate authorities and a private certificate
-  tests the opposite.  It is also just `install` against the real index.
+* Step 6.12: Messages.  When should anything be said: on creating the
+  directory, on each download, on a stale bootstrap?  One constraint is
+  hard.  A library must never write to standard output, because the
+  host program's output may be piped or parsed.  `logging` with a
+  `NullHandler` lets the host decide.  One line on standard error when a
+  download actually starts is still worth it, because several seconds
+  of silence looks like a hang.
 
-* Step 6.14: Rewrite the project's own `README.md`, the page a stranger
-  lands on after a program tells them to.  Not the cache's
-  `~/.alt_venv/README.md`, which is Step 6.12.
-  * 6.14.1 - It still describes the Scavenger Hunt, at lines 17 and 27,
-    which nothing implements any more: nobody is sent to visit web pages
-    and paste titles back.  What replaced it is that the author approves
-    once and the recipient is told, and asked at most once per cache.
-  * 6.14.2 - `## Security Issues of Executing Unvetted Code` is still
+  A pointer to the `README.md` belongs in the failed fetch message from
+  Step 6.1, and costs one `paste` line: the URL in a shared constant
+  keeps the `raise` on one source line at 73 columns, where inlining it
+  is 121 and wrapping it costs two, so `SHARED_LINES` would go from 7
+  to 8.  Not done, because the URL depends on the repository name.
+
+* Step 6.13: `README.md` documentation.  Two different files carry that
+  name and they are for different readers, so each has its own
+  sub-items below and neither is finished by writing the other.  The
+  project's `README.md` is the page a stranger lands on after a program
+  tells them to; `~/.alt_venv/README.md` is what somebody finds inside
+  the cache directory and wonders about.
+  * 6.13.1 - The project's `README.md` still describes the Scavenger
+    Hunt, at lines 17 and 27, which nothing implements any more: nobody
+    is sent to visit web pages and paste titles back.  What replaced it
+    is that the author approves once, and the recipient is told and
+    asked at most once per cache.
+  * 6.13.2 - `## Security Issues of Executing Unvetted Code` is still
     marked TBD, and it is the section the whole feature rests on.  The
     sub-items of Step 6.6 are its outline, and 6.6.1 in particular: the
     claim has to be narrow to be true, because a malicious author gets
     no protection at all and a typosquat very little.
-  * 6.14.3 - Habituation deserves an answer here, per 6.6.7.  The
+  * 6.13.3 - Habituation deserves an answer here, per 6.6.7.  The
     mitigation is real and worth stating: the question is asked once per
     cache, not once per run, and an approvals file removes it entirely.
-  * 6.14.4 - It should say plainly that an approvals file is how a
-    guarantee is had, where a listing is only a notification, and that
-    a program started by `cron` or a build has nobody to ask and so
-    proceeds.
+  * 6.13.4 - The project's `README.md` should say plainly that an
+    approvals file is how a guarantee is had, where a listing is only a
+    notification, and that a program started by `cron` or a build has
+    nobody to ask and so proceeds.
+  * 6.13.5 - The cache's `~/.alt_venv/README.md` is the other file, and
+    `AltVEnv.__init__` writes it from its own docstring.  What it should
+    say needs discussing, and it has to describe the versioned layout of
+    Step 6.3, which it predates.  Note the current behaviour: it is
+    rewritten on every construction rather than only when absent, which
+    makes writing a file a side effect of making an object and will
+    surprise somebody.
 
-* Step 6.15: And more.  A place holder for additional steps.
+* Step 6.14: And more.  A place holder for additional steps.
 
 ### Step 6.1: Error on a failed fetch
 
@@ -1636,7 +1662,7 @@ approval test is a child program.
 
 What this step does not cover: the project's own `README.md`, which
 still describes the Scavenger Hunt and still has its security section
-marked TBD.  Explaining any of this to a stranger is Step 6.14, and the
+marked TBD.  Explaining any of this to a stranger is Step 6.13, and the
 sub-items above are the outline it should follow.
 
 ### Task 6 Summary
