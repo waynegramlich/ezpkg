@@ -1750,6 +1750,55 @@ expected every time the order changes, and is Claude's job.
     that `PACKAGE = "alt_venv"` in a pasted bootstrap resolves for a
     stranger with no local index.  That is the true end to end test and
     it is a release decision, with `test.pypi.org` as its rehearsal.
+
+    **Who does what.**  Wayne uploads, by hand, exactly as with `git`.
+    Two factor authentication is **not** the gate here and it was worth
+    finding out before relying on it: it protects the web login, while
+    an upload authenticates with an API token and is entirely
+    non-interactive.  So the boundary has to be the token itself --
+    Claude prepares and verifies the artifact and never holds the
+    credential.
+
+    **Ready as of 2026-09-27**, so that tomorrow is only the parts that
+    need a person:
+
+    * `release_wheel` builds the artifact: the module copied under the
+      published name so one word is both the `pip` name and the import
+      name, `Requires-Python` from `alt_venv.py`'s own block, `README.md`
+      as the project page, a `License` field as free text and five trove
+      classifiers.  Seven tests in `ReleaseWheelTest`, including `pip`
+      accepting it and no `@` anywhere in the headers.
+    * `dev_version()` stamps a version to the minute, because **no index
+      lets a filename be uploaded twice**, even after a deletion.  Every
+      rehearsal therefore gets a name of its own for free.
+    * `twine` is fetched with our own `install()` -- about twenty
+      packages, the largest closure this project has resolved -- and
+      then judges our own handwritten `METADATA`.  Measured:
+      `twine check --strict` **passes**.  The rejection 6.8.7 expected
+      did not happen, which retires the main risk of the whole exercise.
+      The test is opt in behind `ALT_VENV_PYPI`.
+
+    **What is left for a person, in order.**
+
+    * An account on `test.pypi.org`, which is separate from PyPI's, with
+      2FA by authenticator application rather than SMS as far as anybody
+      here knows; the signup page settles it.
+    * An API token from that account, kept out of the repository.
+      `TWINE_USERNAME=__token__` and `TWINE_PASSWORD=<token>` in the
+      environment is the least permanent way to hold one.
+    * Build with a stamped version, then `twine upload --repository-url
+      https://test.pypi.org/legacy/ <wheel>`, under the trial name
+      `alt_venv_trial` rather than `alt-venv`.
+    * Fetch it back the way a stranger would: a pasted bootstrap with
+      `PIP_INDEX_URL=https://test.pypi.org/simple/` and no local index at
+      all.  That is the step nothing has ever tested.
+    * Then, and only then, `alt-venv` at `0.0.1.dev1` on real PyPI, which
+      claims the name that every pasted bootstrap carries while leaving
+      `0.0.1` clean for the first real release.
+
+    **One asymmetry to keep in mind**: `test.pypi.org` may be pruned,
+    unscheduled, so a mistake there does fade; PyPI never forgets, and
+    the protection there is the version suffix and nothing else.
   * 6.8.3 - Opt in, and pin.  This is the one test that can fail because
     the world changed rather than because we did, so it stays out of the
     default suite behind an environment variable, and it names exact

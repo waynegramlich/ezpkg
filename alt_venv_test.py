@@ -45,6 +45,7 @@ SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 import _csv
 import base64
 import csv
+import datetime
 import functools
 import hashlib
 import html
@@ -68,7 +69,7 @@ import unittest.mock
 import urllib.error
 import urllib.request
 import zipfile
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from pathlib import Path, PurePath
 from types import ModuleType
 from typing import IO, Any, cast
@@ -81,6 +82,16 @@ DISTRIBUTION: str = "alt-venv"
 MODULE: str = "alt_venv"
 VERSION: str = alt_venv.__version__
 SUMMARY: str = "Fetch Python packages that are not preinstalled."
+
+# The distribution name for a rehearsal upload, which is deliberately
+# not `alt-venv` and deliberately not `alt_venv_test` either: the second
+# is this file's own module name, and a published module spelled that way
+# would shadow this suite whenever a cache went on `sys.path` in front of
+# the project.  Spelled with an underscore so that one word serves as the
+# `pip` name and the import name at once, which is what `bootstrap.py`'s
+# single `PACKAGE` needs.  See Step 6.8.2 in `LOGBOOK.md`.
+RELEASE_DISTRIBUTION: str = "alt_venv_trial"
+
 
 def floor() -> str:
     """Return the Python floor `alt_venv.py` declares for itself.
@@ -239,7 +250,12 @@ def build_wheel(module: Path, distribution: str, version: str,
                 summary: str, directory: Path,
                 tag: str = "py3-none-any",
                 requires: Sequence[str] = (),
-                floor: str = "") -> Path:
+                floor: str = "",
+                description: str = "",
+                license_name: str = "",
+                author: str = "",
+                urls: Mapping[str, str] | None = None,
+                classifiers: Sequence[str] = ()) -> Path:
     """Build a pure Python wheel holding one module.
 
     A wheel is a zip archive with an agreed layout, so building one
@@ -285,6 +301,24 @@ def build_wheel(module: Path, distribution: str, version: str,
       an interpreter that cannot run it and says why; without it the
       install succeeds and the program fails later with a `SyntaxError`
       that explains nothing.
+    * `description` (`str`):
+      The long description, which becomes the body of `METADATA` and the
+      project page on an index.  Markdown, and declared as such.  Empty,
+      the default, writes none: a test wheel wants no project page.
+    * `license_name` (`str`):
+      The `License` field, as free text.  Free text on purpose: a
+      `Classifier` naming a license is validated by PyPI and a wrong one
+      is rejected, where this field is not checked at all.
+    * `author` (`str`):
+      The `Author` field.  No email, because an address in package
+      metadata is published to everybody and is the author's to give.
+    * `urls` (`Mapping[str, str] | None`):
+      Labels and addresses for `Project-URL`.  Step 6.13's failed fetch
+      message wants somewhere to point, and this is where a wheel
+      carries it.
+    * `classifiers` (`Sequence[str]`):
+      Trove classifiers.  Every one is validated on upload, so an
+      invented classifier fails the upload rather than being ignored.
 
     Returns:
     * (`Path`): The wheel that was written.
@@ -298,8 +332,17 @@ def build_wheel(module: Path, distribution: str, version: str,
             f"Metadata-Version: 2.1\nName: {distribution}\n"
             f"Version: {version}\nSummary: {summary}\n"
             + (f"Requires-Python: {floor}\n" if floor else "")
+            + (f"License: {license_name}\n" if license_name else "")
+            + (f"Author: {author}\n" if author else "")
+            + "".join(f"Project-URL: {label}, {address}\n"
+                      for label, address in (urls or {}).items())
+            + "".join(f"Classifier: {one}\n" for one in classifiers)
             + "".join(f"Requires-Dist: {one}\n"
-                      for one in requires)).encode(),
+                      for one in requires)
+            # The description is the message body, after a blank line,
+            # which is how a `METADATA` file carries a project page.
+            + ("Description-Content-Type: text/markdown\n\n"
+               + description if description else "")).encode(),
         f"{info}/WHEEL": (b"Wheel-Version: 1.0\n"
                           b"Generator: alt_venv_test\n"
                           b"Root-Is-Purelib: true\n"
@@ -327,6 +370,87 @@ def build_wheel(module: Path, distribution: str, version: str,
         for path, content in members.items():
             archive.writestr(path, content)
     return wheel
+
+
+def dev_version(version: str = VERSION) -> str:
+    """Return a development version that no index can have seen.
+
+    An index never lets a filename be re-uploaded, even after the
+    release is deleted, so every rehearsal needs a version of its own.
+    A minute stamped suffix gives one without anybody having to
+    remember what the last attempt was called, and `.devN` sorts below
+    the release it rehearses, so publishing `0.0.1` afterwards still
+    supersedes them all.  See Step 6.8.2 in `LOGBOOK.md`.
+
+    Arguments:
+    * `version` (`str`):
+      The release being rehearsed.
+
+    Returns:
+    * (`str`): Something like `0.0.1.dev202609272231`.
+    """
+    # UTC, so that two machines cannot disagree about the order.
+    stamp: str = datetime.datetime.now(
+        datetime.UTC).strftime("%Y%m%d%H%M")
+    return f"{version}.dev{stamp}"
+
+
+def release_wheel(directory: Path,
+                  distribution: str = RELEASE_DISTRIBUTION,
+                  version: str = VERSION,
+                  readme: Path | None = None) -> Path:
+    """Build the wheel this project would publish.
+
+    The same builder the tests use, given the metadata an index wants:
+    a long description, a license, an author, a project address and
+    classifiers.  Nothing here uploads anything; see Step 6.8.2 in
+    `LOGBOOK.md`, and uploading is Wayne's by hand in any case.
+
+    The module inside is named after the distribution, so that one word
+    serves as both the `pip` name and the import name -- which is what
+    `bootstrap.py`'s single `PACKAGE` requires.  For a rehearsal that
+    means a copy of `alt_venv.py` under another name, which is also the
+    honest thing to publish: it is the same code.
+
+    `Requires-Python` comes from `alt_venv.py`'s own PEP 723 block, per
+    Step 6.7.9, so a published wheel cannot claim a floor the source
+    does not.
+
+    Arguments:
+    * `directory` (`Path`):
+      Where to write the wheel, and the copied module.  Created if
+      absent.
+    * `distribution` (`str`):
+      The distribution name, which is also the module name.
+    * `version` (`str`):
+      The version to publish, which PyPI will never let be reused.
+    * `readme` (`Path | None`):
+      The file to use as the long description.  `None` takes the
+      project's own `README.md`.
+
+    Returns:
+    * (`Path`): The wheel that was written.
+    """
+    # The module is a copy of ours under the published name.
+    here: Path = Path(__file__).resolve().parent
+    directory.mkdir(parents=True, exist_ok=True)
+    module: Path = directory / f"{distribution}.py"
+    module.write_bytes((here / f"{MODULE}.py").read_bytes())
+
+    # Everything else is metadata an index asks for and a test does not.
+    page: Path = (here / "README.md") if readme is None else readme
+    return build_wheel(
+        module, distribution, version, SUMMARY, directory,
+        floor=floor(),
+        description=page.read_text(encoding="utf-8"),
+        license_name="MIT No Attribution",
+        author="Wayne C. Gramlich",
+        urls={"Homepage": "https://github.com/waynegramlich/alt_venv"},
+        classifiers=["Development Status :: 3 - Alpha",
+                     "Intended Audience :: Developers",
+                     "Operating System :: OS Independent",
+                     "Programming Language :: Python :: 3",
+                     "Topic :: System :: Installation/Setup"])
 
 
 def add_data_member(wheel: Path, sub: str, name: str,
@@ -3469,6 +3593,145 @@ class LocatorTest(unittest.TestCase):
         self.assertIn("approvals= None", output)
 
 
+class ReleaseWheelTest(unittest.TestCase):
+    """Check that the wheel this project would publish is publishable.
+
+    Nothing here reaches an index.  `build` and `twine` are not
+    installed on this machine, which is fitting for a project about
+    packages that are not preinstalled but does mean `twine check` is
+    not the validator; `pip` accepting the wheel is.  See Step 6.8.2 in
+    `LOGBOOK.md`.
+
+    Attributes:
+    * `root` (`Path`):
+      A temporary directory holding the wheel.
+    * `wheel` (`Path`):
+      The wheel under test, built once for the class.
+
+    Constructor:
+    * `ReleaseWheelTest()`, by `unittest` rather than by hand.
+    """
+
+    root: Path
+    wheel: Path
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        """Build the release wheel once."""
+        # One build serves every test here; none of them mutates it.
+        cls.root = Path(tempfile.mkdtemp(prefix="release-"))
+        cls.wheel = release_wheel(cls.root / "dist")
+
+    @classmethod
+    def tearDownClass(cls) -> None:
+        """Remove the directory the wheel was built in."""
+        # One directory holds everything.
+        shutil.rmtree(cls.root, ignore_errors=True)
+
+    def metadata(self) -> str:
+        """Return the wheel's `METADATA` as text.
+
+        Returns:
+        * (`str`): The whole file, headers and description alike.
+        """
+        # The name of the `dist-info` directory follows from the wheel.
+        archive: zipfile.ZipFile
+        with zipfile.ZipFile(self.wheel) as archive:
+            name: str = next(item for item in archive.namelist()
+                             if item.endswith("/METADATA"))
+            return archive.read(name).decode()
+
+    def test_the_filename_is_what_an_index_expects(self) -> None:
+        """Name, version and tag, spelled the way a wheel filename is."""
+        # `pip` reads this filename before it reads anything inside.
+        self.assertEqual(
+            self.wheel.name,
+            f"{RELEASE_DISTRIBUTION}-{VERSION}-py3-none-any.whl")
+
+    def test_the_metadata_carries_what_an_index_wants(self) -> None:
+        """Every field a project page is built from is present."""
+        # `Requires-Python` comes from `alt_venv.py`'s own block.
+        text: str = self.metadata()
+        for line in (f"Name: {RELEASE_DISTRIBUTION}",
+                     f"Version: {VERSION}",
+                     f"Summary: {SUMMARY}",
+                     f"Requires-Python: {FLOOR}",
+                     "License: MIT No Attribution",
+                     "Author: Wayne C. Gramlich",
+                     "Project-URL: Homepage, https://github.com/",
+                     "Classifier: Programming Language :: Python :: 3",
+                     "Description-Content-Type: text/markdown"):
+            with self.subTest(line=line):
+                self.assertIn(line, text)
+
+    def test_the_description_is_the_readme(self) -> None:
+        """The project page is the `README.md`, not a summary of it."""
+        # The body follows a blank line, which is what makes it the body.
+        here: Path = Path(__file__).resolve().parent
+        readme: str = (here / "README.md").read_text(encoding="utf-8")
+        text: str = self.metadata()
+        body: str
+        body = text.split("\n\n", 1)[1]
+        self.assertNotIn("Description-Content-Type", body)
+        self.assertEqual(body, readme)
+
+    def test_no_email_address_is_published(self) -> None:
+        """An address in metadata is published to everybody.
+
+        Deliberate: the `Author-email` field is the author's to give,
+        and a test is the place to notice if one ever appears.
+        """
+        # `@` would be the giveaway in any of the header fields.
+        headers: str = self.metadata().split("\n\n", 1)[0]
+        self.assertNotIn("@", headers)
+
+    def test_pip_accepts_the_wheel(self) -> None:
+        """`pip` installs it from a local file, which is the validation.
+
+        `twine check` is not available here, so this stands in: `pip`
+        reads the filename, the `METADATA`, the `WHEEL` and the `RECORD`,
+        and refuses a wheel it cannot make sense of.
+        """
+        # `--no-index` proves nothing was fetched to make it work.
+        target: Path = self.root / "installed"
+        done: subprocess.CompletedProcess[str] = subprocess.run(
+            [sys.executable, "-m", "pip", "install", "--quiet",
+             "--no-input", "--disable-pip-version-check", "--no-index",
+             "--no-deps", "--target", str(target), str(self.wheel)],
+            capture_output=True, text=True, check=False)
+        self.assertEqual(done.returncode, 0, done.stderr[-500:])
+        self.assertTrue((target / f"{RELEASE_DISTRIBUTION}.py").is_file())
+
+    def test_the_published_module_is_ours(self) -> None:
+        """The module inside is `alt_venv.py`, byte for byte.
+
+        A rehearsal upload publishes the same code under another name;
+        if these ever differ, the wheel is not what it claims to be.
+        """
+        # Byte comparison, because a copy is all it is meant to be.
+        here: Path = Path(__file__).resolve().parent
+        archive: zipfile.ZipFile
+        with zipfile.ZipFile(self.wheel) as archive:
+            inside: bytes = archive.read(f"{RELEASE_DISTRIBUTION}.py")
+        self.assertEqual(inside, (here / f"{MODULE}.py").read_bytes())
+
+    def test_the_name_is_parameterized(self) -> None:
+        """A different distribution name builds a different wheel.
+
+        The name is in one constant because it appears in every pasted
+        bootstrap; this is the check that nothing else hard-codes it.
+        """
+        # `alt-venv` itself is what the real upload would use.
+        other: Path = release_wheel(self.root / "other",
+                                    distribution="alt_venv",
+                                    version="9.9.9")
+        self.assertEqual(other.name, "alt_venv-9.9.9-py3-none-any.whl")
+        archive: zipfile.ZipFile
+        with zipfile.ZipFile(other) as archive:
+            self.assertIn("alt_venv-9.9.9.dist-info/METADATA",
+                          archive.namelist())
+
+
 @unittest.skipUnless(os.environ.get("ALT_VENV_PYPI"),
                      "set ALT_VENV_PYPI to fetch from the real index")
 class PyPITest(unittest.TestCase):
@@ -3544,7 +3807,8 @@ class PyPITest(unittest.TestCase):
         environment.pop("VIRTUAL_ENV", None)
         done: subprocess.CompletedProcess[str] = subprocess.run(
             [sys.executable, str(program)], env=environment,
-            capture_output=True, text=True, check=False)
+            cwd=str(self.root), capture_output=True, text=True,
+            check=False)
         self.assertEqual(done.returncode, 0, done.stderr[-800:])
         return done.stdout, cache / "versions"
 
@@ -3567,6 +3831,30 @@ class PyPITest(unittest.TestCase):
             with self.subTest(package=name):
                 self.assertTrue(any(tree.startswith(name)
                                     for tree in trees), trees)
+
+    def test_twine_fetched_by_us_approves_our_wheel(self) -> None:
+        """`twine check --strict` passes on the wheel we would publish.
+
+        Two things at once, and both are the point.  `twine` is fetched
+        with `install()` rather than with `pip`, which is the largest
+        transitive closure this project has ever resolved -- about twenty
+        packages -- and is the dogfood Step 6.8.2 asks for.  Then that
+        `twine` judges our handwritten `METADATA`, which is the only
+        independent check available here that an index would accept it.
+        """
+        # Built with a stamped development version, because no index
+        # ever lets a filename be uploaded twice.
+        printed: str
+        printed, _ = self.fetch(
+            "twine==5.1.1",
+            "import alt_venv_test as avt\n"
+            "from twine.cli import dispatch\n"
+            "wheel = avt.release_wheel(Path('dist'),"
+            " version=avt.dev_version())\n"
+            "dispatch(['check', '--strict', str(wheel)])\n"
+            "print('checked', wheel.name)")
+        self.assertIn("checked", printed)
+        self.assertIn(".dev", printed)
 
     def test_a_real_wheel_carries_a_pth_file(self) -> None:
         """`setuptools` ships `.pth`, which Step 6.9 is about.
