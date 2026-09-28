@@ -1710,11 +1710,13 @@ expected every time the order changes, and is Claude's job.
     eleven live in `InstallTest` (real programs, own directories),
     `-OO` and `python3 -c` among them.  Whole suite 117 tests in 67 s.
 
-* Step 6.8: A fetch from the real PyPI, carried over from Task 5.  It is
-  the only thing that can settle Task 3's conclusion that a bootstrap
-  needs `python3-pip` plus a TLS trust store, since that claim is about
-  trusting the public certificate authorities and a private certificate
-  tests the opposite.  It is also just `install` against the real index.
+* Step 6.8: A fetch from the real PyPI, carried over from Task 5.
+
+  It is the only thing that can settle Task 3's conclusion that a
+  bootstrap needs `python3-pip` plus a TLS trust store, since that claim
+  is about trusting the public certificate authorities and a private
+  certificate tests the opposite.  It is also just `install` against the
+  real index.
 
   Early rather than late, because of how much it retires at once.
   Everything measured so far has been against wheels this project built
@@ -1722,7 +1724,57 @@ expected every time the order changes, and is Claude's job.
   synthetic `needy` and `widget`, and TLS against the public
   authorities are all unexamined.  One opt-in test reaches all of them,
   and settles a claim that has been open since 2026-09-24.
-  * 6.8.1 - Look at the untrusted certificate test while here, carried
+  * 6.8.1 - Done 2026-09-27.  `PyPITest`, skipped unless
+    `ALT_VENV_PYPI` is set, fetches from the real index in a child
+    process with `PIP_INDEX_URL` removed, so the default applies: PyPI
+    over TLS against the system trust store.  Two tests, 5.4 s.
+    `requests==2.32.3` arrives with `certifi`, `charset-normalizer`,
+    `idna` and `urllib3`, which is the first real transitive closure this
+    project has seen, and Task 3's trust store claim is settled in the
+    affirmative: nothing about the fetch needed arranging.
+
+    Download only; upload nothing.  Wayne asked on 2026-09-27
+    whether PyPI has a scratch area that ages out after about a week, to
+    hold wheels of our own.  It would not help here: the three unknowns
+    are real tag soup, a real transitive closure and TLS against the
+    public authorities, and all three come from **fetching** something
+    that already exists.  Nothing this project does publishes a package.
+
+    The nearest real thing is `test.pypi.org`, a separate instance whose
+    database may be pruned, but not on a schedule anybody should rely on,
+    and real PyPI refuses to reuse a filename once deleted.  Unverified
+    recollection rather than measurement; one fetch of their
+    documentation would settle it if it ever matters.
+  * 6.8.2 - Uploading belongs to a different question, kept separate so
+    it is not confused with this one: publishing `alt-venv` itself, so
+    that `PACKAGE = "alt_venv"` in a pasted bootstrap resolves for a
+    stranger with no local index.  That is the true end to end test and
+    it is a release decision, with `test.pypi.org` as its rehearsal.
+  * 6.8.3 - Opt in, and pin.  This is the one test that can fail because
+    the world changed rather than because we did, so it stays out of the
+    default suite behind an environment variable, and it names exact
+    versions.  Rate limiting and a machine with no network are both
+    ordinary outcomes here, not faults.
+  * 6.8.4 - Which packages, and why each.  `requests` brings a real
+    transitive closure -- `certifi`, `idna`, `urllib3`,
+    `charset-normalizer` -- which the synthetic `needy` cannot imitate.
+    `setuptools` is the other, because it ships `distutils-precedence.pth`
+    and so doubles as Step 6.9's evidence, and because it has no
+    dependencies of its own.  `coverage` was the first choice and turned
+    out to ship no `.pth` at all; see 6.9.
+  * 6.8.5 - Two code paths reach an index and only one of them is
+    `pip`'s.  `install` hands resolution and tag matching to `pip`, so a
+    real index tests our plumbing rather than our judgement.  Cases 3 and
+    12 use the five-line tag matcher of `2wtmifs` instead, and pointing
+    **those** at real PyPI is what tests the stand-in against real tag
+    soup, which nothing has done yet.  Worth doing both.
+  * 6.8.6 - The prompt is a hazard here, not in the suite.  Under
+    `unittest` there is no controlling terminal, so `consent` returns
+    True and nothing hangs; a person running this test from a terminal
+    with no approvals file gets asked, and the answer they give decides
+    whether the test passes.  Set `ALT_VENV_APPROVE` in the test rather
+    than leaving that to chance.
+  * 6.8.7 - Look at the untrusted certificate test while here, carried
     from 6.5.13: 19.8 s against 5.3 s for the trusted one, over the same
     four cases.  The suspicion is `ATTEMPTS`, which would mean a rejected
     certificate is retried three times.  If so it is a defect and not
@@ -1738,11 +1790,20 @@ expected every time the order changes, and is Claude's job.
   Moved up sharply on 2026-09-27, because it stopped being tidiness.
   Step 6.3 took the unpacking of wheels away from `pip` and on to us,
   and 6.3.12 named `.pth` as part of the specification we had knowingly
-  not implemented.  The uncomfortable case is concrete: `coverage` ships
-  `a1_coverage.pth`, which is how it measures subprocesses, so anybody
-  installing `coverage` through this gets a silently half working
-  install -- and `coverage` is the package this project used as its own
-  example throughout Task 2.
+  not implemented.
+
+  The example this step used to give was wrong, and Step 6.8.1 found it
+  out by looking: **`coverage` ships no `.pth` file at all.**  Measured
+  2026-09-27 on `coverage==7.6.1`, whose wheel holds 62 entries and not
+  one of them ends in `.pth`; `a1_coverage.pth` is a file coverage's
+  documentation tells a person to write by hand.  The claim had been sat
+  here since the step was written and it motivated moving the step up.
+
+  Two packages that really do ship one, also measured: `setuptools`
+  carries `distutils-precedence.pth`, which is on very nearly every
+  machine, and `pytest-cov` carries `pytest-cov.pth`, which is how *it*
+  reaches subprocesses.  Both are code executed at path setup, so the
+  gap is real and the step stands; only the example changes.
   * 6.9.1 - This changes what Step 6.10.2 has to say, so decide it
     before that section is written.  A `.pth` line beginning with
     `import` is **executed** when the path is set up, which is how

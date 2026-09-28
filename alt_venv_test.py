@@ -3469,6 +3469,128 @@ class LocatorTest(unittest.TestCase):
         self.assertIn("approvals= None", output)
 
 
+@unittest.skipUnless(os.environ.get("ALT_VENV_PYPI"),
+                     "set ALT_VENV_PYPI to fetch from the real index")
+class PyPITest(unittest.TestCase):
+    """Fetch from the real PyPI, which nothing else here does.
+
+    Everything else in this suite runs against wheels this project built
+    and served itself, so three things have never been exercised: real
+    wheel tag soup, a real transitive closure, and TLS against the public
+    certificate authorities.  See Step 6.8 in `LOGBOOK.md`.
+
+    Opt in, because this is the one class that can fail for reasons
+    outside the repository -- no network, a rate limit, a yanked release
+    -- and a suite that fails for those reasons teaches people to ignore
+    it.  Versions are pinned for the same reason.  Nothing is uploaded
+    anywhere; see 6.8.1.
+
+    Attributes:
+    * `root` (`Path`):
+      A temporary directory holding the program and its cache.
+
+    Constructor:
+    * `PyPITest()`, by `unittest` rather than by hand.
+    """
+
+    # Pinned, so that the world changing is not a test failure.
+    REQUESTS: str = "requests==2.32.3"
+    SETUPTOOLS: str = "setuptools==75.1.0"
+
+    root: Path
+
+    def setUp(self) -> None:
+        """Make a directory for this test's program and cache."""
+        # `addCleanup`, so a failure still tidies up.
+        self.root = Path(tempfile.mkdtemp(prefix="pypi-"))
+        self.addCleanup(shutil.rmtree, self.root, ignore_errors=True)
+
+    def fetch(self, requirement: str, tail: str) -> tuple[str, Path]:
+        """Run a program that declares `requirement` and fetch it for real.
+
+        Arguments:
+        * `requirement` (`str`):
+          A pinned PEP 508 requirement for the program's block.
+        * `tail` (`str`):
+          Statements to run after `install()`.
+
+        Returns:
+        * (`tuple[str, Path]`): What the program printed, and the
+          `versions` directory of its cache.
+        """
+        # A block, the bootstrap's part, and then the program's imports.
+        here: str = str(Path(__file__).resolve().parent)
+        cache: Path = self.root / "cache"
+        program: Path = self.root / "prog.py"
+        program.write_text(
+            "# /// script\n"
+            f'# dependencies = ["{requirement}"]\n'
+            "# ///\n"
+            "import sys\n"
+            f"sys.path.insert(0, {here!r})\n"
+            "import alt_venv\n"
+            "from pathlib import Path\n"
+            f"v = alt_venv.AltVEnv(Path({str(cache)!r}))\n"
+            "v.install()\n"
+            f"{tail}\n")
+
+        # No `PIP_INDEX_URL`, which is the whole point: the default is
+        # PyPI over TLS, validated against the system trust store.  And
+        # `skip`, because a person running this from a terminal would
+        # otherwise be asked to approve it; see 6.8.6.
+        environment: dict[str, str] = dict(os.environ,
+                                           ALT_VENV_APPROVE="skip")
+        environment.pop("PIP_INDEX_URL", None)
+        environment.pop("VIRTUAL_ENV", None)
+        done: subprocess.CompletedProcess[str] = subprocess.run(
+            [sys.executable, str(program)], env=environment,
+            capture_output=True, text=True, check=False)
+        self.assertEqual(done.returncode, 0, done.stderr[-800:])
+        return done.stdout, cache / "versions"
+
+    def test_a_real_transitive_closure_arrives(self) -> None:
+        """`requests` brings four packages nobody asked for.
+
+        `needy` and `widget` are a synthetic pair; this is the real
+        thing, resolved by `pip` against the real index.
+        """
+        # The version proves it is ours and not the system's copy.
+        printed: str
+        versions: Path
+        printed, versions = self.fetch(
+            self.REQUESTS, "import requests\nprint(requests.__version__)")
+        self.assertEqual(printed.strip(), "2.32.3")
+
+        # Four dependencies, none of them asked for.
+        trees: list[str] = sorted(tree.name for tree in versions.iterdir())
+        for name in ("certifi", "charset_normalizer", "idna", "urllib3"):
+            with self.subTest(package=name):
+                self.assertTrue(any(tree.startswith(name)
+                                    for tree in trees), trees)
+
+    def test_a_real_wheel_carries_a_pth_file(self) -> None:
+        """`setuptools` ships `.pth`, which Step 6.9 is about.
+
+        Evidence rather than a fix: the file arrives and lands in the
+        tree, where `sys.path.insert` will never execute it.
+        `setuptools` is the example because it has no dependencies and
+        is on nearly every machine, and because `coverage` -- which the
+        logbook claimed shipped one -- measurably does not; see 6.9.
+        """
+        # The import works; what the `.pth` would add is the `distutils`
+        # precedence hook, which is 6.9's business.
+        printed: str
+        versions: Path
+        printed, versions = self.fetch(
+            self.SETUPTOOLS,
+            "import setuptools\nprint(setuptools.__version__)")
+        self.assertEqual(printed.strip(), "75.1.0")
+        found: list[Path] = [path for tree in versions.iterdir()
+                             for path in tree.glob("*.pth")]
+        self.assertEqual([path.name for path in found],
+                         ["distutils-precedence.pth"])
+
+
 def main() -> None:
     """Run the `alt_venv` test suite.
 
