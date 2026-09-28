@@ -515,12 +515,15 @@ def main() -> None:
     # `types`, because `sys` is a module and is already imported.
     assert isinstance(module, type(sys)), f"{PACKAGE} gave {module!r}"
 
-    # A real program constructs one next, and that is not idle here:
-    # the constructor repairs a single module install so that this
-    # case's own `is_dir()` guard recognises it on the following run.
-    # See `0cctfd`.  Harness machinery, so `paste` does not count it.
+    # A real program constructs one next and calls `install()`, and
+    # neither is idle here: the constructor repairs a single module
+    # install so that this case's own `is_dir()` guard recognises it on
+    # the following run, and `install()` walks the declared path in every
+    # one of the twelve shapes, virtual environments included.  This file
+    # has no PEP 723 block, so nothing is fetched.  See `0cctfd` and Step
+    # 6.7.8.  Harness machinery, so `paste` does not count it.
     if hasattr(module, "AltVEnv"):
-        module.AltVEnv()
+        module.AltVEnv().install()
 
     print(f"{PACKAGE}: module {module.__name__} "
           f"version {module.__version__} from {module.__file__}")

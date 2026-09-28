@@ -82,12 +82,37 @@ MODULE: str = "alt_venv"
 VERSION: str = alt_venv.__version__
 SUMMARY: str = "Fetch Python packages that are not preinstalled."
 
+def floor() -> str:
+    """Return the Python floor `alt_venv.py` declares for itself.
+
+    Read out of that file's own PEP 723 block, with our own parser, so
+    that the floor is written down once and the dogfooding of Step 6.7.5
+    has a consequence: break the parser or the block and the wheels stop
+    claiming the right `Requires-Python`.  See Step 6.7.9.
+
+    Returns:
+    * (`str`): The specifier, such as `>=3.11`.
+
+    Raises:
+    * `AssertionError`:
+      If the block or its `requires-python` has gone missing, which is
+      a broken `alt_venv.py` rather than a broken test.
+    """
+    # Read from disk; the block is a comment and is gone at run time.
+    source: Path = Path(__file__).resolve().parent / f"{MODULE}.py"
+    metadata: dict[str, Any] | None = alt_venv.script_metadata(
+        source.read_text(encoding="utf-8"))
+    assert metadata is not None, f"{source} has no PEP 723 block"
+    stated: object = metadata.get("requires-python")
+    assert isinstance(stated, str), f"{source} declares no requires-python"
+    return stated
+
+
 # The lowest Python `alt_venv.py` runs on, written into the wheel as
 # `Requires-Python`.  It is 3.11 because `tomllib` reads the PEP 723
 # block and arrived in 3.11; the language features used need only 3.10.
-# Written twice for now, here and in `alt_venv.py`'s own block, which
-# Step 6.7.9 closes.  See Steps 6.7.4 and 6.7.7.
-FLOOR: str = ">=3.11"
+# See Steps 6.7.4 and 6.7.7.
+FLOOR: str = floor()
 
 # Which cases the all-case tests exercise.  The default is one case, on
 # the grounds that this project is not shipping a virtual environment
@@ -728,6 +753,23 @@ def with_path(*entries: Path) -> str:
     if inherited:
         wanted.append(inherited)
     return os.pathsep.join(wanted)
+
+
+class _KeptStringIO(io.StringIO):
+    """A `StringIO` that survives being closed.
+
+    `AltVEnv.consent` closes the handles `terminal` gave it, which is
+    right, and leaves a plain `StringIO` unreadable afterwards.  This one
+    ignores the close so that a test can still see what was asked.
+
+    Constructor:
+    * `_KeptStringIO(initial)`, as `io.StringIO`.
+    """
+
+    def close(self) -> None:
+        """Do nothing, so that `getvalue` still works afterwards."""
+        # Deliberately not calling `super().close()`.
+        return
 
 
 def inject(case: unittest.TestCase, server: _IndexServer, suffix: str,
@@ -2668,6 +2710,143 @@ class InstallTest(unittest.TestCase):
         self.assertIn("could not fetch gadgetlib",
                       self.install(target, "gadgetlib"))
 
+    def test_an_unmet_python_floor_stops_the_install(self) -> None:
+        """A program declaring a Python it is not running is told so.
+
+        The service `pip` does for a wheel's `Requires-Python`, done for
+        the program's own declaration: a clear line at the top instead of
+        a `SyntaxError` in a module the person has never heard of.
+        """
+        # Nothing is fetched, because the check comes before the fetch.
+        program: Path = self.declaring_program(
+            "too_old",
+            'requires-python = ">=3.99"\ndependencies = ["widget"]',
+            "import widget\nprint(widget.__version__)")
+        done: subprocess.CompletedProcess[str] = self.run_program(program)
+        self.assertNotEqual(done.returncode, 0)
+        self.assertIn("declares requires-python >=3.99", done.stderr)
+        self.assertFalse((program.parent / "cache" / "versions").exists())
+
+    def test_a_met_python_floor_is_silent(self) -> None:
+        """A floor this interpreter satisfies is not mentioned at all."""
+        # `>=3.11` is the floor `alt_venv.py` itself declares.
+        program: Path = self.declaring_program(
+            "new_enough",
+            f'requires-python = "{FLOOR}"\ndependencies = ["widget"]',
+            "import widget\nprint(widget.__version__)")
+        done: subprocess.CompletedProcess[str] = self.run_program(program)
+        self.assertEqual(done.returncode, 0, done.stderr[-400:])
+        self.assertEqual(done.stdout.strip(), "1.2.3")
+        self.assertNotIn("requires-python", done.stderr)
+
+    def test_an_unreadable_floor_is_left_to_pip(self) -> None:
+        """A specifier outside the whitelist installs anyway.
+
+        `>=3.9,<4` is satisfied here, but the point is that we do not
+        judge it either way: the install proceeds and PEP 440 stays
+        `pip`'s business.
+        """
+        # A shape we deliberately do not interpret.
+        program: Path = self.declaring_program(
+            "unjudged",
+            'requires-python = ">=3.9,<4"\ndependencies = ["widget"]',
+            "import widget\nprint(widget.__version__)")
+        done: subprocess.CompletedProcess[str] = self.run_program(program)
+        self.assertEqual(done.returncode, 0, done.stderr[-400:])
+        self.assertEqual(done.stdout.strip(), "1.2.3")
+
+    def test_a_floor_of_the_wrong_type_is_refused(self) -> None:
+        """TOML permits a number there; PEP 723 does not."""
+        # `requires-python = 3.11` is the typo this catches.
+        program: Path = self.declaring_program(
+            "float_floor", "requires-python = 3.11", "print('ran')")
+        done: subprocess.CompletedProcess[str] = self.run_program(program)
+        self.assertNotEqual(done.returncode, 0)
+        self.assertIn("must be a string", done.stderr)
+
+    def test_check_python_can_be_asked_directly(self) -> None:
+        """`check_python` takes a declaration, for a caller that has one."""
+        # The in-process form, which needs no program of its own.
+        venv: alt_venv.AltVEnv = alt_venv.AltVEnv(self.root / "asked")
+        venv.check_python({"requires-python": ">=3.0"})
+        venv.check_python({})
+        with self.assertRaises(RuntimeError) as caught:
+            venv.check_python({"requires-python": ">=99.0"})
+        self.assertIn("declares requires-python >=99.0",
+                      str(caught.exception))
+
+    def test_writing_approvals_needs_somewhere_to_write(self) -> None:
+        """`write` with no program file says so instead of lying.
+
+        Found by the tracer 2026-09-27: `approve` returning `None` was
+        an unexercised line, and following it up showed `gate` printing
+        "approvals written to None", which claims a file was written.
+        """
+        # `python3 -c` is the program with nowhere to keep approvals.
+        here: str = str(Path(__file__).resolve().parent)
+        environment: dict[str, str] = dict(
+            os.environ, PIP_INDEX_URL=self.index_url,
+            ALT_VENV_APPROVE="write")
+        environment.pop("VIRTUAL_ENV", None)
+        done: subprocess.CompletedProcess[str] = subprocess.run(
+            [sys.executable, "-c",
+             (f"import sys; sys.path.insert(0, {here!r}); "
+              "import alt_venv; from pathlib import Path; "
+              f"v = alt_venv.AltVEnv(Path({str(self.root / 'nowhere')!r})); "
+              "print(v.install('widget').__version__)")],
+            env=environment, capture_output=True, text=True, check=False)
+        self.assertEqual(done.returncode, 0, done.stderr[-400:])
+        self.assertEqual(done.stdout.strip(), "1.2.3")
+        self.assertIn("nowhere to write approvals", done.stderr)
+
+    def test_a_terminal_at_end_of_file_declines(self) -> None:
+        """A terminal that reads nothing is not an answer, and stops.
+
+        The tracer found this line unexercised.  A real pseudoterminal
+        cannot easily be made to return end of file on demand without a
+        race, so `terminal` is patched instead: the case under test is
+        `consent`'s handling of an empty read, not the opening of
+        `/dev/tty`, which the pty tests cover.
+        """
+        # An empty read means the terminal went away.  Asking again
+        # would loop until `ATTEMPTS` ran out and ask nobody anything.
+        venv: alt_venv.AltVEnv = alt_venv.AltVEnv(self.root / "hangup")
+        spoken: _KeptStringIO = _KeptStringIO()
+        with unittest.mock.patch.object(
+                alt_venv.AltVEnv, "terminal",
+                return_value=(spoken, _KeptStringIO(""))):
+            self.assertFalse(venv.consent([], ["widget"]))
+        self.assertIn("go ahead? [y/N/?]", spoken.getvalue())
+        self.assertEqual(spoken.getvalue().count("go ahead?"), 1)
+
+    def test_verify_without_approvals_checks_nothing(self) -> None:
+        """`verify` on its own is silent when there is no approvals file.
+
+        Unreachable through `gate`, which looks before it calls, so this
+        guard is for anybody calling the public method directly.  The
+        tracer found the line; the guard is worth keeping.
+        """
+        # This test process is itself a program with no approvals file.
+        venv: alt_venv.AltVEnv = alt_venv.AltVEnv(self.root / "unchecked")
+        self.assertIsNone(venv.approved())
+        venv.verify([])
+
+    def test_a_record_for_another_request_is_ignored(self) -> None:
+        """A cache record that names a different request is not used.
+
+        One file per request, named after a digest of it, so a mismatch
+        means the file was edited or a digest collided.  Either way the
+        record is not evidence about this request.
+        """
+        # Write a good record, then make it claim to be another request.
+        venv: alt_venv.AltVEnv = alt_venv.AltVEnv(self.root / "mismatch")
+        venv.remember("widget", ["widget-1.2.3"], ["widget-1.2.3.whl"])
+        records: list[Path] = list(venv.paths()[3].iterdir())
+        self.assertEqual(len(records), 1, records)
+        records[0].write_text(records[0].read_text().replace(
+            '"request": "widget"', '"request": "something else"'))
+        self.assertIsNone(venv.remember("widget"))
+
     def test_contains_reports_what_is_cached(self) -> None:
         """`contains` is False before an install and True after."""
         # A single module counts, not only a package directory.
@@ -2676,6 +2855,194 @@ class InstallTest(unittest.TestCase):
         self.assertFalse(venv.contains("widget"))
         self.install(target, "widget")
         self.assertTrue(venv.contains("widget"))
+
+
+    def declaring_program(self, name: str, block: str | None,
+                          tail: str) -> Path:
+        """Write a program that declares its packages in a PEP 723 block.
+
+        The shape `README.md` will teach: a block at the top, the
+        bootstrap's work done by `install()` with no arguments, and the
+        program's own imports below it.
+
+        Arguments:
+        * `name` (`str`):
+          A directory name, to keep one test's program from another's.
+        * `block` (`str | None`):
+          The TOML to put inside the block, already split into lines by
+          newlines, or `None` for a program with no block at all.
+        * `tail` (`str`):
+          Statements to run after `install()`, such as the imports.
+
+        Returns:
+        * (`Path`): The program written.
+        """
+        # A block is comment lines, which is what makes it PEP 723.
+        where: Path = self.root / name
+        where.mkdir(parents=True, exist_ok=True)
+        lines: list[str] = ["#!/usr/bin/env python3"]
+        if block is not None:
+            lines.append("# /// script")
+            lines.extend(f"# {line}" if line else "#"
+                         for line in block.splitlines())
+            lines.append("# ///")
+
+        # Then the bootstrap's part, played by an import from the tree.
+        here: str = str(Path(__file__).resolve().parent)
+        lines.extend([
+            "import sys",
+            f"sys.path.insert(0, {here!r})",
+            "import alt_venv",
+            "from pathlib import Path",
+            f"v = alt_venv.AltVEnv(Path({str(where / 'cache')!r}))",
+            "v.install()",
+            tail,
+        ])
+        program: Path = where / "prog.py"
+        program.write_text("\n".join(lines) + "\n")
+        return program
+
+    def test_a_declared_package_is_installed(self) -> None:
+        """`install()` with no arguments fetches what the block declares."""
+        # The import is the program's own, below the bootstrap, and it
+        # works because the cache is on `sys.path` by then.
+        program: Path = self.declaring_program(
+            "declared", 'dependencies = ["widget"]',
+            "import widget\nprint(widget.__version__)")
+        done: subprocess.CompletedProcess[str] = self.run_program(program)
+        self.assertEqual(done.returncode, 0, done.stderr[-400:])
+        self.assertEqual(done.stdout.strip(), "1.2.3")
+
+    def test_a_declared_constraint_is_honoured(self) -> None:
+        """A PEP 508 constraint in the block reaches `pip` unaltered."""
+        # Two versions are published, so the choice is a real one.
+        program: Path = self.declaring_program(
+            "constrained", 'dependencies = ["sprocket==1.0.0"]',
+            "import sprocket\nprint(sprocket.__version__)")
+        done: subprocess.CompletedProcess[str] = self.run_program(program)
+        self.assertEqual(done.returncode, 0, done.stderr[-400:])
+        self.assertEqual(done.stdout.strip(), "1.0.0")
+
+    def test_a_declaration_needs_no_import_name(self) -> None:
+        """A distribution named apart from its module just works.
+
+        This is why the no-argument form imports nothing.  PEP 508 names
+        `python-gadget`, the module is `gadgetlib`, and no pair form is
+        needed because the program's own `import` supplies the module
+        name where a module name belongs.
+        """
+        # The pair form of `install` exists for exactly this and is not
+        # wanted here.
+        program: Path = self.declaring_program(
+            "two_named_block", 'dependencies = ["python-gadget"]',
+            "import gadgetlib\nprint(gadgetlib.__version__)")
+        done: subprocess.CompletedProcess[str] = self.run_program(program)
+        self.assertEqual(done.returncode, 0, done.stderr[-400:])
+        self.assertEqual(done.stdout.strip(), "4.5.6")
+
+    def test_several_declarations_are_one_pip_run(self) -> None:
+        """Everything declared is fetched together, as `install` does."""
+        # One `pip` means `pip` resolves the set and can see a conflict.
+        program: Path = self.declaring_program(
+            "several", 'dependencies = ["widget", "python-gadget"]',
+            "import gadgetlib\nimport widget\n"
+            "print(widget.__version__, gadgetlib.__version__)")
+        done: subprocess.CompletedProcess[str] = self.run_program(program)
+        self.assertEqual(done.returncode, 0, done.stderr[-400:])
+        self.assertEqual(done.stdout.strip(), "1.2.3 4.5.6")
+
+    def test_no_block_declares_nothing(self) -> None:
+        """A program without a block asks for nothing, and is not scolded."""
+        # Silence is the requirement: most programs have no block, and
+        # every test that constructs an `AltVEnv` is one of them.
+        program: Path = self.declaring_program(
+            "blockless", None, "print('ran')")
+        done: subprocess.CompletedProcess[str] = self.run_program(program)
+        self.assertEqual(done.returncode, 0, done.stderr[-400:])
+        self.assertEqual(done.stdout.strip(), "ran")
+        self.assertFalse((program.parent / "cache" / "versions").exists())
+
+    def test_an_empty_dependency_list_fetches_nothing(self) -> None:
+        """A block declaring no dependencies runs no `pip` at all."""
+        # `alt_venv.py`'s own block is this shape, so it had better work.
+        program: Path = self.declaring_program(
+            "nothing_declared", "dependencies = []", "print('ran')")
+        done: subprocess.CompletedProcess[str] = self.run_program(program)
+        self.assertEqual(done.returncode, 0, done.stderr[-400:])
+        self.assertEqual(done.stdout.strip(), "ran")
+        self.assertFalse((program.parent / "cache" / "versions").exists())
+
+    def test_a_malformed_block_is_reported(self) -> None:
+        """A block that will not parse is the author's mistake, said aloud.
+
+        The opposite of the case above: nothing declared is silence, but
+        a declaration that cannot be read must not be mistaken for one.
+        """
+        # An unclosed array is the likeliest typo in a list of packages.
+        program: Path = self.declaring_program(
+            "malformed", 'dependencies = [\n"widget"', "print('ran')")
+        done: subprocess.CompletedProcess[str] = self.run_program(program)
+        self.assertNotEqual(done.returncode, 0)
+        self.assertIn("not valid TOML", done.stderr)
+
+    def test_dependencies_must_be_strings(self) -> None:
+        """A `dependencies` of the wrong type is refused by name."""
+        # TOML permits it; PEP 508 does not, and `pip` would be baffled.
+        program: Path = self.declaring_program(
+            "wrong_type", "dependencies = [1, 2]", "print('ran')")
+        done: subprocess.CompletedProcess[str] = self.run_program(program)
+        self.assertNotEqual(done.returncode, 0)
+        self.assertIn("must be a list of strings", done.stderr)
+
+    def test_declared_reports_without_fetching(self) -> None:
+        """`declared` answers what would be fetched, and fetches nothing."""
+        # The question a garbage collector or a report wants to ask.
+        program: Path = self.declaring_program(
+            "asking", 'dependencies = ["widget", "sprocket>=1"]',
+            "print(v.declared())")
+        program.write_text(program.read_text().replace("v.install()\n", ""))
+        done: subprocess.CompletedProcess[str] = self.run_program(program)
+        self.assertEqual(done.returncode, 0, done.stderr[-400:])
+        self.assertEqual(done.stdout.strip(),
+                         "['widget', 'sprocket>=1']")
+        self.assertFalse((program.parent / "cache" / "versions").exists())
+
+    def test_declarations_survive_stripped_docstrings(self) -> None:
+        """`python3 -OO` cannot hurt a declaration, because it is a comment.
+
+        The reason `main_source` reads the file: `-OO` throws away
+        docstrings, and comments were never there at run time at all.
+        """
+        # Same program, harsher interpreter, same answer.
+        program: Path = self.declaring_program(
+            "stripped_block", 'dependencies = ["widget"]',
+            "import widget\nprint(widget.__version__)")
+        environment: dict[str, str] = dict(
+            os.environ, PIP_INDEX_URL=self.index_url)
+        environment.pop("VIRTUAL_ENV", None)
+        done: subprocess.CompletedProcess[str] = subprocess.run(
+            [sys.executable, "-OO", str(program)], env=environment,
+            capture_output=True, text=True, check=False)
+        self.assertEqual(done.returncode, 0, done.stderr[-400:])
+        self.assertEqual(done.stdout.strip(), "1.2.3")
+
+    def test_a_program_with_no_file_declares_nothing(self) -> None:
+        """`python3 -c` has no file, so `install()` does nothing."""
+        # No file, no block, no complaint; see 6.7.6 for why.
+        here: str = str(Path(__file__).resolve().parent)
+        cache: Path = self.root / "no_file" / "cache"
+        environment: dict[str, str] = dict(
+            os.environ, PIP_INDEX_URL=self.index_url)
+        environment.pop("VIRTUAL_ENV", None)
+        done: subprocess.CompletedProcess[str] = subprocess.run(
+            [sys.executable, "-c",
+             (f"import sys; sys.path.insert(0, {here!r}); "
+              "import alt_venv; from pathlib import Path; "
+              f"v = alt_venv.AltVEnv(Path({str(cache)!r})); "
+              "print(v.declared()); print(v.install())")],
+            env=environment, capture_output=True, text=True, check=False)
+        self.assertEqual(done.returncode, 0, done.stderr[-400:])
+        self.assertEqual(done.stdout.split(), ["[]", "None"])
 
 
 class MetadataTest(unittest.TestCase):
@@ -2836,21 +3203,59 @@ class MetadataTest(unittest.TestCase):
             "# dependencies = []\n"
             "print('hello')\n"))
 
-    def test_our_own_block_reads_back(self) -> None:
-        """`alt_venv.py`'s own block parses, and says 3.11.
+    def test_a_simple_floor_is_understood(self) -> None:
+        """`>=X.Y` and `>=X.Y.Z` are the shapes with an answer."""
+        # Whitespace after the operator is legal and appears in the wild.
+        self.assertEqual(alt_venv.python_floor(">=3.11"), (3, 11))
+        self.assertEqual(alt_venv.python_floor(">= 3.11"), (3, 11))
+        self.assertEqual(alt_venv.python_floor(">=3.11.2"), (3, 11, 2))
+        self.assertEqual(alt_venv.python_floor("  >=3.9  "), (3, 9))
 
-        This is the dogfooding of 6.7.5 with a consequence attached: if
-        the parser breaks, or the block is edited into something no tool
-        would accept, this test fails rather than the block quietly
-        becoming decoration.
+    def test_anything_else_gets_no_opinion(self) -> None:
+        """Everything PEP 440 permits beyond that is left alone.
+
+        The point of the whitelist: a partial reading of somebody
+        else's specification disagrees silently, which is what 6.3.3
+        refused.  `None` here means "ask `pip` or `uv`".
+        """
+        # Each of these is a real thing a block may legitimately say.
+        specifier: str
+        for specifier in (">=3.9,<4", "!=3.9.*", "~=3.11", ">3.10",
+                          "==3.11.*", ">=3", "", "3.11", ">=3.x"):
+            with self.subTest(specifier=specifier):
+                self.assertIsNone(alt_venv.python_floor(specifier))
+
+    def test_our_own_block_reads_back(self) -> None:
+        """`alt_venv.py`'s own block parses, and declares nothing.
+
+        The dogfooding of 6.7.5 with a consequence attached: `FLOOR`
+        comes from this block through this parser, so breaking either
+        one fails here rather than quietly shipping a wheel that claims
+        the wrong `Requires-Python`.
         """
         # Read from disk, because the comment is gone at run time.
         source: Path = Path(__file__).resolve().parent / f"{MODULE}.py"
         found: dict[str, Any] | None = alt_venv.script_metadata(
             source.read_text(encoding="utf-8"))
         assert found is not None
-        self.assertEqual(found["requires-python"], FLOOR)
+        self.assertEqual(found["requires-python"], ">=3.11")
         self.assertEqual(found["dependencies"], [])
+
+    def test_the_linters_agree_with_the_block(self) -> None:
+        """`ruff.toml` and `mypy.ini` say what the block says.
+
+        Three files state the floor and only one can be the authority.
+        The other two are configuration that no parser can derive, so
+        this test is what keeps them honest; see Step 6.7.7.
+        """
+        # `>=3.11` spelled three ways, which is why this is a test and
+        # not an assignment.
+        here: Path = Path(__file__).resolve().parent
+        self.assertEqual(FLOOR, ">=3.11")
+        self.assertIn('target-version = "py311"',
+                      (here / "ruff.toml").read_text(encoding="utf-8"))
+        self.assertIn("python_version = 3.11",
+                      (here / "mypy.ini").read_text(encoding="utf-8"))
 
 
 class LocatorTest(unittest.TestCase):
@@ -3002,6 +3407,32 @@ class LocatorTest(unittest.TestCase):
         output: str = self.run_program(str(program))
         self.assertIn("path= None", output)
         self.assertIn("text= False", output)
+
+    def test_a_latin_one_program_is_read(self) -> None:
+        """A program is not obliged to be UTF-8, and is still read.
+
+        A coding cookie is honoured by the interpreter, so a program
+        carrying one runs perfectly and its block is as valid as anyone
+        else's.  Found 2026-09-27 by trying it: with `Path.read_text`
+        this program declared nothing, silently, and `tokenize.open` is
+        the standard library's answer.
+        """
+        # The byte is in a comment, which is where a PEP 723 block is.
+        program: Path = self.root / "latin.py"
+        here: str = str(Path(__file__).resolve().parent)
+        program.write_bytes(
+            "# -*- coding: latin-1 -*-\n"
+            "# MARKER: caf\N{LATIN SMALL LETTER E WITH ACUTE}\n"
+            "import sys\n"
+            f"sys.path.insert(0, {here!r})\n"
+            "import alt_venv\n"
+            "found = alt_venv.main_source()\n"
+            "print('path=', alt_venv.main_path())\n"
+            "print('text=', found is not None and 'MARKER' in found[1])\n"
+            .encode("latin-1"))
+        output: str = self.run_program(str(program))
+        self.assertIn(f"path= {program}", output)
+        self.assertIn("text= True", output)
 
     def test_an_unreadable_program_has_no_text(self) -> None:
         """A file that cannot be read is located but not quoted."""

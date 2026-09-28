@@ -1108,6 +1108,15 @@ expected every time the order changes, and is Claude's job.
     machine.  That is `2wtmifs`'s failure mode exactly.  PEP 440 also
     has epochs, post and dev releases, local versions, `~=` and `==1.2.*`
     wildcards.  `pip` owns all of it.
+
+    Qualified on 2026-09-27 by Step 6.7.10, which does compare one
+    version: the running interpreter's against a program's declared
+    `requires-python`, and only when that is a single `>=X.Y[.Z]` clause.
+    This is not the case above.  A package version is chosen from many
+    candidates, where being too permissive installs a release candidate
+    nobody wanted; an interpreter version is a fact about the machine,
+    where being too permissive merely fails to warn.  The rule still
+    holds where it was aimed: no parser decides what to install.
   * 6.3.4 - Key the cache on the request, not the resolution.  If
     `sprocket<2` was resolved before, reuse it; no comparison is needed,
     only string equality on a normalised requirement.  The cost is cache
@@ -1155,7 +1164,7 @@ expected every time the order changes, and is Claude's job.
     collision cannot pass as a hit.  Two writers recording the *same*
     request may honestly disagree, if the index gained a release between
     them; one wins, both trees exist, and the loser's is garbage for
-    Step 6.10.
+    Step 6.11.
   * 6.3.10 - The same failure wants opposite handling.  On a first fetch
     there is no cache, so an unreachable index must say so and stop; on
     a staleness check there is one, so it must be shrugged off, because
@@ -1189,7 +1198,7 @@ expected every time the order changes, and is Claude's job.
     removed it, and the second raised `FileNotFoundError` out of a
     constructor.  `unlink(missing_ok=True)` now, with a test that makes
     the read delete the file as a rival would have.
-  * 6.4.2 - Carried to Step 6.10 rather than left open here: a program
+  * 6.4.2 - Carried to Step 6.11 rather than left open here: a program
     killed mid-unpack leaves an `unpacking-` directory under
     `pending/`, and a killed download leaves its own.  Neither is
     importable, so neither is a correctness problem; they only
@@ -1313,6 +1322,44 @@ expected every time the order changes, and is Claude's job.
     of the exercise, run under `ALT_VENV_TEST=COMPLETE`, which is what
     the end of a task gets.
 
+    One consequence to expect rather than be alarmed by: `bootstrap.py`
+    reads 39% traced instead of 75%, because eleven case bodies no longer
+    run in the quick suite.  It is not a regression, and `COMPLETE` is
+    where those lines are covered now.
+  * 6.5.14 - Sixth traced round, 2026-09-27, after Step 6.7 landed the
+    locator, the parser and `install()`.  118 tests, 524 s with children
+    traced, 170 child processes folded in; `alt_venv.py` at 98% and
+    `alt_venv_test.py` at 99%.  Five unexercised lines, and chasing them
+    was worth it again:
+
+    * **A real defect.** `approve` returning `None` was never reached, and
+      the reason it mattered was one line up its call chain: with
+      `ALT_VENV_APPROVE=write` and a program that has no file, `gate`
+      printed `approvals written to None`, announcing a file it had not
+      written.  It now says there is nowhere to write one.
+    * **Three guards that were simply untested**, now tested: `verify`
+      with no approvals file, which `gate` cannot reach because it looks
+      first, so the guard is for anyone calling the public method;
+      a cache record naming a different request, which means an edited
+      file or a digest collision and is not evidence either way; and
+      `consent` reading end of file from the terminal, where asking again
+      would spend the patience meant for typos on a terminal that has
+      gone away.
+    * **One line that should stay uncovered.** The `__file__ is None` arm
+      of `repair_module_layout`, for a frozen interpreter: `trace` cannot
+      follow a frame whose `__file__` is false, so the tracer could not
+      see that line run even if it did.
+
+    Found by hand in the same sitting, while the tracer was busy, which
+    is worth recording because no coverage tool would have found it: a
+    `# -*- coding: latin-1 -*-` program is perfectly legal Python and the
+    interpreter honours the cookie, but `Path.read_text(encoding="utf-8")`
+    refused it, so `main_source` returned `None` and the program declared
+    nothing at all, in silence.  `tokenize.open` is the standard library's
+    own answer to the question and honours a cookie and a byte order mark
+    alike, so a program the interpreter can run is now a program we can
+    read.
+
 * Step 6.6: Security, and who approves what.
   * 6.6.1 - Write the threat model down first, because the claim has to
     be narrow to be true.  A malicious program author gets no
@@ -1373,7 +1420,7 @@ expected every time the order changes, and is Claude's job.
     thereafter.  This is why approval belongs to the author and not to
     whoever happens to run the program.
 
-  * 6.6.11 - The project's `README.md` is Step 6.13's, not this step's.
+  * 6.6.11 - The project's `README.md` is Step 6.10's, not this step's.
     Its `## Security Issues of Executing Unvetted Code` section is
     outlined by the sub-items here, and by 6.6.1 above all.
 
@@ -1405,17 +1452,20 @@ expected every time the order changes, and is Claude's job.
     is no technical answer to the second: run it against an index you
     mean to trust.
 
-* Step 6.7: Declared requirements, which is `2hsrpbd`.  Read the
-  calling script's PEP 723 `# /// script` block instead of a package
-  name written into the bootstrap.  It builds on Step 6.2, and it makes
-  the same file work under `uv run` for nothing, which is worth a great
-  deal given that prior art is why this project has to justify itself at
-  all.
+* Step 6.7: Deal with PEP 723 issues, which is `2hsrpbd`.
+
+  This step covers everything the standard asks of a program that
+  declares its own requirements: finding the block, reading it, and
+  acting on what it says.  The substance is that the calling script's
+  `# /// script` block replaces a package name written into the
+  bootstrap.  It builds on Step 6.2, and it makes the same file work
+  under `uv run` for nothing, which is worth a great deal given that
+  prior art is why this project has to justify itself at all.
 
   First of what remains, on 2026-09-27, because it is the largest change
   to what the product is: the program declares what it needs instead of
   somebody writing an `install` call by hand.  It also builds the
-  locator that Step 6.11 needs, so doing it first hands that step its
+  locator that Step 6.12 needs, so doing it first hands that step its
   primitive for free.  And both `README.md` files are last for the
   matching reason: the usage they describe changes here, and writing
   them earlier means writing them twice.
@@ -1486,7 +1536,7 @@ expected every time the order changes, and is Claude's job.
   * 6.7.6 - The locator exists, built 2026-09-27: `main_path` returns
     the running program's file and `main_source` returns that file with
     its text, each `None` when there is nothing to find.  This is
-    6.11.1's primitive, and `approvals` was rewritten on to it, so the
+    6.12.1's primitive, and `approvals` was rewritten on to it, so the
     `__main__` handling now lives in one place.  Ten tests, each in a
     child process, because this suite's own `__main__` is `unittest`.
 
@@ -1506,6 +1556,10 @@ expected every time the order changes, and is Claude's job.
     to an absolute path, and `-OO` leaves the comments in the file
     although it has stripped the docstrings from the module, which is the
     whole reason 6.7.2 reads the source.
+
+    Amended the same day: the text is read with `tokenize.open` rather
+    than `Path.read_text`, so that a program declaring a coding cookie is
+    read rather than silently ignored.  See 6.5.14.
 
   * 6.7.7 - Got the TOML parser working.  6.7.3 said `tomllib` raises
     the floor to 3.11 and 6.7.4 then set the floor at `>=3.10`, and both
@@ -1547,26 +1601,136 @@ expected every time the order changes, and is Claude's job.
     because with no configuration `ruff` assumed 3.10, disbelieved that
     `tomllib` is standard library and sorted its import into the third
     party block.
-  * 6.7.8 - Decide the API: whether `install()` with no arguments means
-    "install what the program declared", or whether a separate
-    `declared()` returns the requirements and the caller passes them on.
-    Both `README.md` files describe whichever this is, so it wants
-    settling before Step 6.13.
-  * 6.7.9 - Close the dogfooding loop 6.7.5 promised.  `build_wheel`
-    takes `Requires-Python` from `alt_venv.py`'s own block, through our
-    parser, instead of from `FLOOR`, so that the floor stops being
-    written twice and a broken parser has a consequence.
-  * 6.7.10 - **Undecided, recorded rather than solved:** whether a
-    declared `requires-python` is enforced.  Comparing it means PEP 440
-    version comparison, which 6.3.3 declined to reimplement, and `pip`
-    already enforces the `Requires-Python` of each wheel it is asked
-    for.  What is unenforced is the *program's* own floor, which is
-    arguably the interpreter's business and not ours.
-  * 6.7.11 - Tests: a block present, absent, malformed and duplicated,
-    plus `-OO` and `python3 -c`.  The last two come nearly free from
-    6.7.6's child process harness.
+  * 6.7.8 - The API is `install()` with no arguments, decided and built
+    2026-09-27.  It reads the program's block, fetches what is declared,
+    puts the cache on `sys.path` and **imports nothing**; the program's
+    own `import` statements, written below the bootstrap, do that.  A
+    program with no file, no block, or a block declaring nothing gets
+    silence, because every test that merely constructs an `AltVEnv` is
+    such a program.  A declaration that will not parse is reported,
+    since that is not the same as no declaration.
 
-* Step 6.8: `.pth` files, which is `3pfaibne`.  `install` uses
+    Putting the fetch in `__init__` was considered and declined.  It
+    reads well -- construct the object and start importing -- but
+    `AltVEnv().install()` is one pasted line either way, so the whole
+    gain is invisible in the only unit that matters, and the cost is
+    real: `contains` asks what is cached, Steps 6.11 and 6.12 will want
+    an object that only looks, and `bootstrap.py` constructs one to
+    repair a module layout.  A constructor that fetches, prompts on
+    `/dev/tty` and mutates `sys.path` also leaves a half-built object
+    behind when it raises.
+
+    Importing nothing is what makes the two naming systems stop
+    colliding, which is the unexpected prize.  A PEP 508 requirement
+    names a distribution, an `import` statement names a module, and
+    `python-dateutil` is not `dateutil`; the pair form of `install`
+    exists only because it returns modules and had to guess.  The
+    declared path never guesses, so the pair form is now the escape
+    hatch rather than the answer.
+
+    `install(requirements)` stays, for requirements not known until run
+    time -- the database driver named in a configuration file, which a
+    static block cannot express.  Both forms share `provide`, split out
+    of `install` for the purpose: fetch, verify, unpack, `sys.path`, no
+    imports.  `declared` is public too, and answers what would be
+    fetched without fetching it.
+
+    Eleven tests, all running a real program in its own directory: a
+    plain declaration, a version constraint, `python-gadget` imported as
+    `gadgetlib`, several in one `pip` run, no block, an empty
+    `dependencies`, unparseable TOML, a `dependencies` of integers,
+    `declared` on its own, `python3 -OO`, and `python3 -c`.
+
+    Measured on a realistic program, because linter complaints land on
+    the author and are the friction they will actually feel: with the
+    imports below the bootstrap, `ruff` reports **no** E402, which was
+    the objection to the whole shape and it was wrong.  It does report
+    `BLE001` for the blind `except` the paste itself carries, so the
+    paste must carry `# noqa: BLE001` too.  `mypy` cannot see a package
+    that will not exist until run time and says
+    `Cannot find implementation or library stub for module named ...`;
+    `# type: ignore[import-not-found]` on each import is the narrow fix
+    and `--ignore-missing-imports` the blunt one, which was measured to
+    swallow a misspelt module name as well.  In practice the author has
+    the packages installed and sees none of this.  All of it belongs in
+    Step 6.10.
+  * 6.7.9 - The dogfooding loop is closed, 2026-09-27.  `FLOOR` is no
+    longer a literal: `floor()` reads `requires-python` out of
+    `alt_venv.py`'s own block with our own parser, so the wheels' claim
+    comes from our file through our code, and breaking either one fails
+    the suite instead of shipping a wrong `Requires-Python`.
+
+    Configuration cannot be derived that way, so `ruff.toml` and
+    `mypy.ini` still say 3.11 by hand, and
+    `test_the_linters_agree_with_the_block` is what stops the three
+    drifting apart.  `bootstrap.py`'s epilogue now calls
+    `AltVEnv().install()` rather than only constructing one, so all
+    twelve shapes walk the declared path; that file has no block, so
+    nothing is fetched.
+  * 6.7.10 - A declared `requires-python` **is** enforced, decided and
+    built 2026-09-27.  Two declarations share a name and only one was
+    ever in question: a wheel's `Requires-Python`, written by whoever
+    built the package, is `pip`'s to enforce and it does; the PEP 723
+    `requires-python` in the program's own block was read by nobody.
+
+    Ignoring it was the first recommendation and Wayne was not thrilled,
+    which was the right instinct.  The options:
+
+    * Ignore it, as `uv` enforces it anyway for anybody who runs the
+      program that way.  Rejected: the program that lies about its floor
+      dies later on a `SyntaxError` in a module the person has never
+      heard of, and we had the information to say so.
+    * Compare it properly, which means PEP 440 and so either a
+      reimplementation or a dependency.  Rejected: 6.3.3, and a
+      dependency on `packaging` to check a version is a bootstrap cycle.
+    * Understand the single `>=X.Y[.Z]` clause and **nothing** else,
+      refusing to interpret the rest.  **Chosen.**
+
+    The distinction 6.3.3 was protecting is intact, and the reason is
+    worth stating plainly: every mistake this whitelist can make is in
+    the permissive direction.  A pre-release such as 3.11.0a1 does not
+    satisfy `>=3.11` under PEP 440 but compares equal on
+    `sys.version_info`, so an alpha is let through; nothing legitimate is
+    ever refused.  6.3.3's tuple comparison had the opposite failure --
+    it would have *installed* a release candidate nobody asked for -- and
+    that asymmetry is what makes one safe and the other not.
+
+    So `python_floor` returns a tuple or `None`, `None` meaning "no
+    opinion, ask `pip` or `uv`", and `check_python` runs before anything
+    is fetched.  `declaration` was split out of `declared` so the block
+    is read once and the two readers cannot disagree.  `requires-python`
+    and `dependencies` of the wrong type now raise `TypeError` rather
+    than `ValueError`, which `ruff` asked for and which reads better.
+    Nine tests: the whitelist's four shapes, nine specifiers it declines,
+    an unmet floor stopping an install cold, a met one passing in
+    silence, `>=3.9,<4` installing unjudged, a numeric floor refused, and
+    the in-process form.
+  * 6.7.11 - Tests, done: present, absent, malformed and duplicated
+    blocks live in `MetadataTest` (13, on strings); the declared path's
+    eleven live in `InstallTest` (real programs, own directories),
+    `-OO` and `python3 -c` among them.  Whole suite 117 tests in 67 s.
+
+* Step 6.8: A fetch from the real PyPI, carried over from Task 5.  It is
+  the only thing that can settle Task 3's conclusion that a bootstrap
+  needs `python3-pip` plus a TLS trust store, since that claim is about
+  trusting the public certificate authorities and a private certificate
+  tests the opposite.  It is also just `install` against the real index.
+
+  Early rather than late, because of how much it retires at once.
+  Everything measured so far has been against wheels this project built
+  itself: real tag soup, a real transitive closure rather than the
+  synthetic `needy` and `widget`, and TLS against the public
+  authorities are all unexamined.  One opt-in test reaches all of them,
+  and settles a claim that has been open since 2026-09-24.
+  * 6.8.1 - Look at the untrusted certificate test while here, carried
+    from 6.5.13: 19.8 s against 5.3 s for the trusted one, over the same
+    four cases.  The suspicion is `ATTEMPTS`, which would mean a rejected
+    certificate is retried three times.  If so it is a defect and not
+    slowness, because a certificate the trust store refuses will be
+    refused again, and retrying says the opposite about what kind of
+    failure it is.
+
+* Step 6.9: `.pth` files, which is `3pfaibne`.  `install` uses
   `sys.path.insert`, which never executes a `.pth` file, so a package
   relying on one is quietly half installed.  `site.addsitedir` is the
   experiment.
@@ -1579,21 +1743,48 @@ expected every time the order changes, and is Claude's job.
   installing `coverage` through this gets a silently half working
   install -- and `coverage` is the package this project used as its own
   example throughout Task 2.
+  * 6.9.1 - This changes what Step 6.10.2 has to say, so decide it
+    before that section is written.  A `.pth` line beginning with
+    `import` is **executed** when the path is set up, which is how
+    `coverage` reaches subprocesses.  Step 6.6's claim survives intact --
+    the gate refuses before anything is unpacked, so only an approved
+    wheel ever gets that far -- but "a wheel is an inert zip" stops being
+    the whole story once an installed package can run code at import
+    time, and the `README.md` should say so rather than leave a stranger
+    to discover it.
 
-* Step 6.9: A fetch from the real PyPI, carried over from Task 5.  It is
-  the only thing that can settle Task 3's conclusion that a bootstrap
-  needs `python3-pip` plus a TLS trust store, since that claim is about
-  trusting the public certificate authorities and a private certificate
-  tests the opposite.  It is also just `install` against the real index.
+* Step 6.10: `README.md` documentation.  Two different files carry that
+  name and they are for different readers, so each has its own
+  sub-items below and neither is finished by writing the other.  The
+  project's `README.md` is the page a stranger lands on after a program
+  tells them to; `~/.alt_venv/README.md` is what somebody finds inside
+  the cache directory and wonders about.
+  * 6.10.1 - The project's `README.md` still describes the Scavenger
+    Hunt, at lines 17 and 27, which nothing implements any more: nobody
+    is sent to visit web pages and paste titles back.  What replaced it
+    is that the author approves once, and the recipient is told and
+    asked at most once per cache.
+  * 6.10.2 - `## Security Issues of Executing Unvetted Code` is still
+    marked TBD, and it is the section the whole feature rests on.  The
+    sub-items of Step 6.6 are its outline, and 6.6.1 in particular: the
+    claim has to be narrow to be true, because a malicious author gets
+    no protection at all and a typosquat very little.
+  * 6.10.3 - Habituation deserves an answer here, per 6.6.7.  The
+    mitigation is real and worth stating: the question is asked once per
+    cache, not once per run, and an approvals file removes it entirely.
+  * 6.10.4 - The project's `README.md` should say plainly that an
+    approvals file is how a guarantee is had, where a listing is only a
+    notification, and that a program started by `cron` or a build has
+    nobody to ask and so proceeds.
+  * 6.10.5 - The cache's `~/.alt_venv/README.md` is the other file, and
+    `AltVEnv.__init__` writes it from its own docstring.  What it should
+    say needs discussing, and it has to describe the versioned layout of
+    Step 6.3, which it predates.  Note the current behaviour: it is
+    rewritten on every construction rather than only when absent, which
+    makes writing a file a side effect of making an object and will
+    surprise somebody.
 
-  Early rather than late, because of how much it retires at once.
-  Everything measured so far has been against wheels this project built
-  itself: real tag soup, a real transitive closure rather than the
-  synthetic `needy` and `widget`, and TLS against the public
-  authorities are all unexamined.  One opt-in test reaches all of them,
-  and settles a claim that has been open since 2026-09-24.
-
-* Step 6.10: Garbage collection.  Cull packages that have not been used
+* Step 6.11: Garbage collection.  Cull packages that have not been used
   for a while.  Not by access time: nearly every Linux filesystem
   mounts `relatime`, so `atime` updates at most once a day and not on
   ordinary reads, and `noatime` switches it off altogether, so culling
@@ -1609,7 +1800,7 @@ expected every time the order changes, and is Claude's job.
   identifiable.  A tree in `versions/` that no request record names any
   longer is the third kind, and arrives from Step 6.3.13.
 
-* Step 6.11: Find the bootstrap, and notice when it is stale.  Python has
+* Step 6.12: Find the bootstrap, and notice when it is stale.  Python has
   a great many introspection facilities, and the direct one is
   `sys.modules["__main__"].__file__` rather than walking frames with
   `inspect`.  Read that file and look for the bootstrap.  It has to
@@ -1621,7 +1812,7 @@ expected every time the order changes, and is Claude's job.
   but not the current one is stale and can be reported precisely; an
   unknown hash is somebody's edited copy and should be passed over in
   silence.
-  * 6.11.1 - One locator, three readers.  Three steps need the main
+  * 6.12.1 - One locator, three readers.  Three steps need the main
     program's path and its source text: this one, to find the pasted
     case; Step 6.7, to find the requirements block; and Step 6.6, which
     already uses the path alone to place `prog.altvenv`.  So one small
@@ -1629,17 +1820,17 @@ expected every time the order changes, and is Claude's job.
     `python3 -c` and a frozen interpreter -- and one place where those
     awkward cases are got right and tested.  Built in 6.7.6, which is
     why that step went first.
-  * 6.11.2 - Nobody is messaged.  There is no channel to an author at run
+  * 6.12.2 - Nobody is messaged.  There is no channel to an author at run
     time, only whoever started the program, and a staleness report is
     useful to an author and noise to a recipient who cannot act on it.
     So the author asks rather than being told: silent by default, and a
     report on request, in the same shape as `ALT_VENV_APPROVE=write`.
     That removes the question of how to reach an author entirely.
-  * 6.11.3 - What to do about a stale bootstrap -- report it, refuse to
-    run, or offer to rewrite the file -- is still open, but 6.11.2 makes
+  * 6.12.3 - What to do about a stale bootstrap -- report it, refuse to
+    run, or offer to rewrite the file -- is still open, but 6.12.2 makes
     reporting the obvious default.
 
-* Step 6.12: Messages.  When should anything be said: on creating the
+* Step 6.13: Messages.  When should anything be said: on creating the
   directory, on each download, on a stale bootstrap?  One constraint is
   hard.  A library must never write to standard output, because the
   host program's output may be piped or parsed.  `logging` with a
@@ -1652,37 +1843,6 @@ expected every time the order changes, and is Claude's job.
   keeps the `raise` on one source line at 73 columns, where inlining it
   is 121 and wrapping it costs two, so `SHARED_LINES` would go from 7
   to 8.  Not done, because the URL depends on the repository name.
-
-* Step 6.13: `README.md` documentation.  Two different files carry that
-  name and they are for different readers, so each has its own
-  sub-items below and neither is finished by writing the other.  The
-  project's `README.md` is the page a stranger lands on after a program
-  tells them to; `~/.alt_venv/README.md` is what somebody finds inside
-  the cache directory and wonders about.
-  * 6.13.1 - The project's `README.md` still describes the Scavenger
-    Hunt, at lines 17 and 27, which nothing implements any more: nobody
-    is sent to visit web pages and paste titles back.  What replaced it
-    is that the author approves once, and the recipient is told and
-    asked at most once per cache.
-  * 6.13.2 - `## Security Issues of Executing Unvetted Code` is still
-    marked TBD, and it is the section the whole feature rests on.  The
-    sub-items of Step 6.6 are its outline, and 6.6.1 in particular: the
-    claim has to be narrow to be true, because a malicious author gets
-    no protection at all and a typosquat very little.
-  * 6.13.3 - Habituation deserves an answer here, per 6.6.7.  The
-    mitigation is real and worth stating: the question is asked once per
-    cache, not once per run, and an approvals file removes it entirely.
-  * 6.13.4 - The project's `README.md` should say plainly that an
-    approvals file is how a guarantee is had, where a listing is only a
-    notification, and that a program started by `cron` or a build has
-    nobody to ask and so proceeds.
-  * 6.13.5 - The cache's `~/.alt_venv/README.md` is the other file, and
-    `AltVEnv.__init__` writes it from its own docstring.  What it should
-    say needs discussing, and it has to describe the versioned layout of
-    Step 6.3, which it predates.  Note the current behaviour: it is
-    rewritten on every construction rather than only when absent, which
-    makes writing a file a side effect of making an object and will
-    surprise somebody.
 
 * Step 6.14: And more.  A place holder for additional steps.
 
@@ -1809,7 +1969,7 @@ approval test is a child program.
 
 What this step does not cover: the project's own `README.md`, which
 still describes the Scavenger Hunt and still has its security section
-marked TBD.  Explaining any of this to a stranger is Step 6.13, and the
+marked TBD.  Explaining any of this to a stranger is Step 6.10, and the
 sub-items above are the outline it should follow.
 
 ### Task 6 Summary

@@ -68,6 +68,7 @@ import subprocess
 import sys
 import sysconfig
 import tempfile
+import tokenize
 import tomllib
 import zipfile
 from collections.abc import Sequence
@@ -138,7 +139,7 @@ def main_path() -> Path | None:
     There is often no such file.  The interpreter prompt and `python3
     -c` leave `__main__` without a `__file__` at all, and then there is
     nothing to find.  Every caller has to cope with that rather than
-    assume a program has a file; see Step 6.11.1 in `LOGBOOK.md`.
+    assume a program has a file; see Step 6.12.1 in `LOGBOOK.md`.
 
     Worse, a `__file__` that is present is not necessarily a file.  A
     program piped in as `python3 - < program.py` gets the literal
@@ -180,6 +181,39 @@ BLOCK: re.Pattern[str] = re.compile(
 # blocks arrive as one match and never look duplicated; measured
 # 2026-09-27.  Counting the fences notices them anyway.  See Step 6.7.7.
 FENCE: re.Pattern[str] = re.compile(r"(?m)^# /// script$")
+
+
+# The one `requires-python` shape this understands: a single `>=` clause
+# naming two or three numbers, which is what a real block says.  Anything
+# else -- `>=3.9,<4`, `!=3.9.*`, `~=3.11`, a pre-release rule -- is left
+# alone rather than guessed at, because PEP 440 belongs to `pip`.  See
+# Steps 6.3.3 and 6.7.10 in `LOGBOOK.md`.
+PYTHON_FLOOR: re.Pattern[str] = re.compile(
+    r"^>=\s*(\d+)\.(\d+)(?:\.(\d+))?$")
+
+
+def python_floor(specifier: str) -> tuple[int, ...] | None:
+    """Return the lowest Python a specifier allows, when that is certain.
+
+    Only the single `>=` form is read; see `PYTHON_FLOOR`.  The point of
+    refusing the rest is that a partial reading of somebody else's
+    specification is worse than no reading at all: it disagrees silently.
+    Two or three numbers come back as a tuple, which compares against
+    `sys.version_info` the way PEP 440 compares that shape.
+
+    Arguments:
+    * `specifier` (`str`):
+      A `requires-python` value, such as `>=3.11`.
+
+    Returns:
+    * (`tuple[int, ...] | None`): The floor as numbers, or `None` when
+      the specifier is not one this can be sure about.
+    """
+    # No match means no opinion, which is the safe answer.
+    found: re.Match[str] | None = PYTHON_FLOOR.match(specifier.strip())
+    if found is None:
+        return None
+    return tuple(int(part) for part in found.groups() if part is not None)
 
 
 def script_metadata(text: str) -> dict[str, Any] | None:
@@ -252,7 +286,7 @@ def main_source() -> tuple[Path, str] | None:
     """Return the running program's file and its text.
 
     Three things want this: the PEP 723 block of Step 6.7, the bootstrap
-    that Step 6.11 looks for, and the approvals file of Step 6.6, which
+    that Step 6.12 looks for, and the approvals file of Step 6.6, which
     needs only the path.  One function so that the awkward cases are got
     right once and tested once.
 
@@ -260,6 +294,14 @@ def main_source() -> tuple[Path, str] | None:
     `python3 -O` and `-OO` change what the interpreter keeps -- `-OO`
     discards docstrings entirely -- and comments never survive compiling
     at all.  Only the source has everything that was written.
+
+    `tokenize.open` reads it rather than `Path.read_text`, because a
+    program is not obliged to be UTF-8: a `# -*- coding: latin-1 -*-`
+    line, or a byte order mark, tells the interpreter otherwise and it
+    obeys.  `tokenize.open` is the standard library's own answer to that
+    question and honours both, so a program the interpreter can run is a
+    program this can read.  Measured 2026-09-27: with `read_text` a
+    perfectly legal latin-1 program declared nothing at all, silently.
 
     Returns:
     * (`tuple[Path, str] | None`): The program's file and its contents,
@@ -270,9 +312,13 @@ def main_source() -> tuple[Path, str] | None:
     where: Path | None = main_path()
     if where is None:
         return None
+
+    # `SyntaxError` is what `tokenize` raises for an encoding it cannot
+    # make sense of, and such a file would not have got this far.
     try:
-        return where, where.read_text(encoding="utf-8")
-    except (OSError, UnicodeDecodeError):
+        with tokenize.open(where) as source:
+            return where, source.read()
+    except (OSError, UnicodeDecodeError, SyntaxError):
         return None
 
 
@@ -724,8 +770,14 @@ class AltVEnv:
         # One place decides, so the cold and warm paths cannot diverge.
         mode: str = os.environ.get("ALT_VENV_APPROVE", "").lower()
         if mode == "write":
-            print(f"approvals written to {self.approve(wheels)}",
-                  file=sys.stderr)
+            # A program with no file has nowhere to keep approvals, and
+            # saying "written to None" would claim otherwise.
+            written: Path | None = self.approve(wheels)
+            if written is None:
+                print("nowhere to write approvals: this program has no "
+                      "file of its own", file=sys.stderr)
+            else:
+                print(f"approvals written to {written}", file=sys.stderr)
             return
         if mode == "skip":
             return
@@ -998,6 +1050,9 @@ class AltVEnv:
     Requirements = list[Requirement] | tuple[Requirement, ...]
 
     @overload
+    def install(self) -> None: ...
+
+    @overload
     def install(self, requirements: str,
                 argv: Sequence[str] = ()) -> ModuleType: ...
 
@@ -1005,10 +1060,25 @@ class AltVEnv:
     def install(self, requirements: Requirements,
                 argv: Sequence[str] = ()) -> list[ModuleType]: ...
 
-    def install(self, requirements: str | Requirements,
+    def install(self, requirements: str | Requirements | None = None,
                 argv: Sequence[str] = ()
-                ) -> ModuleType | list[ModuleType]:
+                ) -> ModuleType | list[ModuleType] | None:
         """Install packages if they are missing, and import them.
+
+        **With no arguments**, the packages are the ones the program
+        declared in its PEP 723 block, and nothing is imported: the
+        cache goes on `sys.path` and the program's own `import`
+        statements, written below the bootstrap, then succeed.  This is
+        the form the bootstrap calls and the one `README.md` teaches;
+        see Step 6.7.8 in `LOGBOOK.md`.  A program with no block, or a
+        block declaring nothing, asks for nothing and gets nothing,
+        without complaint.
+
+        Nothing is imported in that form because a PEP 508 requirement
+        names a distribution and not a module, and the two differ often
+        enough -- `python-dateutil` imports as `dateutil` -- that
+        guessing would fail on real programs.  The `import` statement is
+        where a module name belongs.
 
         Whatever is missing is installed into the cache directory with
         `pip install --target`, which needs no virtual environment, and
@@ -1043,8 +1113,9 @@ class AltVEnv:
         `install([("dateutil", "python-dateutil>=2.8")])`.
 
         Arguments:
-        * `requirements` (`str | Requirements`):
-          One requirement, or several.  Each is either a string that
+        * `requirements` (`str | Requirements | None`):
+          `None`, the default, means whatever the program declared.
+          Otherwise one requirement, or several.  Each is either a string that
           `pip` accepts, whose import name is taken to be the name with
           any punctuation turned into underscores, or a
           `(import_name, requirement)` pair for when the two differ.
@@ -1056,11 +1127,12 @@ class AltVEnv:
           a repeated option.
 
         Returns:
-        * (`ModuleType | list[ModuleType]`): The imported module when
-          `requirements` was a single string, so that
-          `cov = v.install("coverage")` reads properly; otherwise one
-          module per requirement, in the order given, so that
-          `cov, pt = v.install(["coverage", "pytest"])` does.
+        * (`ModuleType | list[ModuleType] | None`): The imported module
+          when `requirements` was a single string, so that
+          `cov = v.install("coverage")` reads properly; one module per
+          requirement, in the order given, when it was several, so that
+          `cov, pt = v.install(["coverage", "pytest"])` does; and
+          `None` when it was omitted, since that form imports nothing.
 
         Raises:
         * `ValueError`:
@@ -1075,8 +1147,18 @@ class AltVEnv:
         * `ModuleNotFoundError`:
           If `pip` succeeds but a package still will not import, which
           means its import name was guessed wrongly and wants the pair
-          form.
+          form.  The no-argument form imports nothing and so cannot
+          raise it.
         """
+        # No arguments means whatever the program declared.  The
+        # interpreter is checked first, because a program on the wrong
+        # Python should be told that rather than handed packages.
+        if requirements is None:
+            declaration: dict[str, Any] = self.declaration()
+            self.check_python(declaration)
+            self.provide(self.declared(), argv)
+            return None
+
         # One string is the simple case, and it returns one module.
         single: bool = isinstance(requirements, str)
         wanted: list[str | tuple[str, str]] = (
@@ -1096,6 +1178,157 @@ class AltVEnv:
                 names.append(import_name(entry))
                 asking.append(entry)
 
+        # Two entries claiming one import name would return a module
+        # twice and never mention the other.
+        repeated: set[str] = {name for name in names
+                              if names.count(name) > 1}
+        if repeated:
+            raise ValueError("repeated import name: "
+                             + ", ".join(sorted(repeated)))
+
+        # Everything up to the imports is the same work either form does.
+        self.provide(asking, argv)
+        modules: list[ModuleType] = [importlib.import_module(name)
+                                     for name in names]
+        return modules[0] if single else modules
+
+    def declaration(self) -> dict[str, Any]:
+        """Return the running program's PEP 723 declaration.
+
+        The block is in the program's source text, which `main_source`
+        supplies; see Steps 6.7.2 and 6.7.7 in `LOGBOOK.md`.  Two callers
+        want it -- `declared` for the packages and `check_python` for the
+        interpreter -- and reading it once means they cannot disagree.
+
+        Returns:
+        * (`dict[str, Any]`): What the block declared.  Empty when the
+          program has no file or no `script` block, which are two ways of
+          declaring nothing.
+
+        Raises:
+        * `ValueError`:
+          Through `script_metadata`, if the block will not parse.
+        """
+        # No file and no block are both "nothing declared".
+        found: tuple[Path, str] | None = main_source()
+        if found is None:
+            return {}
+        return script_metadata(found[1]) or {}
+
+    def check_python(self, declaration: dict[str, Any] | None = None
+                     ) -> None:
+        """Refuse to go on when the program declared a different Python.
+
+        PEP 723's `requires-python` is written for a tool that chooses an
+        interpreter before the program starts, which `uv run` does and we
+        cannot: by the time this runs, the program is already running on
+        whatever it got.  So this reports rather than prevents, and the
+        report is the point -- the alternative is a `SyntaxError` forty
+        lines into a module the person has never heard of.
+
+        Only the `>=X.Y` form is judged; see `python_floor`.  Anything
+        else is left to `pip` and `uv`, and the divergence that leaves is
+        worth naming: a pre-release such as 3.11.0a1 does not satisfy
+        `>=3.11` under PEP 440, but its `sys.version_info` compares equal
+        here, so an alpha is let through.  Every error this can make is
+        in that direction -- failing to refuse, never refusing wrongly --
+        which is what makes a whitelist safe here where 6.3.3's tuple
+        comparison was not.
+
+        Arguments:
+        * `declaration` (`dict[str, Any] | None`):
+          What `declaration` returned, when the caller has it already.
+          `None` reads it.
+
+        Raises:
+        * `RuntimeError`:
+          If the running Python is below a floor this understands.  Named
+          so that the bootstrap's one line of diagnosis carries it; see
+          Step 6.1.
+        * `TypeError`:
+          If `requires-python` is present but not a string.
+        """
+        # Nothing declared is nothing to check.
+        found: dict[str, Any] = (self.declaration()
+                                 if declaration is None else declaration)
+        stated: object = found.get("requires-python")
+        if stated is None:
+            return
+        if not isinstance(stated, str):
+            raise TypeError(
+                f"PEP 723 `requires-python` must be a string, "
+                f"not {stated!r}")
+
+        # An unrecognised specifier gets no opinion, not a guess.
+        floor: tuple[int, ...] | None = python_floor(stated)
+        if floor is None:
+            return
+        running: tuple[int, ...] = (sys.version_info.major,
+                                    sys.version_info.minor,
+                                    sys.version_info.micro)[:len(floor)]
+        if running < floor:
+            where: Path | None = main_path()
+            name: str = where.name if where is not None else "this program"
+            raise RuntimeError(
+                f"{name} declares requires-python {stated}, but this is "
+                f"Python {'.'.join(str(part) for part in running)}")
+
+    def declared(self) -> list[str]:
+        """Return the requirements the running program declared.
+
+        Asking this rather than `install()` is how a caller finds out
+        what would be fetched without fetching it.
+
+        Returns:
+        * (`list[str]`): The requirement strings, in the order declared.
+          Empty when the program has no file, no `script` block, or a
+          block that declares no dependencies -- three different ways of
+          asking for nothing, which all deserve the same silence.
+
+        Raises:
+        * `ValueError`:
+          If the block is unreadable as PEP 723, which `script_metadata`
+          reports.  A declaration that cannot be read is not the same as
+          no declaration and must not be mistaken for one.
+        * `TypeError`:
+          If `dependencies` is not a list of strings.
+        """
+        # `requires-python` is `check_python`'s business, not this one's.
+        metadata: dict[str, Any] = self.declaration()
+        declared: object = metadata.get("dependencies", [])
+        if not isinstance(declared, list) or not all(
+                isinstance(entry, str) for entry in declared):
+            raise TypeError(
+                f"PEP 723 `dependencies` must be a list of strings, "
+                f"not {declared!r}")
+        return list(declared)
+
+    def provide(self, asking: list[str],
+                argv: Sequence[str] = ()) -> None:
+        """Fetch whatever of `asking` is missing, and make it importable.
+
+        The engine both forms of `install` share: it fetches, verifies,
+        unpacks and puts the result on `sys.path`, and imports nothing.
+        `install` with arguments imports afterwards; `install` with none
+        leaves that to the program.
+
+        Arguments:
+        * `asking` (`list[str]`):
+          Requirement strings as `pip` spells them.  An empty list is
+          not an error and does nothing at all, not even a `pip` run.
+        * `argv` (`Sequence[str]`):
+          Extra arguments for `pip install`, as `install` documents.
+
+        Raises:
+        * `ValueError`:
+          If a requirement reads as an option, or if `pip` exits 2.
+        * `RuntimeError`:
+          If `pip` fails for any other reason.
+        """
+        # Nothing asked for is nothing to do, and no `pip` to run.
+        if not asking:
+            return
+
         # Refuse the one thing `pip` would accept and should not: a
         # leading dash reads as an option, so `install("--index-url=")`
         # could aim the fetch at somebody else's index.  Requirement
@@ -1107,14 +1340,6 @@ class AltVEnv:
             if requirement.startswith("-"):
                 raise ValueError(
                     f"requirement reads as an option: {requirement!r}")
-
-        # Two entries claiming one import name would return a module
-        # twice and never mention the other.
-        repeated: set[str] = {name for name in names
-                              if names.count(name) > 1}
-        if repeated:
-            raise ValueError("repeated import name: "
-                             + ", ".join(sorted(repeated)))
 
         # A request answered before is answered from the cache, keyed by
         # what was asked rather than by what it resolved to; see Step
@@ -1164,9 +1389,6 @@ class AltVEnv:
             if str(tree) not in sys.path:
                 sys.path.insert(0, str(tree))
         importlib.invalidate_caches()
-        modules: list[ModuleType] = [importlib.import_module(name)
-                                     for name in names]
-        return modules[0] if single else modules
 
     def remember(self, request: str, trees: list[str] | None = None,
                  wheels: list[str] | None = None
@@ -1184,7 +1406,7 @@ class AltVEnv:
         never a partial one.  Two writers recording the *same* request
         may legitimately disagree, if the index gained a release between
         them; one wins, both trees exist, and the loser's becomes
-        garbage for Step 6.10 to cull.
+        garbage for Step 6.11 to cull.
 
         The request is stored inside the file as well as hashed into its
         name, so that a record can be read by a person and so that a
