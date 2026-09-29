@@ -88,8 +88,9 @@ trust.
 Somebody has already solved most of this problem.  What follows is every
 approach found, and what each one still asks of the user.
 
-* [PEP 723](https://peps.python.org/pep-0723/) is final, and its
-  canonical text is now maintained by the PyPA as the [inline script
+* [PEP 723](https://peps.python.org/pep-0723/) is final and now marked a
+  historical document; its canonical text is maintained by the PyPA as
+  the [inline script
   metadata
   spec](https://packaging.python.org/specifications/inline-script-metadata/).
   Dependencies are declared in a `# /// script` comment block at the top
