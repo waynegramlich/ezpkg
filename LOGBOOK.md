@@ -1987,6 +1987,78 @@ expected every time the order changes, and is Claude's job.
     **only when it would change**, which retires 6.10.5's complaint that
     making an object wrote a file; a stale copy is still replaced, so
     editing the docstring still reaches an existing cache.  Four tests.
+  * 6.10.7 - Writing this step out of order paid for itself, twice over,
+    and that is worth recording rather than apologising for.  Wayne
+    rewrote the project's `README.md` from scratch on 2026-09-29 and we
+    went through it line by line, and **describing the behaviour to a
+    stranger is what exposed the decisions**.  Four things came out of it
+    that specification alone had not produced:
+
+    * The consent prompt gained a fourth answer, `[y/n/a/?]`, where `a`
+      means approve from now on and leaves a marker in the cache.  Wayne
+      wanted a reader to understand that code is being downloaded without
+      being nagged about it forever; the letter and the marker file did
+      not exist as an idea until the prompt had to be explained.
+    * Garbage collection got designed, in 6.11.1, because *nothing ages
+      out* was an uncomfortable sentence to write down.
+    * `AltVEnv` never needs `sudo` -- which had to be checked before it
+      could be claimed, and which contradicted the `apt install` line two
+      paragraphs above it until a qualifier was added.
+    * What a person sees when `pip` is missing got measured, because
+      Wayne asked.  Python's own `No module named pip` is precise and our
+      line beneath it is noise; see 6.13.
+    * A definition of *wheel*, because most Python users have never
+      needed the word, and the README used it to make its central claim.
+
+    The general lesson, which the rest of Task 6 should expect: the steps
+    still open are precisely the ones the `README.md` could not describe
+    honestly.  Describing a thing is a cheap way to find out whether it
+    exists.
+
+  * 6.10.8 - What the project's `README.md` still lacks, as of 2026-09-29,
+    so that the list is somewhere other than a conversation.  Grouped by
+    who needs it, and the first group is the one that would embarrass us.
+
+    **Missing and depended upon by a decision not yet made:**
+
+    * **The download prompt.**  What is shown, that `?` lists the
+      packages, that the default is no, that it is asked once per cache
+      rather than once per run, and that a program with no terminal --
+      `cron`, a build, a double clicked launcher -- proceeds without
+      asking.  Waiting on the `[y/n/a/?]` letter and its marker file.
+    * **The security section itself.**  Wayne's rewrite dropped the old
+      `## Security Issues of Executing Unvetted Code` heading along with
+      the Scavenger Hunt, so the page currently says **nothing** about
+      the subject the whole feature rests on.  6.10.2 and 6.10.4 are its
+      outline: what an approvals file guarantees, what a listing merely
+      notifies, and the two things the mechanism cannot do -- a malicious
+      author and a typosquat the author fell for.
+
+    **Missing and ready to write:**
+
+    * **The real bootstrap**, copy and pasteable.  The layout sketch at
+      the top of the file is schematic and says so in a comment; an
+      author cannot use the page as it stands.  This is the single most
+      important omission.
+    * **`uv` compatibility.**  The same file runs under `uv run` with the
+      bootstrap never executing, which is the strongest argument for
+      having used the standard block.  One sentence.
+    * **The author's side of approvals**: run once with the writer, commit
+      the `.altvenv` file beside the program, and recipients get those
+      exact wheels or a refusal.
+    * **Version constraints.**  `"requests<3"` works because it is a PEP
+      508 requirement handed to `pip`, and two programs wanting different
+      versions each get their own directory.
+    * **`PIP_INDEX_URL`**, for a private index or a mirror, which is also
+      how every test in this project fetches.
+    * **What the messages mean**: the failed fetch, the Python floor
+      refusal, and what happens with no network on a warm cache.
+    * **Status and scope**: experimental; measured on Linux with CPython
+      3.12; Windows, macOS and PyPy **untested**, which matters now that
+      the page speaks to Windows readers; concurrent use tested; MIT-0;
+      and a pointer here, to `LOGBOOK.md`, for anybody wanting the
+      reasoning rather than the instructions.
+    * **Where to report a problem**, once there is somewhere to report it.
 
   * 6.10.1 - The project's `README.md` still describes the Scavenger
     Hunt, at lines 17 and 27, which nothing implements any more: nobody
@@ -2028,6 +2100,55 @@ expected every time the order changes, and is Claude's job.
   whole of the fix; the `unpacking-` prefix is there to make them
   identifiable.  A tree in `versions/` that no request record names any
   longer is the third kind, and arrives from Step 6.3.13.
+  * 6.11.1 - Designed 2026-09-29, and designed **for testability**, at
+    Wayne's insistence: where two designs would work, the one that is
+    easier to test wins, because the test suite is the product.  Written
+    as a plan because Step 6.10's `README.md` forced the decisions early
+    -- describing behaviour to a stranger is what exposed which parts do
+    not exist yet.
+
+    * **Deciding is separate from deleting.**  `litter()` and
+      `stale(days)` each return a list of paths and remove nothing;
+      `cull(days)` removes what they name and returns what it removed.
+      Most tests then assert on lists and never delete anything, and a
+      dry run is free, which is a feature a person actually wants: *what
+      would you remove?*
+    * **File times are the clock, and `os.utime` is the test lever.**  No
+      injected clock, no mocking, no sleeping: a test back-dates a stamp
+      by two hundred days and asks whether the tree is stale.  Exact
+      rather than approximate.  The same trick already tests that the
+      cache `README.md` is not rewritten needlessly.
+    * **The request records are the evidence of use.**  Each install
+      touches its record, warm or cold; a tree is stale when no record
+      naming it has been touched inside the threshold.  No new directory,
+      nothing written inside a package tree, and two programs sharing a
+      tree means the freshest record wins.  It reuses the walk 6.3.13
+      needs anyway.
+    * **Thresholds are parameters with module level defaults**, so a test
+      passes `days=0` or an absurdly large number and gets both extremes
+      without touching the environment.  An environment variable can come
+      later if anybody asks.
+    * **Litter first, because it needs no policy and cannot be wrong.**
+      Anything under `pending/`, and any tree no record names at all,
+      is unreachable by definition.  The test is: make a mess, cull,
+      assert the mess is gone and the good tree is untouched.
+    * **The daily gate is its own predicate.**  `due()` reads the mtime
+      of a `last_cull` stamp and `install` culls only when it says so.
+      Tests drive `due()` directly, and the install path needs one test
+      that a second install the same day culls nothing.
+    * **Two safety invariants, a test each**, because they are how this
+      feature would bite: nothing stamped during this run is ever
+      removed, and a tree vanishing mid-cull because another process got
+      there first is not an error.
+    * **`wheels/` is left alone** for now, with a test saying so, because
+      those wheels are what makes `ALT_VENV_APPROVE=write` work from a
+      warm cache; a later size optimisation must not quietly break the
+      author's flow.
+
+    Order of work: litter and the daily gate first, which is a small
+    honest half, then the age based cull.  The `README.md` already says
+    the automatic clean up is designed and not yet written, so it becomes
+    true rather than needing a correction.
 
 * Step 6.12: Find the bootstrap, and notice when it is stale.  Python has
   a great many introspection facilities, and the direct one is
