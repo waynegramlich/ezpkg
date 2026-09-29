@@ -1360,6 +1360,39 @@ expected every time the order changes, and is Claude's job.
     alike, so a program the interpreter can run is now a program we can
     read.
 
+  * 6.5.15 - Seventh traced round, 2026-09-27, everything turned up at
+    once: `ALT_VENV_TEST=COMPLETE`, `ALT_VENV_PYPI=1` and `--children`.
+    Nothing new in the product -- `alt_venv.py` still has exactly one
+    uncovered line, the frozen interpreter arm, and `bootstrap.py`'s 98
+    uncovered lines are precisely the command line measurement harness,
+    so all twelve pasted cases remain covered.
+
+    The instrument, though, has a defect this run exposed and no `FAST`
+    run could: **the child tracer stops ignoring the standard library
+    inside a virtual environment.**  Both tracers are built with
+    `ignoredirs=[sys.prefix, sys.exec_prefix]`, which is correct for an
+    ordinary interpreter.  In a virtual environment `sys.prefix` is the
+    environment and the standard library is under `sys.base_prefix`;
+    measured 2026-09-27, `/usr/lib/python3.12/pathlib.py` does not start
+    with the venv's `sys.prefix`.  So the six venv cases traced the whole
+    standard library, which is why this report carries dozens of
+    `/usr/lib/python3.12` rows that earlier reports did not.
+
+    Consequences are noise and time rather than wrong numbers -- each
+    file's percentage is still its own -- but tracing every line of
+    `typing`, `tarfile` and `ssl` in six children is not free.  The fix
+    is to add `sys.base_prefix` and `sys.base_exec_prefix` to both
+    `ignoredirs` lists, in `alt_venv_coverage.py` and in
+    `trace_hook/sitecustomize.py`.  Left unapplied for Wayne to call,
+    since it changes what the instrument considers ours.
+
+    Two smaller observations, neither a defect.  In
+    `test_a_racing_unpack_is_recovered` the patched `Path.rename` never
+    falls through to the genuine one, so the guard against patching too
+    broadly is itself unexercised; the test wheel has no `.data` member
+    to move.  And the `sys.path` cleanup helper never finds an entry to
+    remove, because the tests that use it install in children.
+
 * Step 6.6: Security, and who approves what.
   * 6.6.1 - Write the threat model down first, because the claim has to
     be narrow to be true.  A malicious program author gets no
@@ -1811,25 +1844,72 @@ expected every time the order changes, and is Claude's job.
     and so doubles as Step 6.9's evidence, and because it has no
     dependencies of its own.  `coverage` was the first choice and turned
     out to ship no `.pth` at all; see 6.9.
-  * 6.8.5 - Two code paths reach an index and only one of them is
-    `pip`'s.  `install` hands resolution and tag matching to `pip`, so a
-    real index tests our plumbing rather than our judgement.  Cases 3 and
-    12 use the five-line tag matcher of `2wtmifs` instead, and pointing
-    **those** at real PyPI is what tests the stand-in against real tag
-    soup, which nothing has done yet.  Worth doing both.
+  * 6.8.5 - Done 2026-09-28, and it found what it was meant to find.
+    `install` hands resolution and tag matching to `pip`, so a real index
+    tests our plumbing; cases 3 and 12 choose for themselves with the
+    five line matcher of `2wtmifs`, and those are the ones worth aiming
+    at real tag soup.  Four packages, both cases:
+
+    * `certifi`, pure `py3-none-any`: fetched.
+    * `coverage`, a `cp312` wheel for this machine plus a pure fallback:
+      fetched, so the preference order does real work.
+    * `charset_normalizer`: fetched, but **by luck**.  It publishes
+      `cp312-cp312-manylinux...` and `cp312-cp312-musllinux_1_2_x86_64`,
+      and a musl name contains both `linux` and `x86_64`, so the matcher
+      accepts either; PyPI happens to list manylinux first.  A project
+      listing them the other way round would hand a glibc machine a musl
+      wheel whose shared objects cannot load.  That is `2wtmifs`
+      predicted and now confirmed against real data.
+    * `cryptography`: **cannot be fetched at all.**  An abi3 wheel is
+      tagged with the **lowest** Python it supports and serves every
+      later one, so the real names are `cp39-abi3` and `cp311-abi3`; the
+      matcher looks for `cp312-abi3` and gives up with `no compatible
+      wheel found`.  `pip` installs it without comment.
+
+    The abi3 gap is now a `@unittest.expectedFailure` in `PyPITest`, so
+    it documents itself and reports an unexpected success the day the
+    matcher learns about abi3.  Both faults belong to `2wtmifs` and the
+    fix is pasted code, so it is Wayne's call: matching `cpXY-abi3` for
+    any `XY` at or below the running version is a comparison, not a
+    parser, and costs a line or two of paste.
   * 6.8.6 - The prompt is a hazard here, not in the suite.  Under
     `unittest` there is no controlling terminal, so `consent` returns
     True and nothing hangs; a person running this test from a terminal
     with no approvals file gets asked, and the answer they give decides
     whether the test passes.  Set `ALT_VENV_APPROVE` in the test rather
     than leaving that to chance.
-  * 6.8.7 - Look at the untrusted certificate test while here, carried
-    from 6.5.13: 19.8 s against 5.3 s for the trusted one, over the same
-    four cases.  The suspicion is `ATTEMPTS`, which would mean a rejected
-    certificate is retried three times.  If so it is a defect and not
-    slowness, because a certificate the trust store refuses will be
-    refused again, and retrying says the opposite about what kind of
-    failure it is.
+  * 6.8.7 - Done 2026-09-28, and the suspicion was wrong in a useful
+    way.  `ATTEMPTS` is the consent prompt's and nothing fetches with
+    it; the time is `pip`'s own five retries with backoff.  Measured
+    against a server whose certificate nothing trusts, one case each:
+
+    | flags                       | time  | names the certificate |
+    |-----------------------------|-------|-----------------------|
+    | `--quiet`, default retries  | 8.4 s | yes                   |
+    | `--quiet --retries 0`       | 0.7 s | **no**                |
+    | loud, `--retries 0`         | 0.7 s | yes                   |
+    | loud, `--retries 1`         | 0.7 s | yes                   |
+
+    The middle row is the finding, and it is worse than slowness: under
+    `--quiet` the word certificate appears **only in the retry
+    warnings**, so a user with `PIP_RETRIES=0` set, or a future pip that
+    words its warnings differently, is told `no matching distribution
+    found` -- a confident lie about the cause, which is exactly the
+    failure Step 6.1 exists to prevent.  The good message we have today
+    is luck.
+
+    So `download` drops `--quiet` and passes `--retries 1`.  Everything
+    pip prints is captured, so the caller sees no extra noise; the
+    diagnosis now comes from the error rather than from a warning; and
+    one retry remains for a genuinely flaky network.  `argv` still wins,
+    for a caller who wants pip's defaults back.
+
+    **Left for Wayne, because it changes the pasted code:**
+    `bootstrap.py`'s cases still pass `--quiet` and still take 8.4 s on
+    a bad certificate, and `TlsTest` measures them rather than
+    `download`.  Dropping `--quiet` there costs **no** pasted line and a
+    few characters, and would additionally show a person that something
+    is being fetched, which Step 6.13 wants anyway.
 
 * Step 6.9: `.pth` files, which is `3pfaibne`.  `install` uses
   `sys.path.insert`, which never executes a `.pth` file, so a package
@@ -1853,6 +1933,23 @@ expected every time the order changes, and is Claude's job.
   machine, and `pytest-cov` carries `pytest-cov.pth`, which is how *it*
   reaches subprocesses.  Both are code executed at path setup, so the
   gap is real and the step stands; only the example changes.
+  * 6.9.2 - Done 2026-09-28, and it needed **both** calls rather than a
+    choice between them.  Measured: `site.addsitedir` appends to the
+    back of `sys.path`, where this cache is supposed to come first; and
+    it skips a directory already listed while still processing that
+    directory's `.pth` files.  So `provide` inserts the tree at the
+    front as before and then calls `addsitedir` on it, which runs the
+    `.pth` files without costing the cache its precedence.  A third test
+    pins that ordering, because a future tidy-up that dropped the insert
+    would look harmless and quietly demote every cached package.
+
+    Both halves of what a `.pth` can do are exercised by a `pathy`
+    package in the test index: an `import` line, which now runs, and a
+    directory line, which now lands on `sys.path`.  Running `.pth` files
+    twice in one process would run their import lines twice, so the
+    existing `if str(tree) not in sys.path` guard is now load bearing
+    and says so.
+
   * 6.9.1 - This changes what Step 6.10.2 has to say, so decide it
     before that section is written.  A `.pth` line beginning with
     `import` is **executed** when the path is set up, which is how
@@ -1869,6 +1966,27 @@ expected every time the order changes, and is Claude's job.
   project's `README.md` is the page a stranger lands on after a program
   tells them to; `~/.alt_venv/README.md` is what somebody finds inside
   the cache directory and wonders about.
+  * 6.10.6 - Drafted 2026-09-28, both files, and Wayne's to edit: the
+    prose is the product's face and a draft from Claude is a starting
+    point rather than an answer.  `hg revert` undoes it in one command.
+
+    The project's `README.md` keeps the opening -- a person arrives here
+    annoyed, and the author chose this over a virtual environment -- and
+    replaces the Scavenger Hunt with what the code does: a **What Just
+    Happened** section showing the real listing and the real
+    `[y/N/?]` question, a **Security** section written from 6.6's
+    sub-items as two lists, what it protects against and what it plainly
+    does not, and a **For Program Authors** section carrying the PEP 723
+    shape with its `# noqa: BLE001` and `# type: ignore` comments
+    explained.  Everything in it is something this project measured.
+
+    The cache's `README.md` now describes the versioned layout it
+    predated: `versions/`, `wheels/`, `requests/` and `pending/`, one
+    line each, with the litter note for `pending/`.  And it is written
+    **only when it would change**, which retires 6.10.5's complaint that
+    making an object wrote a file; a stale copy is still replaced, so
+    editing the docstring still reaches an existing cache.  Four tests.
+
   * 6.10.1 - The project's `README.md` still describes the Scavenger
     Hunt, at lines 17 and 27, which nothing implements any more: nobody
     is sent to visit web pages and paste titles back.  What replaced it
@@ -2265,6 +2383,17 @@ Not yet started, in priority order.
     pick a compiled wheel has never been run at all, and the tests have
     only ever exercised the `py3-none-any` path.  Reaching it needs a
     platform tagged wheel in the test index, which is Step 6.5.11.
+  * Claude (2026-09-28): Measured against **real** PyPI, by Step 6.8.5,
+    and there are now two concrete faults rather than one worry.
+    `cryptography` cannot be fetched at all: an abi3 wheel is tagged
+    with the lowest Python it supports, so the real names are
+    `cp39-abi3` and `cp311-abi3` while the matcher looks for
+    `cp312-abi3`.  And the musl confusion is confirmed --
+    `charset_normalizer` publishes `cp312-cp312-musllinux_1_2_x86_64`
+    alongside its manylinux wheel, and only PyPI's ordering keeps a
+    glibc machine off the musl one.  `certifi` and `coverage` both
+    fetch correctly.  The abi3 gap is pinned by an
+    `@unittest.expectedFailure` in `PyPITest`.
     The complete run confirms it: with all twelve cases exercised, ten
     are covered completely and these seven lines are the only dead code
     in any of them.

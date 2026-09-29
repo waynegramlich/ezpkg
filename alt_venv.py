@@ -64,6 +64,7 @@ import json
 import os
 import re
 import shutil
+import site
 import subprocess
 import sys
 import sysconfig
@@ -356,14 +357,31 @@ class AltVEnv:
         This directory holds Python packages that a program needed but
         that the Python installation did not provide.  A small
         bootstrap, pasted into the top of that program, fetched them
-        and put this directory on `sys.path`.
+        and put them on `sys.path`.
 
         Nothing here is managed by the system package manager, and
         nothing here is a virtual environment despite the name.  It is
         an ordinary directory of installed packages.
 
-        Deleting this directory is safe.  The next program that needs
-        one of these packages will fetch it again.
+        What is in it:
+
+        * `versions/` holds one directory per package version, named
+          after the wheel it came from, so two programs wanting two
+          versions of the same package each get their own.  These are
+          the directories that go on `sys.path`.
+        * `wheels/` keeps the downloaded wheels themselves.
+        * `requests/` records what was asked for, one small file per
+          request, so that asking again costs nothing.
+        * `pending/` is scratch space used while fetching and
+          unpacking.  Anything left in it is litter from an interrupted
+          run and is safe to remove.
+
+        Deleting this whole directory is safe.  The next program that
+        needs one of these packages will fetch it again.
+
+        A program can say which packages it needs in a PEP 723 block at
+        its top, and can carry a `.altvenv` file beside it recording
+        which exact wheels its author approved.
 
         Arguments:
         * `root` (`Path | None`):
@@ -388,9 +406,21 @@ class AltVEnv:
             title = title.rstrip(".")
             body = body.split("Arguments:")[0].rstrip()
 
-        # Write it out, replacing any earlier copy.
+        # Write it only when it would change.  Making an object used to
+        # write a file every time, which is a side effect nobody asks a
+        # constructor for and which touches the modification time of a
+        # file a person may be reading; see Step 6.10.5 in `LOGBOOK.md`.
+        # A stale copy is still replaced, so editing this docstring
+        # still reaches the cache.
         self.readme = self.root / "README.md"
-        self.readme.write_text(f"# {title}\n{body}\n")
+        wanted: str = f"# {title}\n{body}\n"
+        present: str = ""
+        try:
+            present = self.readme.read_text(encoding="utf-8")
+        except OSError:
+            present = ""
+        if present != wanted:
+            self.readme.write_text(wanted, encoding="utf-8")
 
         # Repair a single module install, so that the bootstrap that
         # fetched this one recognises it next time.  See `0cctfd`.
@@ -951,8 +981,22 @@ class AltVEnv:
         # A directory per call, so concurrent downloads stay apart.
         pending: Path = self.paths()[0]
         holding: Path = Path(tempfile.mkdtemp(dir=pending))
+
+        # Not `--quiet`, and only one retry, and the two go together.
+        # Measured 2026-09-28 against a server with an untrusted
+        # certificate: `--quiet` with pip's five retries takes 8.4 s and
+        # names the certificate **only in the retry warnings**, while
+        # `--quiet --retries 0` takes 0.7 s and reports nothing but
+        # `no matching distribution found`, which is a lie about the
+        # cause.  Loud takes 0.7 s and names the certificate in the
+        # error itself.  Everything pip prints is captured here, so
+        # dropping `--quiet` costs the caller no noise at all, and the
+        # retries that were buying the diagnosis are no longer needed
+        # for it.  One is kept for a genuinely flaky network.  A caller
+        # wanting pip's defaults back passes them in `argv`, which wins.
+        # See Step 6.8.7 in `LOGBOOK.md`.
         done: subprocess.CompletedProcess[str] = subprocess.run(
-            [sys.executable, "-m", "pip", "download", "--quiet",
+            [sys.executable, "-m", "pip", "download", "--retries", "1",
              "--no-input", "--disable-pip-version-check",
              "--only-binary", ":all:", *argv, "--dest", str(holding),
              *requirements],
@@ -1384,10 +1428,29 @@ class AltVEnv:
 
         # Only the unpacked trees go on the path, never the holding
         # area.  That one rule is the whole of the jail; see 6.3.1.
+        #
+        # `sys.path.insert` puts the tree first, which is the precedence
+        # this cache is meant to have, and `site.addsitedir` runs the
+        # `.pth` files in it, which `sys.path` alone never does.  Both,
+        # because neither suffices: measured 2026-09-28, `addsitedir`
+        # appends to the **back** of `sys.path`, and it skips a directory
+        # already listed while still processing that directory's `.pth`
+        # files, so inserting first and calling it second gets the order
+        # we want and the files run.  `setuptools` ships
+        # `distutils-precedence.pth` and `pytest-cov` ships
+        # `pytest-cov.pth`, and without this both install half working.
+        #
+        # A `.pth` line beginning with `import` is **executed** here.
+        # That is the specification, not a liberty we are taking, and it
+        # happens only for a wheel the gate already approved; see Step
+        # 6.9 in `LOGBOOK.md`.  The guard matters for a second reason
+        # now: running the same `.pth` twice in one process would run
+        # its import line twice.
         tree: Path
         for tree in trees:
             if str(tree) not in sys.path:
                 sys.path.insert(0, str(tree))
+                site.addsitedir(str(tree))
         importlib.invalidate_caches()
 
     def remember(self, request: str, trees: list[str] | None = None,

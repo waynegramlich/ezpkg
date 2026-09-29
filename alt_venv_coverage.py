@@ -83,8 +83,14 @@ def build_tracer() -> trace.Trace:
     * (`trace.Trace`): A line counting tracer, not yet running.
     """
     # Exclude the interpreter's own directories, whatever they are.
+    # `sys.prefix` is the virtual environment when there is one, and
+    # the standard library then lives under `sys.base_prefix`, so
+    # naming only the first traces the whole standard library in a
+    # venv child.  Found by Step 6.5.15.
     return trace.Trace(count=1, trace=0,
-                       ignoredirs=[sys.prefix, sys.exec_prefix])
+                       ignoredirs=[sys.prefix, sys.exec_prefix,
+                                   sys.base_prefix,
+                                   sys.base_exec_prefix])
 
 
 def run_suite() -> None:

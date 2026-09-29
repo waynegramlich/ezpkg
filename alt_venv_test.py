@@ -493,6 +493,43 @@ def add_data_member(wheel: Path, sub: str, name: str,
     return wheel
 
 
+def add_root_member(wheel: Path, name: str, text: str) -> Path:
+    """Add a file at the top level of a wheel.
+
+    `add_data_member` puts a file inside the `.data` directory, which is
+    where a wheel carries things that belong elsewhere.  A `.pth` file
+    is not one of those: it sits at the root, beside the module, and is
+    installed straight into the directory packages land in.  See Step
+    6.9 in `LOGBOOK.md`.
+
+    `RECORD` is left alone, as `add_data_member` leaves it: nothing in
+    this project verifies it, and a wheel that disagrees with its own
+    `RECORD` is a fair thing for a test to hand us.
+
+    Arguments:
+    * `wheel` (`Path`):
+      The wheel to rewrite.
+    * `name` (`str`):
+      The member's name, such as `zz_widget.pth`.
+    * `text` (`str`):
+      What that file contains.
+
+    Returns:
+    * (`Path`): The wheel, rewritten in place.
+    """
+    # A zip cannot grow in place, so it is rebuilt beside itself.
+    rebuilt: Path = wheel.with_suffix(".rebuilt")
+    old: zipfile.ZipFile
+    new: zipfile.ZipFile
+    with zipfile.ZipFile(wheel) as old, \
+            zipfile.ZipFile(rebuilt, "w", zipfile.ZIP_DEFLATED) as new:
+        for entry in old.infolist():
+            new.writestr(entry.filename, old.read(entry.filename))
+        new.writestr(name, text)
+    rebuilt.replace(wheel)
+    return wheel
+
+
 def build_index(wheels: list[Path],
                 root: Path) -> Path:
     """Lay wheels out as a PEP 503 simple repository.
@@ -1559,8 +1596,52 @@ class AltVEnvTest(unittest.TestCase):
         text: str = alt_venv.AltVEnv(cache).readme.read_text()
         self.assertTrue(
             text.startswith("# AltVEnv Package Cache\n"))
-        self.assertIn("Deleting this directory is safe.", text)
+        self.assertIn("Deleting this whole directory is safe.", text)
         self.assertNotIn("Arguments:", text)
+
+    def test_the_readme_describes_the_layout(self) -> None:
+        """It names the four directories a person will find.
+
+        The file predated the versioned cache of Step 6.3 and described
+        a layout that no longer existed; see Step 6.10.5.
+        """
+        # Somebody who opens the cache should recognise what is in it.
+        cache: Path = self.root / "layout_readme"
+        text: str = alt_venv.AltVEnv(cache).readme.read_text()
+        name: str
+        for name in ("versions/", "wheels/", "requests/", "pending/"):
+            with self.subTest(directory=name):
+                self.assertIn(name, text)
+
+    def test_the_readme_is_not_rewritten_needlessly(self) -> None:
+        """Constructing an object twice writes the file once.
+
+        Making an object used to write a file every time, which is a
+        side effect nobody asks a constructor for, and which touched the
+        modification time of a file somebody might be reading.
+        """
+        # The modification time is the observable part, so use it.
+        cache: Path = self.root / "unchanged_readme"
+        readme: Path = alt_venv.AltVEnv(cache).readme
+        stamp: int = readme.stat().st_mtime_ns
+        os.utime(readme, ns=(stamp - 10**9, stamp - 10**9))
+        moved: int = readme.stat().st_mtime_ns
+        alt_venv.AltVEnv(cache)
+        self.assertEqual(readme.stat().st_mtime_ns, moved)
+
+    def test_a_stale_readme_is_replaced(self) -> None:
+        """An out of date copy is still rewritten.
+
+        The other half of the rule above: editing the docstring has to
+        reach a cache that already has an older file in it.
+        """
+        # Anything that is not what the docstring says is stale.
+        cache: Path = self.root / "stale_readme"
+        readme: Path = alt_venv.AltVEnv(cache).readme
+        readme.write_text("# Something else\n")
+        alt_venv.AltVEnv(cache)
+        self.assertTrue(
+            readme.read_text().startswith("# AltVEnv Package Cache\n"))
 
     def test_default_root_follows_home(self) -> None:
         """With no argument the cache lands under the home directory."""
@@ -1770,8 +1851,23 @@ class InstallTest(unittest.TestCase):
                                       cls.root / "dist",
                                       requires=["widget"])
 
-        cls.index = build_index([wheel, two_named, depending, *versions],
-                                cls.root / "index")
+        # A package that ships a `.pth`, which `sys.path.insert` alone
+        # never runs.  One line imports and one names a directory, which
+        # are the two things a `.pth` can do; see Step 6.9.
+        pathy: Path = cls.root / "pathy.py"
+        pathy.write_text('"""Ships a .pth."""\n__version__ = "1.0.0"\n')
+        shipping: Path = build_wheel(pathy, "pathy", "1.0.0",
+                                     "Ships a .pth.", cls.root / "dist")
+        add_root_member(shipping, "inner/tucked.py",
+                        '"""Reached only through the .pth."""\n'
+                        'WHERE = "inner"\n')
+        add_root_member(
+            shipping, "zz_pathy.pth",
+            "import sys; setattr(sys, 'alt_venv_pth_ran', True)\n"
+            "inner\n")
+
+        cls.index = build_index([wheel, two_named, depending, shipping,
+                                 *versions], cls.root / "index")
         cls.cache = cls.root / "cache"
 
         # Start the server last, so nothing can fail after it is up.
@@ -2971,6 +3067,54 @@ class InstallTest(unittest.TestCase):
             '"request": "widget"', '"request": "something else"'))
         self.assertIsNone(venv.remember("widget"))
 
+    def test_a_pth_file_is_executed(self) -> None:
+        """A `.pth` import line runs, which `sys.path` alone never does.
+
+        `setuptools` ships `distutils-precedence.pth` and `pytest-cov`
+        ships `pytest-cov.pth`; without this both install half working,
+        which is the whole of Step 6.9.
+        """
+        # The `.pth` marks `sys` itself, which the program can see.
+        program: Path = self.declaring_program(
+            "pth_runs", 'dependencies = ["pathy"]',
+            "import pathy\n"
+            "print(getattr(sys, 'alt_venv_pth_ran', False))")
+        done: subprocess.CompletedProcess[str] = self.run_program(program)
+        self.assertEqual(done.returncode, 0, done.stderr[-400:])
+        self.assertEqual(done.stdout.strip(), "True")
+
+    def test_a_pth_directory_line_is_added(self) -> None:
+        """A `.pth` line naming a directory puts it on `sys.path` too.
+
+        The other half of what a `.pth` does, and the half that makes a
+        package like `setuptools` find its vendored code.
+        """
+        # `tucked` exists only inside the directory the `.pth` names.
+        program: Path = self.declaring_program(
+            "pth_directory", 'dependencies = ["pathy"]',
+            "import tucked\nprint(tucked.WHERE)")
+        done: subprocess.CompletedProcess[str] = self.run_program(program)
+        self.assertEqual(done.returncode, 0, done.stderr[-400:])
+        self.assertEqual(done.stdout.strip(), "inner")
+
+    def test_the_cache_still_wins_over_the_path(self) -> None:
+        """Running `.pth` files must not cost the cache its precedence.
+
+        `site.addsitedir` appends, so calling it alone would put the
+        cache **behind** everything already on `sys.path`.  Measured
+        2026-09-28, which is why `provide` inserts first and calls it
+        second.
+        """
+        # The tree has to be ahead of the project directory, which is
+        # where an installed copy of the same name would otherwise win.
+        program: Path = self.declaring_program(
+            "precedence", 'dependencies = ["pathy"]',
+            "import pathy\n"
+            "print(sys.path.index(str(Path(pathy.__file__).parent)))")
+        done: subprocess.CompletedProcess[str] = self.run_program(program)
+        self.assertEqual(done.returncode, 0, done.stderr[-400:])
+        self.assertEqual(done.stdout.strip(), "0")
+
     def test_contains_reports_what_is_cached(self) -> None:
         """`contains` is False before an install and True after."""
         # A single module counts, not only a package directory.
@@ -3855,6 +3999,73 @@ class PyPITest(unittest.TestCase):
             "print('checked', wheel.name)")
         self.assertIn("checked", printed)
         self.assertIn(".dev", printed)
+
+    def real_case(self, label: str, package: str) -> str:
+        """Run one `bootstrap.py` case against real PyPI.
+
+        Cases 3 and 12 are the two that choose a wheel themselves, with
+        the five line matcher of issue `2wtmifs`, rather than leaving it
+        to `pip`.  Everything else has only ever met wheels this project
+        built, so this is the first real tag soup they have seen.
+
+        Arguments:
+        * `label` (`str`):
+          The case to run.
+        * `package` (`str`):
+          A distribution whose name is also its import name, because
+          `bootstrap.py` has one `PACKAGE` for both.
+
+        Returns:
+        * (`str`): The last line the case printed, or its diagnosis.
+        """
+        # A `HOME` of its own, since every case installs into `~`.
+        home: Path = Path(tempfile.mkdtemp(prefix=f"real-{label}-",
+                                           dir=self.root))
+        script: Path = Path(__file__).resolve().parent / "bootstrap.py"
+        environment: dict[str, str] = dict(
+            os.environ, HOME=str(home), BOOTSTRAP_PACKAGE=package,
+            BOOTSTRAP_JSON_API="https://pypi.org/pypi")
+        environment.pop("PIP_INDEX_URL", None)
+        environment.pop("VIRTUAL_ENV", None)
+        done: subprocess.CompletedProcess[str] = subprocess.run(
+            [sys.executable, str(script), label], env=environment,
+            capture_output=True, text=True, check=False)
+        return (done.stdout + done.stderr).strip().splitlines()[-1]
+
+    def test_the_matcher_handles_real_wheels(self) -> None:
+        """A pure wheel and a platform wheel both arrive, from PyPI.
+
+        `certifi` is `py3-none-any`; `coverage` ships a `cp312` wheel
+        for this machine and a pure fallback, so the preference order
+        is doing real work.
+        """
+        # Both cases that choose for themselves, both packages.
+        label: str
+        package: str
+        for label in ("3", "12"):
+            for package in ("certifi", "coverage"):
+                with self.subTest(case=label, package=package):
+                    self.assertIn(f"module {package} version",
+                                  self.real_case(label, package))
+
+    @unittest.expectedFailure
+    def test_the_matcher_handles_abi3_wheels(self) -> None:
+        """A stable ABI wheel is missed, which is issue `2wtmifs`.
+
+        Measured 2026-09-28: `cryptography` publishes
+        `cp39-abi3` and `cp311-abi3` wheels, because an abi3 wheel is
+        tagged with the **lowest** Python it supports and then serves
+        every later one.  The matcher looks for `cp312-abi3` on this
+        machine and finds nothing, so a package that `pip` installs
+        without comment cannot be fetched at all.
+
+        Written as an expected failure on purpose: it documents the gap
+        today, and the day the matcher learns about abi3 the suite
+        reports an unexpected success rather than staying quiet.
+        """
+        # `pip` has no difficulty with this package; we do.
+        self.assertIn("module cryptography version",
+                      self.real_case("3", "cryptography"))
 
     def test_a_real_wheel_carries_a_pth_file(self) -> None:
         """`setuptools` ships `.pth`, which Step 6.9 is about.
