@@ -1475,6 +1475,63 @@ expected every time the order changes, and is Claude's job.
     although `widget` was already there from the first program.  The
     listing therefore appears once per cache, not once per run.
 
+  * 6.6.15 - A fourth answer, built 2026-09-29: the question is now
+    `[y/n/a/?]`, where `a` means do not ask again.  Wayne's reasoning is
+    the point of the whole feature, so it belongs here: nearly everybody
+    will approve, and what the question is **for** is that a person
+    understands packages are being downloaded -- not that they are nagged
+    about it forever.  Answering `a` writes `FOREVER_APPROVE` in the
+    cache, whose contents say what it means and that deleting it restores
+    the question, and the answer prints that path, because one keystroke
+    making a permanent decision deserves a visible way back.
+
+    The marker lives in the cache rather than beside the program, because
+    it records a decision by whoever uses the machine and not by any
+    author; that also gives it the lifetime the question already had,
+    which is once per cache.
+
+    **The invariant that makes it safe:** the marker is checked *after*
+    the approvals, so it silences the question and can never hide a wheel
+    that fails `verify`.  A wheel that does not match what an author
+    approved is a different matter from a person who would rather not be
+    asked.  Three tests, one of them exactly that case: approve, corrupt
+    the record, set the marker, fetch cold, and the refusal still
+    happens.
+
+    Reworked the same day, at Wayne's suggestion, and the reasoning is
+    worth keeping: **the prompt spells the answers out** rather than
+    abbreviating them, because a person seeing it for the first time
+    should not have to guess what a letter means:
+
+        2 requested, 3 to install into /home/you/.alt_venv;
+        go ahead? [y=>Yes/n=>No/a=>Always/?=>Explanation]
+
+    Case no longer matters, since somebody with caps lock on has not made
+    a mistake.  And `a` now **asks twice**: `Really never ask again?
+    [y=>Yes/n=>No]`, because it is the only answer that outlives the run.
+    Declining the confirmation returns to the question rather than
+    cancelling the install -- not wanting a thing for ever is not the
+    same as not wanting it now -- and counts as an attempt so the pair
+    cannot loop indefinitely.
+
+    The second `y` prints where the marker is, that packages will be
+    downloaded silently from now on, and the removal command for the
+    platform it is running on, with `os.name` choosing between
+    `rm -rf` and `rmdir /s /q`.  The words *ALWAYS safe to delete* are
+    Wayne's, and they are right: the directory is a cache, and losing it
+    costs a download.
+
+    Wayne also spotted that `consent`'s docstring still described the old
+    `[y/N/?]` prompt.  The test file now holds the prompt and the
+    confirmation as `PROMPT` and `CONFIRM`, one place each, so the next
+    rewording fails in one obvious spot rather than in seven.
+
+    This replaces nothing: `ALT_VENV_APPROVE` stays, because `write` is
+    how an author generates the approvals file at all and `skip` is for
+    an author still deciding.  Wayne leant against the variable while
+    designing this, and the reason to keep it is that it is the author's
+    tool and never in a recipient's way.
+
   * 6.6.14 - Two things the mechanism cannot do, recorded so that they
     are decisions rather than oversights.  A declined download is
     discarded, not kept, so `pending/` is empty afterwards and a later

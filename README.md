@@ -169,3 +169,97 @@ written**, so for now the directory grows until you clear it.
 programs want the same package, the second one recognises that the identical
 package is already there and uses it.  That holds even if both programs
 start at the same moment.
+
+## Being Asked Before Anything Is Downloaded
+
+The first time a program needs packages that are not already in the cache,
+and there is a terminal to ask on, it asks:
+
+```
+2 requested, 3 to install into /home/you/.alt_venv;
+go ahead? [y=>Yes/n=>No/a=>Always/?=>Explanation]
+```
+
+* **y** installs them and runs the program.
+* **n** installs nothing and stops.  Nothing has been unpacked at that
+  point and nothing from the packages has run.
+* **?** lists what would be installed, one line each, and asks again.
+  Asking for detail is never counted against you.
+* **a** stops the question being asked ever again on this machine.  It is
+  the only answer that outlasts the run, so it is the only one that asks
+  you to confirm:
+
+  ```
+  Really never ask again? [y=>Yes/n=>No]
+  ```
+
+  Answering no returns you to the first question with the install still on
+  offer.  Answering yes leaves a file called `FOREVER_APPROVE` in the
+  cache, and says so, along with how to undo it.  Deleting that file brings
+  the question back.
+
+Capital letters work as well as small ones, and a bare newline means no.
+
+The question is asked **once per cache, not once per run.**  A program that
+has already been given what it needs does not ask again, and neither does
+the next program that needs the same packages.
+
+**A program with no terminal is not asked.**  Anything started by `cron`, a
+build system, a service manager, or by double clicking an icon has nobody
+to put a question to, so it says what it downloaded and carries on.  That is
+a deliberate choice: a program that hangs waiting for an answer nobody can
+give is worse than one that tells you afterwards.
+
+## What This Protects You Against, And What It Does Not
+
+Installing a package means running its code later, so this deserves to be
+said plainly rather than implied.
+
+**What the author can guarantee.**  If the person who wrote the program ran
+it once with the approvals recorder, there is a file beside the program --
+`prog.altvenv` next to `prog.py` -- listing the exact package files they
+approved and a SHA-256 fingerprint of each.  When you run that program,
+anything that does not match is refused **before** it is unpacked, and a
+package that is refused has never run: what was downloaded is a zip archive,
+and downloading an archive does not execute anything inside it.  Nothing is
+asked of you, because the author already answered.
+
+**What you get without that file.**  A list of what arrived and, if there
+is a terminal, the question above.  That is notification, not a guarantee:
+it tells you how many packages and which names, so that seven packages when
+you expected one is something you can notice.
+
+**What none of this protects you against.**  Three things, and being straight
+about them is the point:
+
+* **A program whose author meant you harm.**  They did not need any of this;
+  their program runs on your machine by your invitation.  `AltVEnv` is not a
+  sandbox and does not pretend to be.
+* **A name the author got wrong.**  If the author approved `reqeusts`
+  believing it was `requests`, the approvals file faithfully records the
+  wrong package.  It records a decision; it cannot tell whether the decision
+  was sound.
+* **A package that was hostile from the start.**  Nothing here inspects what
+  a package does.  This is the same exposure you accept every time you run
+  `pip install`, no better and no worse.  Package indexes do remove malicious
+  packages, usually quickly, but only once somebody has noticed them.
+
+One more thing worth knowing, because it surprises people: a package can run
+code the moment it is placed on Python's import path, before your program
+imports anything from it, by shipping a file that Python executes during
+start up.  Widely used packages do this for legitimate reasons.  Approval
+happens before any of that, which is why it happens before unpacking rather
+than at import time.
+
+**If you wrote the program**, the guarantee is yours to give, and it takes
+one run:
+
+```bash
+ALT_VENV_APPROVE=write python3 prog.py
+```
+
+That writes `prog.altvenv` beside your program.  Commit it alongside the
+code, and everybody who runs your program afterwards gets exactly the
+packages you approved or a refusal that names the mismatch.  While you are
+still deciding what your program needs, `ALT_VENV_APPROVE=skip` turns the
+checking off for your own runs.
