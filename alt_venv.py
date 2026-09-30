@@ -708,12 +708,22 @@ class AltVEnv:
         `charset-normalizer 3.3.2` belongs can still say that seven
         packages is a surprise when they asked for one.
 
-        `y` or `yes` goes ahead; `n`, `no` or a bare newline declines,
-        because `[y/N/?]` says the default is no; `?` describes each
-        wheel and asks again; anything else is taken for a typo and the
-        question is put again, up to `ATTEMPTS` typos.  Asking for the
-        detail is not a typo and does not count, so curiosity is never
-        punished.  A terminal that has gone away reads as empty, which
+        Each answer is spelled out in the prompt rather than abbreviated,
+        because a person who has never seen this question before should
+        not have to guess what a letter means.  Case does not matter.
+
+        `y` or `yes` goes ahead once; `n`, `no` or a bare newline
+        declines; `?` describes each wheel and asks again; `a` or
+        `always` stops the question being asked at all, and is the one
+        answer that asks for confirmation first, because it is the only
+        one that outlives this run.  Declining that confirmation returns
+        to the question rather than cancelling the install, and counts as
+        an attempt so that the pair cannot loop for ever.
+
+        Anything else is taken for a typo and the question is put again,
+        up to `ATTEMPTS` typos.  Asking for the detail is not a typo and
+        does not count, so curiosity is never punished.  A terminal that
+        has gone away reads as empty, which
         declines at once rather than being asked again forever.
 
         With no terminal there is nobody to ask, and the answer is yes:
@@ -741,6 +751,7 @@ class AltVEnv:
         # again.  Only typos are counted, so that reading the detail can
         # never use up the patience meant for mistakes.
         answer: str
+        confirm: str
         typos: int = 0
         writer: IO[str]
         reader: IO[str]
@@ -748,8 +759,9 @@ class AltVEnv:
         with writer, reader:
             while typos < ATTEMPTS:
                 writer.write(f"{len(asking)} requested, {len(wheels)} to "
-                             f"install into {self.root}; "
-                             f"go ahead? [y/N/?] ")
+                             f"install into {self.root};\n"
+                             f"go ahead? "
+                             f"[y=>Yes/n=>No/a=>Always/?=>Explanation] ")
                 writer.flush()
                 answer = reader.readline()
 
@@ -762,13 +774,68 @@ class AltVEnv:
                     return True
                 if answer in ("", "n", "no"):
                     return False
+                if answer in ("a", "always"):
+                    # The only answer that outlives this run, so it is
+                    # the only one asked about twice.
+                    writer.write("Really never ask again? [y=>Yes/n=>No] ")
+                    writer.flush()
+                    confirm = reader.readline()
+                    if not confirm:
+                        return False
+                    if confirm.strip().lower() not in ("y", "yes"):
+                        # Not wanting this for ever is not the same as
+                        # not wanting it now, so the question comes back.
+                        # Counted, so that the pair cannot loop for ever.
+                        typos += 1
+                        continue
+
+                    # A permanent decision deserves a visible way back,
+                    # and the command that gives it.
+                    marker: Path = self.forever()
+                    marker.write_text(
+                        "This file means: do not ask again before "
+                        "installing packages\ninto this directory.  "
+                        "Delete it to be asked again.\n",
+                        encoding="utf-8")
+                    removal: str = (f"rmdir /s /q {self.root}"
+                                    if os.name == "nt"
+                                    else f"rm -rf {self.root}")
+                    writer.write(
+                        f"\nFrom now on packages will be downloaded "
+                        f"silently into\n{self.root}.\n"
+                        f"To be asked again, delete\n{marker}.\n"
+                        f"It is ALWAYS safe to delete the whole "
+                        f"directory as well, which costs\nonly a "
+                        f"download:\n    {removal}\n\n")
+                    return True
                 if answer == "?":
                     writer.write("\n" + "\n".join(
                         self.details(wheels, asking)) + "\n")
                     continue
                 typos += 1
-                writer.write("Please answer y, n, or ? for more.\n")
+                writer.write(
+                    "Please answer y, n, a for always, or ? for more.\n")
         return False
+
+    def forever(self) -> Path:
+        """Return the file that says never to ask on this machine again.
+
+        The `a` answer to the consent question writes it.  It belongs to
+        the cache rather than to any program, because it records a
+        decision by whoever uses this machine and not by any author: the
+        person has understood that packages are downloaded and would
+        rather not be asked each time a new cache needs filling.
+
+        It lives in the cache, so deleting the cache restores the
+        question, which is the same lifetime the question already had:
+        asked once per cache.  See Step 6.10 in `LOGBOOK.md`.
+
+        Returns:
+        * (`Path`): The marker, whether or not it exists.
+        """
+        # One file, named so that somebody listing the directory can
+        # guess what it does without reading anything else.
+        return self.root / "FOREVER_APPROVE"
 
     def gate(self, wheels: Sequence[Path],
              asking: Sequence[str] = ()) -> None:
@@ -785,6 +852,10 @@ class AltVEnv:
         are no approvals at all the person who started the program is
         asked once.  The author's judgement replaces the recipient's
         prompt rather than being added to it.
+
+        A `FOREVER_APPROVE` marker in the cache, written by answering `a`,
+        skips the question.  It is checked **after** the approvals, so it
+        can never hide a wheel that fails `verify`; see `forever`.
 
         Arguments:
         * `wheels` (`Sequence[Path]`):
@@ -813,6 +884,14 @@ class AltVEnv:
             return
         if self.approved() is not None:
             self.verify(wheels)
+            return
+
+        # The marker answers the question; it does **not** answer
+        # `verify`, which is above it on purpose.  A wheel that does not
+        # match what an author approved is a different matter from a
+        # person who would rather not be asked, and no amount of
+        # impatience should hide it.
+        if self.forever().is_file():
             return
         if not self.consent(wheels, asking):
             raise RuntimeError(

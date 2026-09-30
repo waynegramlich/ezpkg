@@ -125,6 +125,11 @@ def floor() -> str:
 # See Steps 6.7.4 and 6.7.7.
 FLOOR: str = floor()
 
+# The consent question, spelled once here so that changing the wording in
+# `alt_venv.py` fails in one obvious place rather than in six.
+PROMPT: str = "go ahead? [y=>Yes/n=>No/a=>Always/?=>Explanation]"
+CONFIRM: str = "Really never ask again? [y=>Yes/n=>No]"
+
 # Which cases the all-case tests exercise.  The default is one case, on
 # the grounds that this project is not shipping a virtual environment
 # and the quick run should exercise the case most likely to be the
@@ -2655,8 +2660,100 @@ class InstallTest(unittest.TestCase):
         program: Path = self.program("asked_yes", "widget")
         seen: str = self.answer_on_a_terminal(program, b"y\n")
         self.assertIn("1 requested, 1 to install", seen)
-        self.assertIn("go ahead? [y/N/?]", seen)
+        self.assertIn(PROMPT, seen)
         self.assertIn("1.2.3", seen)
+
+    def test_always_writes_the_marker_and_proceeds(self) -> None:
+        """`a` installs and records that the question is settled.
+
+        Wayne's reason for wanting this: nearly everybody approves, and
+        the point of the question is that a person understands packages
+        are being downloaded, not that they are nagged forever.
+        """
+        # The answer says where the switch is, because one keystroke
+        # making a permanent decision deserves a visible way back.
+        program: Path = self.program("asked_always", "widget")
+        seen: str = self.answer_on_a_terminal(program, b"a\ny\n")
+        self.assertIn(PROMPT, seen)
+        self.assertIn(CONFIRM, seen)
+        self.assertIn("From now on packages will be downloaded silently",
+                      seen)
+        self.assertIn("ALWAYS safe to delete the whole directory", seen)
+        self.assertIn("rm -rf", seen)
+        self.assertIn("1.2.3", seen)
+        marker: Path = program.parent / "cache" / "FOREVER_APPROVE"
+        self.assertTrue(marker.is_file())
+        self.assertIn("Delete it to be asked again",
+                      marker.read_text())
+        self.assertIn(str(marker), seen)
+
+    def test_always_asks_twice_and_takes_no_for_an_answer(self) -> None:
+        """Declining the confirmation returns to the question.
+
+        Not wanting this for ever is not the same as not wanting it now,
+        so the install is still on offer and the marker is not written.
+        """
+        # `a`, then no, then plain yes: two questions, one install.
+        program: Path = self.program("asked_twice", "widget")
+        seen: str = self.answer_on_a_terminal(program, b"a\nn\ny\n")
+        self.assertEqual(seen.count(CONFIRM), 1, seen)
+        self.assertEqual(seen.count(PROMPT), 2, seen)
+        self.assertIn("1.2.3", seen)
+        self.assertFalse(
+            (program.parent / "cache" / "FOREVER_APPROVE").exists())
+
+    def test_answers_are_case_insensitive(self) -> None:
+        """`Y` and `A` work as well as `y` and `a`.
+
+        Somebody with caps lock on, or who has seen prompts that wanted
+        capitals, should not be told they made a typo.
+        """
+        # Capitals throughout, including the confirmation.
+        program: Path = self.program("asked_caps", "widget")
+        seen: str = self.answer_on_a_terminal(program, b"A\nY\n")
+        self.assertNotIn("Please answer", seen)
+        self.assertIn("1.2.3", seen)
+        self.assertTrue(
+            (program.parent / "cache" / "FOREVER_APPROVE").is_file())
+
+    def test_the_marker_means_no_question(self) -> None:
+        """With the marker in place nothing is asked, even on a terminal.
+
+        The cache is emptied of packages first, so this is a cold fetch
+        that would otherwise ask.
+        """
+        # `a` once, then a second cold install that must be silent.
+        program: Path = self.program("marked", "widget")
+        self.answer_on_a_terminal(program, b"a\ny\n")
+        shutil.rmtree(program.parent / "cache" / "versions")
+        shutil.rmtree(program.parent / "cache" / "requests")
+        seen: str = self.answer_on_a_terminal(program, b"")
+        self.assertNotIn("go ahead?", seen)
+        self.assertIn("1.2.3", seen)
+
+    def test_the_marker_never_hides_a_mismatch(self) -> None:
+        """An altered wheel is still refused, marker or no marker.
+
+        The invariant that makes the marker safe: it answers the
+        question, and the question is only asked when an author approved
+        nothing.  A wheel that fails its approval is a different matter
+        and no amount of impatience should conceal it.
+        """
+        # Approve, corrupt the record, mark forever, then fetch cold.
+        program: Path = self.program("marked_mismatch", "widget")
+        self.assertEqual(
+            self.run_program(program, ALT_VENV_APPROVE="write").returncode,
+            0)
+        record: Path = program.with_suffix(".altvenv")
+        record.write_text(record.read_text().replace(
+            record.read_text().split()[-1], "0" * 64))
+        (program.parent / "cache" / "FOREVER_APPROVE").write_text("x\n")
+        shutil.rmtree(program.parent / "cache" / "versions")
+        shutil.rmtree(program.parent / "cache" / "requests")
+
+        done: subprocess.CompletedProcess[str] = self.run_program(program)
+        self.assertNotEqual(done.returncode, 0)
+        self.assertIn("does not match its approval", done.stderr)
 
     def test_declining_installs_nothing(self) -> None:
         """Saying no installs nothing, and nothing has run.
@@ -2667,7 +2764,7 @@ class InstallTest(unittest.TestCase):
         # Answer no, then look at what the cache holds.
         program: Path = self.program("asked_no", "widget")
         seen: str = self.answer_on_a_terminal(program, b"n\n")
-        self.assertIn("go ahead? [y/N/?]", seen)
+        self.assertIn(PROMPT, seen)
         self.assertIn("declined", seen)
         versions: Path = program.parent / "cache" / "versions"
         self.assertEqual(list(versions.iterdir()), [])
@@ -2690,8 +2787,9 @@ class InstallTest(unittest.TestCase):
         program: Path = self.program("asked_again", "widget")
         seen: str = self.answer_on_a_terminal(program, b"x\nmaybe\ny\n")
         self.assertEqual(
-            seen.count("Please answer y, n, or ? for more."), 2, seen)
-        self.assertEqual(seen.count("go ahead? [y/N/?]"), 3, seen)
+            seen.count("Please answer y, n, a for always, or ? for more."),
+            2, seen)
+        self.assertEqual(seen.count(PROMPT), 3, seen)
         self.assertIn("1.2.3", seen)
 
     def test_a_question_mark_says_more_and_asks_again(self) -> None:
@@ -2704,7 +2802,7 @@ class InstallTest(unittest.TestCase):
         # Ask for detail, then agree.
         program: Path = self.program("curious", "widget")
         seen: str = self.answer_on_a_terminal(program, b"?\ny\n")
-        self.assertEqual(seen.count("go ahead? [y/N/?]"), 2, seen)
+        self.assertEqual(seen.count(PROMPT), 2, seen)
         self.assertIn("fetched from", seen)
         self.assertIn("it says:", seen)
         self.assertIn("sha256:", seen)
@@ -2808,7 +2906,7 @@ class InstallTest(unittest.TestCase):
         program: Path = self.program("asked_enough", "widget")
         seen: str = self.answer_on_a_terminal(
             program, b"x\n" * (alt_venv.ATTEMPTS + 3))
-        self.assertEqual(seen.count("go ahead? [y/N/?]"), alt_venv.ATTEMPTS)
+        self.assertEqual(seen.count(PROMPT), alt_venv.ATTEMPTS)
         self.assertIn("declined", seen)
 
     def test_approvals_replace_the_question(self) -> None:
@@ -3036,7 +3134,7 @@ class InstallTest(unittest.TestCase):
                 alt_venv.AltVEnv, "terminal",
                 return_value=(spoken, _KeptStringIO(""))):
             self.assertFalse(venv.consent([], ["widget"]))
-        self.assertIn("go ahead? [y/N/?]", spoken.getvalue())
+        self.assertIn(PROMPT, spoken.getvalue())
         self.assertEqual(spoken.getvalue().count("go ahead?"), 1)
 
     def test_verify_without_approvals_checks_nothing(self) -> None:
