@@ -44,6 +44,7 @@ SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 import _csv
 import base64
+import contextlib
 import csv
 import datetime
 import functools
@@ -2184,20 +2185,33 @@ class InstallTest(unittest.TestCase):
         source.write_text('"""r."""\n__version__ = "1.0.0"\n')
         wheel: Path = build_wheel(source, "raced", "1.0.0", "r",
                                   self.root / "raced-dist")
+
+        # A `.data` member, so that the unpacking really does rename
+        # something besides the tree itself.  Without one, the claim
+        # below that only the staging rename fails is untested: the
+        # tracer showed the genuine rename was never reached.
+        add_data_member(wheel, "purelib", "tucked.py", 'WHERE = "data"\n')
         staged: Path = Path(shutil.copy(wheel, venv.paths()[0]))
         expected: Path = venv.paths()[2] / venv.version_key(staged)
 
         # Only the staging rename fails; the `.data` moves must not.
         genuine = Path.rename
+        allowed: list[str] = []
 
         def refuse(self: Path, target: "str | PurePath") -> Path:
             """Fail the one rename that puts a tree into place."""
             if Path(target) == expected:
                 raise OSError("another process got there first")
+            allowed.append(Path(target).name)
             return genuine(self, target)
 
         with unittest.mock.patch.object(Path, "rename", refuse):
             self.assertEqual(venv.unpack(staged), expected)
+
+        # The `.data` member really was moved, which is what makes the
+        # claim above -- that only the one rename fails -- a tested
+        # claim rather than a hopeful comment.
+        self.assertIn("tucked.py", allowed, allowed)
 
     def test_a_version_tree_names_the_interpreter(self) -> None:
         """A tree name carries version, interpreter and platform.
@@ -3455,6 +3469,118 @@ class InstallTest(unittest.TestCase):
         self.assertEqual(venv.stale(days=10.0 ** 9), [])
         self.assertEqual(len(venv.stale(days=0.0)), 1)
 
+    def test_litter_ignores_a_record_it_cannot_read(self) -> None:
+        """Junk among the records is passed over, not fatal.
+
+        A record half written by a killed program, or a file somebody
+        dropped in by hand, must not stop the sweep: the whole point of
+        a sweep is that it tidies up after accidents.
+        """
+        # Three kinds of junk, and a real record that still protects.
+        venv: alt_venv.AltVEnv = alt_venv.AltVEnv(self.root / "junk")
+        requests: Path = venv.paths()[3]
+        (requests / "truncated.json").write_text('{"request": "wid')
+        (requests / "not_an_object.json").write_text("[1, 2, 3]")
+        (requests / "no_trees.json").write_text('{"request": "x"}')
+        kept: Path = venv.paths()[2] / "widget-1.2.3-py3-none-any"
+        kept.mkdir()
+        venv.remember("widget", [kept.name], ["widget-1.2.3.whl"])
+        self.age(kept, 2 * alt_venv.CULL_GRACE)
+        self.assertEqual(venv.litter(), [])
+
+    def test_litter_steps_over_something_it_cannot_stat(self) -> None:
+        """A dangling symlink is skipped rather than crashing the sweep.
+
+        `stat` follows the link and raises, which is also what happens
+        when another program removes an entry between the listing and
+        the look.  A broken link makes that deterministic.
+        """
+        # Pointing at nothing, in the two directories that get swept.
+        venv: alt_venv.AltVEnv = alt_venv.AltVEnv(self.root / "dangling")
+        pending: Path = venv.paths()[0]
+        (pending / "gone").symlink_to(pending / "never-existed")
+        (venv.paths()[2] / "also-gone").symlink_to(pending / "nor-this")
+        self.assertEqual(venv.litter(), [])
+        self.assertEqual(venv.cull(), [])
+
+    def test_stale_steps_over_something_it_cannot_stat(self) -> None:
+        """The same, for the records `stale` looks at."""
+        # A dangling link that happens to be named like a record.
+        venv: alt_venv.AltVEnv = alt_venv.AltVEnv(self.root / "dangling_json")
+        requests: Path = venv.paths()[3]
+        (requests / "gone.json").symlink_to(requests / "never-existed")
+        self.assertEqual(venv.stale(), [])
+
+    def test_cull_survives_a_record_it_cannot_remove(self) -> None:
+        """Something unremovable is left behind rather than fatal.
+
+        A directory named like a record is the deterministic version of
+        a permission problem: `unlink` refuses it, and the sweep has to
+        carry on and collect everything else.
+        """
+        # One immovable object, one ordinary piece of litter.
+        venv: alt_venv.AltVEnv = alt_venv.AltVEnv(self.root / "immovable")
+        awkward: Path = venv.paths()[3] / "adirectory.json"
+        awkward.mkdir()
+        self.age(awkward, 2 * alt_venv.CULL_DAYS)
+        junk: Path = venv.paths()[0] / "unpacking-dead"
+        junk.mkdir()
+        self.age(junk, 2 * alt_venv.CULL_GRACE)
+
+        self.assertEqual(venv.stale(), [awkward])
+        self.assertEqual(venv.cull(), [junk])
+        self.assertTrue(awkward.is_dir())
+
+    def test_cull_survives_litter_it_cannot_remove(self) -> None:
+        """A directory it may not write to is left, and the sweep goes on."""
+        # Read only staging: the entry is named but cannot be removed.
+        venv: alt_venv.AltVEnv = alt_venv.AltVEnv(self.root / "protected")
+        pending: Path = venv.paths()[0]
+        stuck: Path = pending / "unpacking-stuck"
+        stuck.mkdir()
+        self.age(stuck, 2 * alt_venv.CULL_GRACE)
+        pending.chmod(0o500)
+        self.addCleanup(pending.chmod, 0o700)
+        self.assertEqual(venv.litter(), [stuck])
+        self.assertEqual(venv.cull(), [])
+        self.assertTrue(stuck.is_dir())
+
+    def test_a_record_that_cannot_be_touched_is_still_used(self) -> None:
+        """Failing to record a use is not a reason to refetch.
+
+        Touching the record is how a warm hit keeps a package alive.  If
+        that fails -- a read only filesystem, most plausibly -- the hit
+        is still a hit: the cache is there and using it is right.
+        """
+        # `Path.touch` is patched because no ordinary arrangement makes
+        # `utime` fail for the owner of a file.
+        target: Path = self.root / "untouchable"
+        self.assertEqual(self.install(target, "widget"), "widget 1.2.3")
+        venv: alt_venv.AltVEnv = alt_venv.AltVEnv(target)
+        with unittest.mock.patch.object(
+                alt_venv.Path, "touch",
+                side_effect=OSError("read only file system")):
+            remembered = venv.remember("widget")
+        assert remembered is not None
+        self.assertEqual(len(remembered[0]), 1, remembered)
+
+    def test_a_terminal_lost_during_the_confirmation_declines(self) -> None:
+        """The terminal going away mid-question is not an answer.
+
+        `a` is answered, the confirmation is asked, and then the
+        terminal reads empty.  Nothing is installed and no marker is
+        written, because silence must never mean yes.
+        """
+        # `a` and then end of file, on a terminal that survives reading.
+        venv: alt_venv.AltVEnv = alt_venv.AltVEnv(self.root / "hangup_twice")
+        spoken: _KeptStringIO = _KeptStringIO()
+        with unittest.mock.patch.object(
+                alt_venv.AltVEnv, "terminal",
+                return_value=(spoken, _KeptStringIO("a\n"))):
+            self.assertFalse(venv.consent([], ["widget"]))
+        self.assertIn(CONFIRM, spoken.getvalue())
+        self.assertFalse(venv.forever().exists())
+
     def test_due_is_true_until_a_sweep_happens(self) -> None:
         """The daily gate opens once, then closes until tomorrow."""
         # A cache that has never been swept is due by definition.
@@ -3675,6 +3801,236 @@ class InstallTest(unittest.TestCase):
             env=environment, capture_output=True, text=True, check=False)
         self.assertEqual(done.returncode, 0, done.stderr[-400:])
         self.assertEqual(done.stdout.split(), ["[]", "None"])
+
+
+class HarnessTest(unittest.TestCase):
+    """Exercise `bootstrap.py`'s measurement harness.
+
+    Those functions run when `bootstrap.py` is invoked with no arguments
+    to print its table, which the suite never does, so they were the
+    largest uncovered region in the project.  Three of the four are pure
+    and quick; `run_tests` is not, because it runs every case three
+    times, and stays uncovered on purpose.
+
+    Constructor:
+    * `HarnessTest()`, by `unittest` rather than by hand.
+    """
+
+    def test_measure_source_counts_the_shipping_case(self) -> None:
+        """The counts come from parsing the file, not from a table."""
+        # Case 7 is the one `README.md` teaches; see Step 6.14.
+        counts: dict[str, tuple[int, int]] = bootstrap.measure_source()
+        self.assertEqual(sorted(counts), sorted(bootstrap.MECHANISMS))
+        imports: int
+        lines: int
+        imports, lines = counts["7"]
+        self.assertEqual(imports, 1)
+        self.assertGreater(lines, 5)
+
+    def test_the_recorded_table_matches_the_measurement(self) -> None:
+        """The table in the docstring agrees with the code it describes.
+
+        This is the test that was missing on 2026-09-29, when the
+        `paste` column was found to have been three lines short in every
+        row since `SHARED_LINES` changed.  A hand pasted table drifts;
+        this is what notices.
+        """
+        # Parse the table out of the module docstring and compare.
+        counts: dict[str, tuple[int, int]] = bootstrap.measure_source()
+        document: str = bootstrap.__doc__ or ""
+        rows: int = 0
+        line: str
+        for line in document.splitlines():
+            fields: list[str] = [one.strip() for one in line.split("|")]
+            if len(fields) != 10 or not fields[1].isdigit():
+                continue
+            rows += 1
+            label: str = fields[1]
+            with self.subTest(case=label):
+                self.assertEqual(int(fields[3]), counts[label][0],
+                                 "imports column")
+                self.assertEqual(int(fields[4]), counts[label][1],
+                                 "lines column")
+                self.assertEqual(
+                    int(fields[5]),
+                    counts[label][1] + bootstrap.SHARED_LINES,
+                    "paste column")
+        self.assertEqual(rows, len(bootstrap.MECHANISMS), document[:200])
+
+    def test_directory_size_steps_over_what_it_cannot_stat(self) -> None:
+        """An entry that vanishes mid-walk is skipped, not fatal.
+
+        Only a race reaches this in earnest -- a file removed between the
+        listing and the look -- so `lstat` is patched to make it
+        deterministic.
+        """
+        # The tree measures zero rather than raising.
+        root: Path = Path(tempfile.mkdtemp(prefix="harness-gone-"))
+        self.addCleanup(shutil.rmtree, root, ignore_errors=True)
+        (root / "vanishing.bin").write_bytes(b"x" * 4096)
+        with unittest.mock.patch.object(
+                bootstrap.pathlib.Path, "lstat",
+                side_effect=OSError("it went away")):
+            self.assertEqual(bootstrap.directory_size(root), 0)
+
+    def test_directory_size_counts_a_tree(self) -> None:
+        """A tree measures more than nothing, and a missing one zero."""
+        # Blocks rather than apparent size, so only the shape is checked.
+        root: Path = Path(tempfile.mkdtemp(prefix="harness-"))
+        self.addCleanup(shutil.rmtree, root, ignore_errors=True)
+        (root / "inner").mkdir()
+        (root / "inner" / "big.bin").write_bytes(b"x" * 40000)
+        self.assertGreater(bootstrap.directory_size(root), 0)
+        self.assertEqual(bootstrap.directory_size(root / "absent"), 0)
+
+    def test_the_report_names_cases_that_failed(self) -> None:
+        """A case that fails is reported as a failure, by name.
+
+        The report's whole purpose is measurement, so the interesting
+        path is the one where a case does not work: the numbers are
+        meaningless then, and saying which case broke is the only useful
+        output.  `subprocess.run` is patched rather than breaking a real
+        index, which makes twelve cases times three repetitions
+        instantaneous instead of minutes.
+        """
+        # Every case "fails", so every case must be named.
+        refused: subprocess.CompletedProcess[str] = (
+            subprocess.CompletedProcess(
+                args=["python3"], returncode=1, stdout="",
+                stderr="pretend the index was unreachable"))
+        printed: io.StringIO = io.StringIO()
+        # `run_tests` imports `subprocess` inside itself, so there is no
+        # attribute on `bootstrap` to patch; the module is shared.
+        with (unittest.mock.patch.object(subprocess, "run",
+                                         return_value=refused),
+              contextlib.redirect_stdout(printed),
+              contextlib.redirect_stderr(io.StringIO())):
+            bootstrap.run_tests()
+
+        report: str = printed.getvalue()
+        self.assertIn("FAILURES:", report)
+        self.assertIn("pretend the index was unreachable", report)
+        label: str
+        for label in bootstrap.MECHANISMS:
+            with self.subTest(case=label):
+                self.assertIn(f"case {label}:", report)
+
+    def test_format_table_is_rectangular(self) -> None:
+        """Every line comes out exactly `TABLE_WIDTH` wide.
+
+        Including the continuation lines a long mechanism name wraps
+        onto, which is the part that would go wrong unnoticed.
+        """
+        # One short row and one whose description has to wrap.
+        rows: list[list] = [
+            ["7", "no venv, pip subprocess", 1, 10, 16, "2.7 s", "0.1 s",
+             1762],
+            ["12", ("venv(no pip), stdlib wheel and a very long tail that "
+                    "must wrap"), 7, 51, 57, "1.4 s", "0.2 s", 1714],
+        ]
+        table: str = bootstrap.format_table(rows)
+        rendered: str
+        for rendered in table.splitlines():
+            with self.subTest(line=rendered):
+                self.assertEqual(len(rendered), bootstrap.TABLE_WIDTH)
+
+        # The mechanism column wraps, so the text arrives in pieces;
+        # that it wraps at all is what this is checking.
+        self.assertIn("no venv, pip", table)
+        self.assertIn("subprocess", table)
+        self.assertIn("wrap", table)
+        self.assertEqual(table.count("| 12   |"), 1, table)
+
+
+@unittest.skipUnless(os.environ.get("ALT_VENV_REPORT"),
+                     "set ALT_VENV_REPORT to run bootstrap.py's own report")
+class ReportTest(unittest.TestCase):
+    """Run `bootstrap.py` with no arguments, which prints its table.
+
+    `run_tests` is the largest thing in this project that the suite
+    never reaches: it runs every case `REPETITIONS` times, cold and
+    warm, which is minutes of virtual environment building.  Opt in for
+    that reason, not because it is unimportant -- the table it produces
+    is what every `paste` figure in the logbook is quoted from.
+
+    Attributes:
+    * `root` (`Path`):
+      A temporary directory holding the index it is aimed at.
+    * `server` (`_IndexServer`):
+      The server publishing that index.
+    * `index_url` (`str`):
+      Its base URL.
+
+    Constructor:
+    * `ReportTest()`, by `unittest` rather than by hand.
+    """
+
+    root: Path
+    server: _IndexServer
+    index_url: str
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        """Publish this project into a throwaway index."""
+        # The cases fetch `alt_venv` itself, so that is what is served.
+        cls.root = Path(tempfile.mkdtemp(prefix="report-"))
+        module: Path = Path(__file__).resolve().parent / f"{MODULE}.py"
+        wheel: Path = build_wheel(module, DISTRIBUTION, VERSION, SUMMARY,
+                                  cls.root / "dist", floor=FLOOR)
+        cls.server, cls.index_url = serve_index(
+            build_index([wheel], cls.root / "index"))
+
+    @classmethod
+    def tearDownClass(cls) -> None:
+        """Stop the server and remove what the class built."""
+        # Stop serving before the tree underneath goes away.
+        cls.server.shutdown()
+        cls.server.server_close()
+        shutil.rmtree(cls.root, ignore_errors=True)
+
+    def test_the_report_runs_every_case_and_prints_a_table(self) -> None:
+        """The whole measurement harness, end to end.
+
+        Every case is run, timed, measured for disk use, and rendered.
+        The assertions are deliberately about shape rather than about
+        numbers: the numbers are measurements of this machine and will
+        differ on the next one.
+        """
+        # `HOME` is given a throwaway per case by `run_tests` itself, so
+        # the real `~/.alt_venv` is untouched.
+        script: Path = Path(__file__).resolve().parent / "bootstrap.py"
+        environment: dict[str, str] = dict(
+            os.environ, PIP_INDEX_URL=self.index_url,
+            BOOTSTRAP_PACKAGE=MODULE,
+            BOOTSTRAP_JSON_API=f"{self.index_url}pypi",
+            ALT_VENV_APPROVE="skip")
+        environment.pop("VIRTUAL_ENV", None)
+        done: subprocess.CompletedProcess[str] = subprocess.run(
+            [sys.executable, str(script)], env=environment,
+            cwd=str(self.root), capture_output=True, text=True, check=False)
+        self.assertEqual(done.returncode, 0, done.stderr[-2000:])
+
+        # One row per case, and every line the width the table promises.
+        label: str
+        for label in bootstrap.MECHANISMS:
+            with self.subTest(case=label):
+                self.assertIn(f"| {label:<4} |", done.stdout)
+        rules: int = done.stdout.count("+------+")
+        self.assertGreaterEqual(rules, 3, done.stdout[:400])
+
+    def test_a_nonsense_argument_gets_the_usage_line(self) -> None:
+        """An argument that names no case is refused, quickly.
+
+        The one branch of the entry point that needs neither a network
+        nor a measurement.
+        """
+        # Fast, and it costs nothing to keep honest.
+        script: Path = Path(__file__).resolve().parent / "bootstrap.py"
+        done: subprocess.CompletedProcess[str] = subprocess.run(
+            [sys.executable, str(script), "not-a-case"],
+            capture_output=True, text=True, check=False)
+        self.assertNotEqual(done.returncode, 0)
+        self.assertIn("takes no arguments", done.stderr)
 
 
 class MetadataTest(unittest.TestCase):

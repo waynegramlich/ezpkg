@@ -28,15 +28,15 @@ case is counted and is exactly the line a real program would carry --
 `~/.alt_venv` is named in the code rather than passed in, so that
 stays true.
 
-`PACKAGE` is internal in the same way.  A pasted case carries one
-literal line, `PACKAGE = "alt_venv"`, and that is the line
-`paste` counts.  Here it defaults to `coverage` and the environment
-can aim the cases at something else through `BOOTSTRAP_PACKAGE`, so
-that the test suite can point them at a locally built
-`alt_venv` wheel without editing a case body.  The `import os`
-that makes the lookup possible is harness machinery too, and is
-excluded from the count along with `sys.argv[1]` and the closing
-`print`.
+`PACKAGE` is internal, and stopped being charged on 2026-09-29.  It
+exists here so that `BOOTSTRAP_PACKAGE` can aim the cases at a locally
+built wheel without editing a case body, and the `import os` that makes
+that lookup possible is harness machinery in the same way.  A real
+pasted program does not need the variable at all: it spells `alt_venv`
+in the four places that use it, which costs no line, so charging a line
+for the name overstated what a program actually carries.  `PACKAGE`,
+`import os`, `sys.argv[1]` and the closing `print` are all excluded from
+the count for that reason.
 
 The `try` wrapper is the one piece of harness machinery that `paste`
 does charge, because a pasted case really does carry it.  Here it sits
@@ -44,9 +44,11 @@ at the entry point so that no case body has to be re-indented, but a
 program with one case pasted into it spells the same three lines around
 that case: `try:`, `except Exception as error:`, and the `raise
 SystemExit`.  Without it a missing network is a traceback rather than a
-message, which is the `0whwnn` issue.  Those three lines are why
-`SHARED_LINES` is 7 and not 4, and every `paste` figure is three higher
-than it was before 2026-09-26.
+message, which is the `0whwnn` issue.  Those three lines, plus the three
+module level imports, are the whole of `SHARED_LINES`, which is 6.  The
+`paste` column below was corrected twice on 2026-09-29: it had been left
+at `lines + 4` from before the wrapper was charged, and then dropped by
+one again when `PACKAGE` stopped being charged.
 
 `JSON_API` is the same arrangement for the same reason.  Cases 3 and
 12 read PyPI's JSON API with `urllib`, which knows nothing of
@@ -66,29 +68,29 @@ user would type.  The real `~/.alt_venv` is never touched.
 +------+-----------------+---------+-------+-------+--------+--------+--------+
 | case | mechanism       | imports | lines | paste | cold   | warm   | size   |
 +------+-----------------+---------+-------+-------+--------+--------+--------+
-| 1    | venv(pip), pip  | 4       | 20    | 24    | 6.12 s | 0.16 s | 16981  |
+| 1    | venv(pip), pip  | 4       | 19    | 25    | 6.12 s | 0.16 s | 16981  |
 |      | in process      |         |       |       |        |        |        |
-| 2    | venv(pip), pip  | 4       | 20    | 24    | 6.68 s | 0.15 s | 16981  |
+| 2    | venv(pip), pip  | 4       | 19    | 25    | 6.68 s | 0.15 s | 16981  |
 |      | subprocess      |         |       |       |        |        |        |
-| 3    | no venv, stdlib | 5       | 45    | 49    | 1.41 s | 0.15 s | 1682   |
+| 3    | no venv, stdlib | 5       | 45    | 51    | 1.41 s | 0.15 s | 1682   |
 |      | wheel           |         |       |       |        |        |        |
-| 4    | venv(pip), then | 5       | 26    | 30    | 6.85 s | 0.16 s | 1790   |
+| 4    | venv(pip), then | 5       | 25    | 31    | 6.85 s | 0.16 s | 1790   |
 |      | delete pip      |         |       |       |        |        |        |
-| 5    | venv(no pip),   | 4       | 20    | 24    | 2.65 s | 0.15 s | 1790   |
+| 5    | venv(no pip),   | 4       | 19    | 25    | 2.65 s | 0.15 s | 1790   |
 |      | pip in proc     |         |       |       |        |        |        |
-| 6    | no venv, pip in | 1       | 11    | 15    | 2.65 s | 0.14 s | 1762   |
+| 6    | no venv, pip in | 1       | 10    | 16    | 2.65 s | 0.14 s | 1762   |
 |      | process         |         |       |       |        |        |        |
-| 7    | no venv, pip    | 1       | 11    | 15    | 2.73 s | 0.14 s | 1762   |
+| 7    | no venv, pip    | 1       | 10    | 16    | 2.73 s | 0.14 s | 1762   |
 |      | subprocess      |         |       |       |        |        |        |
-| 8    | no venv, pip    | 2       | 15    | 19    | 4.22 s | 0.15 s | 1762   |
+| 8    | no venv, pip    | 2       | 14    | 20    | 4.22 s | 0.15 s | 1762   |
 |      | from wheel      |         |       |       |        |        |        |
-| 9    | as 6 plus --no- | 1       | 11    | 15    | 2.62 s | 0.14 s | 1698   |
+| 9    | as 6 plus --no- | 1       | 11    | 17    | 2.62 s | 0.14 s | 1698   |
 |      | compile         |         |       |       |        |        |        |
-| 10   | as 7 plus --no- | 1       | 11    | 15    | 2.69 s | 0.14 s | 1698   |
+| 10   | as 7 plus --no- | 1       | 11    | 17    | 2.69 s | 0.14 s | 1698   |
 |      | compile         |         |       |       |        |        |        |
-| 11   | as 4 but        | 5       | 26    | 30    | 5.25 s | 0.15 s | 1790   |
+| 11   | as 4 but        | 5       | 26    | 32    | 5.25 s | 0.15 s | 1790   |
 |      | subprocess      |         |       |       |        |        |        |
-| 12   | venv(no pip),   | 7       | 51    | 55    | 1.42 s | 0.16 s | 1714   |
+| 12   | venv(no pip),   | 7       | 51    | 57    | 1.42 s | 0.16 s | 1714   |
 |      | stdlib wheel    |         |       |       |        |        |        |
 +------+-----------------+---------+-------+-------+--------+--------+--------+
 
@@ -177,7 +179,7 @@ Case 12 exists to answer a question about the instructions rather than
 to be shipped.  Those asked for a venv built with `venv`, no spawning
 of `python3 -m pip install`, only `venv` and standard libraries, and
 an `importlib` import.  Case 12 is the only one of the twelve that
-does all four, and it costs 55 pasted lines against case 3's 49.  The
+does all four, and it costs 57 pasted lines against case 3's 51.  The
 extra 6 lines and 32 KB buy a virtual environment that nothing then
 reads, which is finding 3 of the log book arriving from yet another
 direction.
@@ -246,9 +248,8 @@ def main() -> None:
                 "platbase": str(root), "installed_base": str(root)}))
             if not (target / PACKAGE).is_dir():
                 from pip._internal.cli.main import main as pip_main
-                if pip_main(["install", "--no-input",
-                             "--disable-pip-version-check", "--target",
-                             str(target), PACKAGE]):
+                if pip_main(["install", "--no-input", "--target", str(target),
+                             "--disable-pip-version-check", PACKAGE]):
                     raise RuntimeError("pip failed")
             sys.path.insert(0, str(target))
             importlib.invalidate_caches()
@@ -268,9 +269,8 @@ def main() -> None:
                 "platbase": str(root), "installed_base": str(root)}))
             if not (target / PACKAGE).is_dir():
                 subprocess.run([sys.executable, "-m", "pip", "install",
-                                "--no-input",
-                                "--disable-pip-version-check", "--target",
-                                str(target), PACKAGE], check=True)
+                                "--no-input", "--disable-pip-version-check",
+                                "--target", str(target), PACKAGE], check=True)
             sys.path.insert(0, str(target))
             importlib.invalidate_caches()
             module = importlib.import_module(PACKAGE)
@@ -336,9 +336,8 @@ def main() -> None:
             sys.path.insert(0, str(target))
             if not (target / PACKAGE).is_dir():
                 from pip._internal.cli.main import main as pip_main
-                if pip_main(["install", "--no-input",
-                             "--disable-pip-version-check", "--target",
-                             str(target), PACKAGE]):
+                if pip_main(["install", "--no-input", "--target", str(target),
+                             "--disable-pip-version-check", PACKAGE]):
                     raise RuntimeError("pip failed")
                 shutil.rmtree(target / "pip", ignore_errors=True)
                 for leftover in target.glob("pip-*.dist-info"):
@@ -361,9 +360,8 @@ def main() -> None:
                 "platbase": str(root), "installed_base": str(root)}))
             if not (target / PACKAGE).is_dir():
                 from pip._internal.cli.main import main as pip_main
-                if pip_main(["install", "--no-input",
-                             "--disable-pip-version-check", "--target",
-                             str(target), PACKAGE]):
+                if pip_main(["install", "--no-input", "--target", str(target),
+                             "--disable-pip-version-check", PACKAGE]):
                     raise RuntimeError("pip failed")
             sys.path.insert(0, str(target))
             importlib.invalidate_caches()
@@ -373,9 +371,8 @@ def main() -> None:
             target = pathlib.Path.home() / ".alt_venv"
             if not (target / PACKAGE).is_dir():
                 from pip._internal.cli.main import main as pip_main
-                if pip_main(["install", "--no-input",
-                             "--disable-pip-version-check", "--target",
-                             str(target), PACKAGE]):
+                if pip_main(["install", "--no-input", "--target", str(target),
+                             "--disable-pip-version-check", PACKAGE]):
                     raise RuntimeError("pip failed")
             sys.path.insert(0, str(target))
             importlib.invalidate_caches()
@@ -386,9 +383,8 @@ def main() -> None:
             target = pathlib.Path.home() / ".alt_venv"
             if not (target / PACKAGE).is_dir():
                 subprocess.run([sys.executable, "-m", "pip", "install",
-                                "--no-input",
-                                "--disable-pip-version-check", "--target",
-                                str(target), PACKAGE], check=True)
+                                "--no-input", "--disable-pip-version-check",
+                                "--target", str(target), PACKAGE], check=True)
             sys.path.insert(0, str(target))
             importlib.invalidate_caches()
             module = importlib.import_module(PACKAGE)
@@ -401,9 +397,8 @@ def main() -> None:
                 sys.path.insert(0, str(next(
                     pathlib.Path(shipped).glob("pip-*.whl"))))
                 from pip._internal.cli.main import main as pip_main
-                if pip_main(["install", "--no-input",
-                             "--disable-pip-version-check", "--target",
-                             str(target), PACKAGE]):
+                if pip_main(["install", "--no-input", "--target", str(target),
+                             "--disable-pip-version-check", PACKAGE]):
                     raise RuntimeError("pip failed")
             sys.path.insert(0, str(target))
             importlib.invalidate_caches()
@@ -523,7 +518,7 @@ def main() -> None:
     # has no PEP 723 block, so nothing is fetched.  See `0cctfd` and Step
     # 6.7.8.  Harness machinery, so `paste` does not count it.
     if hasattr(module, "AltVEnv"):
-        module.AltVEnv().install()
+        module.AltVEnv().install(bootstrap=sys.argv[1])
 
     print(f"{PACKAGE}: module {module.__name__} "
           f"version {module.__version__} from {module.__file__}")
@@ -547,7 +542,7 @@ MECHANISMS = {
 # imports, PACKAGE, and the three of the `try` wrapper that turns a
 # failed fetch into one line of diagnosis.  This is the difference
 # between `lines` and `paste`.
-SHARED_LINES = 7
+SHARED_LINES = 6
 REPETITIONS = 3
 COLUMNS = ["case", "mechanism", "imports", "lines", "paste", "cold",
            "warm", "size"]

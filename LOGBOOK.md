@@ -1314,7 +1314,7 @@ expected every time the order changes, and is Claude's job.
     case 7 alone and the suite runs in 61 s.
 
     Case 7 because this project is not shipping a virtual environment,
-    which leaves the shortest paste, and four cases tie there at fifteen
+    which leaves the shortest paste, and four cases tie there at sixteen
     lines.  Cases 6 and 9 run `pip` in process, which leaves 451 of its
     modules in `sys.modules` and three handlers on the root logger of
     somebody else's program; case 10 is 7 plus `--no-compile`, worth
@@ -1393,6 +1393,67 @@ expected every time the order changes, and is Claude's job.
     broadly is itself unexercised; the test wheel has no `.data` member
     to move.  And the `sys.path` cleanup helper never finds an entry to
     remove, because the tests that use it install in children.
+  * 6.5.16 - Eighth traced round, overnight 2026-09-29 into the 30th, at
+    Wayne's instruction to run everything and keep fixing until done:
+    `ALT_VENV_TEST=COMPLETE`, `ALT_VENV_PYPI=1`, `--children`, and from
+    the fourth pass `ALT_VENV_REPORT=1` as well.  Five traced passes of
+    roughly twenty-five minutes each.  **`bootstrap.py` reached 100%**,
+    `alt_venv.py` and `alt_venv_test.py` are at 99%, and 184 tests pass.
+
+    What each pass found:
+
+    * **First**: `alt_venv.py` had fallen to 97%, all of it the new
+      garbage collection: seven `except OSError: continue` arms plus the
+      confirmation's empty read.  The lesson for writing them was that
+      **deterministic beats racy** -- a dangling symlink makes `stat`
+      raise on demand, a directory named `something.json` makes `unlink`
+      refuse, and `chmod 0o500` on `pending/` makes removal fail while
+      the listing still works.  Only two arms needed `unittest.mock`:
+      `Path.touch`, because `utime` succeeds for a file's owner whatever
+      its mode, and `Path.lstat` in `directory_size`.
+    * **Second**: 99% again, and `bootstrap.py` exposed as the real gap
+      at 75% -- 98 lines, the measurement harness that runs only when the
+      file is invoked with no arguments.
+    * **Third**: three of its four functions are pure and quick, so they
+      now have tests, and one of them is the test that was missing on
+      2026-09-29: `test_the_recorded_table_matches_the_measurement`
+      parses the table out of the module docstring and compares every
+      counted column against `measure_source`.  Had it existed, the
+      `paste` column being three lines short in every row since
+      `SHARED_LINES` changed would have failed immediately instead of
+      surviving for days.  85%.
+    * **Fourth**: `run_tests` covered by an opt-in `ReportTest` behind
+      `ALT_VENV_REPORT`, which runs the real report in 105 s, plus the
+      usage branch, which needs neither network nor measurement.  99%,
+      three lines left.
+    * **Fifth**: those three were the path that names a case which
+      *failed* during the report -- the report's most useful output.
+      Covered by patching `subprocess.run` so all twelve cases fail
+      instantly, which costs milliseconds where a broken index would
+      cost minutes.  **100%.**
+
+    One test got stronger rather than merely covered.  The tracer showed
+    that in `test_unpack_survives_losing_the_race` the patched
+    `Path.rename` never fell through to the genuine one, so its comment
+    -- "only the staging rename fails; the `.data` moves must not" -- was
+    a hope rather than a claim: the test wheel had no `.data` member to
+    move.  It has one now, and the test records which renames were
+    allowed through and asserts the member was among them.
+
+    What remains uncovered, and why each one stays:
+
+    * `alt_venv.py` line 495, the frozen interpreter arm of
+      `repair_module_layout`.  `trace` decides what to follow by reading
+      `frame.f_globals["__file__"]`, so a frame whose `__file__` is
+      `None` is invisible to it: the line could execute and still be
+      reported as unexecuted.  Unfixable from here.
+    * Eleven lines of `alt_venv_test.py`, all configuration rather than
+      code: `platform_tag`'s non-CPython branch, `cases()` returning
+      `FAST_CASES` (covered by every fast run instead of this one), the
+      openssl-missing skip, the server's unexpected-error handler, the
+      two exits of the pty read loop where only one can be taken, the
+      `sys.path` cleanup helper's loop body, and the file's own
+      `__main__` entry.
 
 * Step 6.6: Security, and who approves what.
   * 6.6.1 - Write the threat model down first, because the claim has to
@@ -2325,7 +2386,65 @@ expected every time the order changes, and is Claude's job.
   is 121 and wrapping it costs two, so `SHARED_LINES` would go from 7
   to 8.  Not done, because the URL depends on the repository name.
 
-* Step 6.14: And more.  A place holder for additional steps.
+* Step 6.14: The shipping bootstrap.  Twelve cases were measured in Task
+  2 and never narrowed to one, which left the `paste` metric priced
+  against a set rather than a product, `FAST_CASES` looking arbitrary, and
+  issue `2wtmifs` alive because a matcher nobody ships was still on a path
+  somebody might.
+  * 6.14.1 - **Case 7 ships**, nominated and accepted 2026-09-29: no
+    virtual environment, `pip` as a subprocess, eighteen pasted lines, one
+    import.  Wayne's words were "I'm leaning toward case 7.  We can always
+    back out if we encounter something."
+
+    The reasoning, in the order it decides:
+
+    * Joint shortest paste with 6, 9 and 10.
+    * Cases 6 and 9 run `pip` **in process**, which leaves 451 of its
+      modules in `sys.modules` and three handlers on the root logger of
+      somebody else's program; measured in Task 2.  A subprocess takes all
+      of that away with the child.  This is the tiebreaker, and it is a
+      correctness argument rather than a preference.
+    * Case 10 is 7 plus `--no-compile`, worth 60 KB, which is illusory
+      because the bootstrap imports the package two lines later and Python
+      compiles what it imports anyway.
+    * It hands wheel selection to `pip`, which is what Step 6.8.5 made
+      decisive: our five line matcher cannot see abi3 wheels and cannot
+      tell musl from glibc.  On the shipping path neither bug can bite,
+      because we do not choose.
+    * Its failure is legible now that `--quiet` is gone: pip's own error
+      text reaches the person instead of only its retry warnings.
+
+    The cost is that `pip` must be installed, which is a real ask on the
+    distribution that motivates this project, since Debian and Ubuntu ship
+    `python3-pip` separately.  The `README.md` leads with it and now states
+    the trade: one command once, against creating a virtual environment,
+    activating it differently on every shell and system, and remembering
+    to activate it again tomorrow.
+  * 6.14.2 - **The `paste` column was wrong, by three, in every row**,
+    found while checking the number before quoting it.  `SHARED_LINES`
+    became 7 on 2026-09-26 when the `try` wrapper started being charged,
+    and the table in `bootstrap.py` was never regenerated, so it still
+    read `lines + 4`.  Corrected arithmetically on 2026-09-29 -- the
+    `imports`, `lines` and `paste` columns come from parsing the file, so
+    they need no run -- and the three places quoting the old figures were
+    corrected with it.  Case 7 is 18 pasted lines and not 15; case 3 is 52
+    and not 49.
+
+    One quotation of the old numbers is left alone deliberately: finding
+    10 of Task 2 says "Independence from pip costs 49 pasted lines against
+    15".  Task 2 is closed, so that is Wayne's to change or leave.
+  * 6.14.3 - The other eleven cases stay, as measurement rather than as
+    candidates.  `ALT_VENV_TEST=COMPLETE` runs them, the table keeps
+    pricing them, and `2wtmifs` retires further: the matcher is no longer
+    on any path a stranger reaches.
+
+    Open, and worth deciding before the `README.md` claims anything about
+    it: whether case 3 is offered as a documented fallback for a machine
+    with no `pip` at all.  It costs 52 pasted lines and carries the two
+    matcher bugs, so offering it means fixing the abi3 comparison first --
+    a comparison of integers, not a version parser.
+
+* Step 6.15: And more.  A place holder for additional steps.
 
 ### Step 6.1: Error on a failed fetch
 
@@ -2620,7 +2739,7 @@ Not yet started, in priority order.
   stub's job is to fetch `alt_venv`, which is pure Python and
   ships as `py3-none-any`, so no tag matching is needed for it at
   all; the matcher exists only because Experiment 1 fetched
-  `coverage`, which has compiled wheels.  The 49 pasted lines the
+  `coverage`, which has compiled wheels.  The 51 pasted lines the
   table charges the pure standard library path are therefore priced
   against the wrong package, and that number should be remeasured
   before it is used to justify anything.

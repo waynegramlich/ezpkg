@@ -356,6 +356,9 @@ class AltVEnv:
     is can read the answer without leaving it.
 
     Attributes:
+    * `bootstrap` (`str`):
+      Which bootstrap the program carries, as `install` was told, or the
+      empty string.  Nothing reads it yet; see Step 6.12 in `LOGBOOK.md`.
     * `readme` (`Path`):
       The `README.md` written into `root`.
     * `root` (`Path`):
@@ -368,6 +371,7 @@ class AltVEnv:
     # Set by the constructor; see `Attributes:` above.
     readme: Path
     root: Path
+    bootstrap: str = ""
 
     def __init__(self, root: Path | None = None) -> None:
         """AltVEnv Package Cache.
@@ -1191,7 +1195,7 @@ class AltVEnv:
     Requirements = list[Requirement] | tuple[Requirement, ...]
 
     @overload
-    def install(self) -> None: ...
+    def install(self, *, bootstrap: str = "") -> None: ...
 
     @overload
     def install(self, requirements: str,
@@ -1202,7 +1206,7 @@ class AltVEnv:
                 argv: Sequence[str] = ()) -> list[ModuleType]: ...
 
     def install(self, requirements: str | Requirements | None = None,
-                argv: Sequence[str] = ()
+                argv: Sequence[str] = (), *, bootstrap: str = ""
                 ) -> ModuleType | list[ModuleType] | None:
         """Install packages if they are missing, and import them.
 
@@ -1266,6 +1270,14 @@ class AltVEnv:
           than to one requirement, and they follow this method's own
           arguments, so `pip` lets them win where it takes the last of
           a repeated option.
+        * `bootstrap` (`str`):
+          Which bootstrap the calling program carries, as the pasted code
+          names itself -- `"7"` for the one `README.md` teaches.  Kept on
+          the instance as `self.bootstrap` and **read by nothing yet**:
+          Step 6.12 wants to notice a pasted bootstrap that has gone
+          stale, and telling it which one this is costs the caller no
+          line and saves it guessing.  An empty string means the caller
+          did not say.
 
         Returns:
         * (`ModuleType | list[ModuleType] | None`): The imported module
@@ -1291,6 +1303,9 @@ class AltVEnv:
           form.  The no-argument form imports nothing and so cannot
           raise it.
         """
+        # Remembered for Step 6.12, which has not been written yet.
+        self.bootstrap = bootstrap
+
         # No arguments means whatever the program declared.  The
         # interpreter is checked first, because a program on the wrong
         # Python should be told that rather than handed packages.

@@ -40,28 +40,135 @@ after that the network is no longer needed.
 
 ## How an `AltVEnv` Enabled Program Works.
 
-The general layout of an `AltVEnv` enabled program looks as follows:
-<!-- Claude: I think it would be better to have a real code example here. -->
-```python
-#!/usr/bin/env python3
-# Python Metadata in [TOML](https://toml.io/en/) format goes here.
-"""Program Doc. string"""
+Here is a complete program.  Everything in it is real: this is the code,
+not a sketch of it.
 
-# Import standard library modules first:
-import standard_library_package1
-...
-import standard_library_packageN
-
-# A modest multi-line bootstrap that ensures `AltVEnv` is downloaded is next.
-# After the download, the Meta data at the front is processed to further
-# download and cache the correct versions of all necessary modules.
-
-import non_standard_library_module1
-...
-import non_standard_library_moduleN
-
-# The rest of the code goes here...
 ```
+01: #!/usr/bin/env python3
+02: # /// script
+03: # requires-python = ">=3.11"
+04: # dependencies = [
+05: #   "requests<3",
+06: #   "python-dateutil",
+07: # ]
+08: # ///
+09: """Report yesterday's weather."""
+10:
+11: # Needed for the AltVEnv bootstrap code.
+12: import importlib
+13: import pathlib
+14: import subprocess
+15: import sys
+16:
+17: # Beginning of the AltVEnv bootstrap code.
+18: try:
+19:     target = pathlib.Path.home() / ".alt_venv"
+20:     if not (target / "alt_venv").is_dir():
+21:         subprocess.run([sys.executable, "-m", "pip", "install",
+22:                         "--no-input", "--disable-pip-version-check",
+23:                         "--target", str(target), "alt_venv"], check=True)
+24:     sys.path.insert(0, str(target))
+25:     importlib.invalidate_caches()
+26:     importlib.import_module("alt_venv").AltVEnv().install(bootstrap="7")
+27: except Exception as error:  # noqa: BLE001
+28:     raise SystemExit(f"cannot fetch alt_venv: {error}") from None
+29:
+30: import requests  # type: ignore[import-not-found]
+31: import dateutil.parser  # type: ignore[import-not-found]
+32:
+33: print(requests.__name__, dateutil.parser.__name__)
+```
+
+The line numbers are for reference and are **not** part of the program;
+there is a copy without them further down, for pasting.
+
+* **`01`** -- The shebang, which lets the file be run directly as
+  `./weather.py` on macOS and Linux once it is marked executable.  Windows
+  ignores it and runs the file through its own launcher.
+* **`02`-`08`** -- The metadata block: what your program needs, and the
+  only part of this you write yourself.  `02` and `08` are its fences, and
+  `script` on `02` names the kind of block it is.  Every line carries a
+  `#`, so Python sees comments and reads none of it.
+* **`03`** -- The oldest Python your program will run on.  The syntax is
+  [PEP 440](https://peps.python.org/pep-0440/)'s, the same one `pip` uses,
+  so `>=3.11` and `>=3.11,<4` both mean what they look like.  `AltVEnv`
+  checks this before fetching anything and says so plainly if the Python
+  is too old.
+* **`04`-`07`** -- What to install, one string each, in
+  [PEP 508](https://peps.python.org/pep-0508/) form: a name, optionally
+  followed by a [PEP 440](https://peps.python.org/pep-0440/) version
+  constraint.  `"requests<3"` means any `requests` before 3;
+  `"python-dateutil"` means any version at all.  **These are the names the
+  index knows, which are not always the names you import** --
+  `python-dateutil` is imported as `dateutil`, as line `31` shows.
+* **`09`** -- The docstring.  It is still the docstring even with eight
+  lines above it, because comments are not statements.
+* **`11`-`15`** -- The standard library imports the bootstrap needs.  They
+  are at the top of the file, where Python expects imports, rather than
+  buried inside the bootstrap: your program very likely wants `pathlib`
+  and `sys` anyway, and may want `subprocess` too.
+* **`17`** -- Where the pasted part begins.  Everything from here to `28`
+  is the bootstrap, unchanged from this page.
+* **`18`, `27`, `28`** -- The wrapper that turns any failure -- no
+  network, no `pip`, a package you refused -- into one line of explanation
+  instead of forty lines of traceback.  `# noqa: BLE001` on `27` tells
+  `ruff` that catching everything is deliberate, and `from None` on `28`
+  hides the machinery that led here.
+* **`19`-`20`** -- Where the cache goes, and the test that skips the whole
+  business when it is already there.  That test is why a second run costs
+  about a seventh of a second.
+* **`21`-`23`** -- The fetch.  `--target` installs into the cache instead
+  of into your Python, `--no-input` makes sure `pip` never stops to ask
+  anybody anything, and `--disable-pip-version-check` keeps `pip` from
+  mentioning itself.
+* **`24`-`25`** -- Put the cache first on the import path, then tell
+  Python that the filesystem has changed underneath it.  Two statements
+  that could share a line with a semicolon, and do not, because they do
+  unrelated things.
+* **`26`** -- Import `AltVEnv` by a name held in a string, which is what
+  `importlib` is for, and call the whole of the API.  It reads the block
+  on lines `02`-`08`, fetches what it names, and imports nothing itself --
+  your own `import` statements do that.  Bind it to a name here if your
+  program wants to call `install("something")` later on.  `bootstrap="7"`
+  just says which version of this pasted code you copied, so that a
+  future release can tell you when a better one exists.
+* **`30`-`31`** -- Your program's own imports, which have to come
+  **after** the bootstrap because the packages do not exist until it has
+  run.  `# type: ignore[import-not-found]` tells `mypy` not to complain
+  about a package that is not installed on the machine doing the
+  checking; on your own machine, where you have them, you will not need
+  it.  `ruff` has no objection to imports here at all.
+* **`33`** -- Your program.
+
+### The Part You Paste
+
+Lines `17` to `28`, without the numbers.  You write the metadata block
+yourself, and your program's own imports go after this:
+
+```python
+# Beginning of the AltVEnv bootstrap code.
+try:
+    target = pathlib.Path.home() / ".alt_venv"
+    if not (target / "alt_venv").is_dir():
+        subprocess.run([sys.executable, "-m", "pip", "install",
+                        "--no-input", "--disable-pip-version-check",
+                        "--target", str(target), "alt_venv"], check=True)
+    sys.path.insert(0, str(target))
+    importlib.invalidate_caches()
+    importlib.import_module("alt_venv").AltVEnv().install(bootstrap="7")
+except Exception as error:  # noqa: BLE001
+    raise SystemExit(f"cannot fetch alt_venv: {error}") from None
+```
+
+Because the metadata format is the standard one, the same file also runs
+unchanged under [`uv`](https://docs.astral.sh/uv/): `uv run weather.py`
+reads the block, installs into its own cache, and never reaches this
+bootstrap at all.
+
+One alternative worth knowing about: a program that works out what it needs
+while it runs -- the database driver named in a configuration file, say --
+cannot say so in a static block.  For that, `install("some-package")` takes
+the requirement as an argument and returns the imported module.
 
 <!-- Claude: Feel free to propose text below this line. -->
 
@@ -93,6 +200,13 @@ does ask are worth stating plainly.
   That one command is the only step in this whole document that needs
   administrator rights, and only on those systems.  `AltVEnv` itself never
   asks for any.
+
+  It is worth being clear about what this trade buys you, since needing
+  `pip` is a requirement of sorts.  Installing `pip` is one command, once,
+  on one machine.  The alternative it replaces is creating a virtual
+  environment, activating it -- differently on every shell and every
+  operating system -- remembering to activate it again tomorrow, and
+  explaining all of that to whoever else runs the program.
 
   You will know soon enough if `pip` is missing, because Python says so and
   the program stops before anything is downloaded:
@@ -267,3 +381,5 @@ code, and everybody who runs your program afterwards gets exactly the
 packages you approved or a refusal that names the mismatch.  While you are
 still deciding what your program needs, `ALT_VENV_APPROVE=skip` turns the
 checking off for your own runs.
+
+[spec]: https://packaging.python.org/en/latest/specifications/inline-script-metadata/
