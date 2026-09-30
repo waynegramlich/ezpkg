@@ -159,11 +159,15 @@ rm -rf ~/.alt_venv                       #  macOS, Linux
 On any system you can also simply delete the directory in a file browser
 or file manager.
 
-Packages that have not been used for a long while are expected to be
-removed on their own eventually, for the same reason: a package nobody has
-needed for months is worth less than the space it occupies, and getting it
-back costs one download.  **That automatic clean up is designed but not yet
-written**, so for now the directory grows until you clear it.
+**Old packages are cleared out on their own.**  A package that no program
+has needed for about six months is removed, for the same reason: it is worth
+less than the space it occupies, and getting it back costs one download.
+Using a package counts as needing it, so something installed two years ago
+and used this morning stays.  Anything left behind by a program that was
+interrupted mid-download is cleared out too.
+
+The sweep happens at most once a day, when a program is about to fetch
+something anyway, so you will never notice it.
 
 **Programs share the directory safely, and nothing is stored twice.**  When two
 programs want the same package, the second one recognises that the identical

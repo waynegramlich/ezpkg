@@ -3213,6 +3213,272 @@ class InstallTest(unittest.TestCase):
         self.assertEqual(done.returncode, 0, done.stderr[-400:])
         self.assertEqual(done.stdout.strip(), "0")
 
+    def age(self, path: Path, seconds: float) -> None:
+        """Back-date something, which is how this suite tells time.
+
+        No clock is injected and nothing sleeps: the cache's own notion of
+        age is file modification time, so `os.utime` is an exact lever
+        where a sleep would be a slow approximation.  See Step 6.11.1 in
+        `LOGBOOK.md`.
+
+        Arguments:
+        * `path` (`Path`):
+          What to back-date.
+        * `seconds` (`float`):
+          How far into the past to move it.
+        """
+        # Both times, since something reading `atime` would be as
+        # confused as something reading `mtime`.
+        when: float = path.stat().st_mtime - seconds
+        os.utime(path, (when, when))
+
+    def test_litter_finds_abandoned_staging(self) -> None:
+        """A directory left under `pending/` is litter once it is old."""
+        # A killed unpack leaves exactly this behind.
+        venv: alt_venv.AltVEnv = alt_venv.AltVEnv(self.root / "staging")
+        pending: Path = venv.paths()[0]
+        stale: Path = pending / "unpacking-abandoned"
+        stale.mkdir()
+        (stale / "half.py").write_text("")
+        self.assertEqual(venv.litter(), [])
+        self.age(stale, 2 * alt_venv.CULL_GRACE)
+        self.assertEqual(venv.litter(), [stale])
+
+    def test_litter_spares_a_young_download(self) -> None:
+        """Another program's download in progress is left alone.
+
+        The grace period is about concurrency, not tidiness: a fetch
+        happening right now lives in `pending/` and belongs to somebody.
+        """
+        # Young, therefore somebody else's business.
+        venv: alt_venv.AltVEnv = alt_venv.AltVEnv(self.root / "young")
+        busy: Path = venv.paths()[0] / "tmpsomething"
+        busy.mkdir()
+        self.assertEqual(venv.litter(), [])
+
+    def test_litter_finds_a_tree_nothing_names(self) -> None:
+        """A `versions/` tree no request record names is unreachable."""
+        # `install` finds trees through the records, so an unnamed tree
+        # can never be found again however good it looks.
+        venv: alt_venv.AltVEnv = alt_venv.AltVEnv(self.root / "orphan")
+        versions: Path = venv.paths()[2]
+        orphan: Path = versions / "widget-9.9.9-py3-none-any"
+        orphan.mkdir()
+        self.age(orphan, 2 * alt_venv.CULL_GRACE)
+        self.assertEqual(venv.litter(), [orphan])
+
+    def test_litter_spares_a_tree_a_record_names(self) -> None:
+        """A tree still spoken for survives however old it is."""
+        # Age is not the test for these; being named is.
+        venv: alt_venv.AltVEnv = alt_venv.AltVEnv(self.root / "spoken")
+        versions: Path = venv.paths()[2]
+        kept: Path = versions / "widget-1.2.3-py3-none-any"
+        kept.mkdir()
+        venv.remember("widget", [kept.name], ["widget-1.2.3.whl"])
+        self.age(kept, 100 * alt_venv.CULL_GRACE)
+        self.assertEqual(venv.litter(), [])
+
+    def test_cull_removes_the_litter_and_says_what_it_took(self) -> None:
+        """`cull` removes what `litter` names and returns it."""
+        # One of each kind, and a good tree that must survive.
+        venv: alt_venv.AltVEnv = alt_venv.AltVEnv(self.root / "sweep")
+        pending: Path
+        versions: Path
+        pending, _, versions, _ = venv.paths()
+        junk: Path = pending / "unpacking-dead"
+        junk.mkdir()
+        orphan: Path = versions / "gone-0.0.1-py3-none-any"
+        orphan.mkdir()
+        kept: Path = versions / "widget-1.2.3-py3-none-any"
+        kept.mkdir()
+        venv.remember("widget", [kept.name], ["widget-1.2.3.whl"])
+        path: Path
+        for path in (junk, orphan, kept):
+            self.age(path, 2 * alt_venv.CULL_GRACE)
+
+        self.assertEqual(venv.cull(), sorted([junk, orphan]))
+        self.assertFalse(junk.exists())
+        self.assertFalse(orphan.exists())
+        self.assertTrue(kept.is_dir())
+
+    def test_cull_collects_a_wheel_nothing_names(self) -> None:
+        """An unreferenced wheel is litter, like an unreferenced tree.
+
+        This reverses an earlier decision to leave `wheels/` alone, and
+        the reason is that records now age out: their wheels would be the
+        one thing in the cache that grew for ever.  See Step 6.11.
+        """
+        # Old and named by no record, so nothing can ever look at it.
+        venv: alt_venv.AltVEnv = alt_venv.AltVEnv(self.root / "dead_wheel")
+        wheel: Path = venv.paths()[1] / "widget-1.2.3-py3-none-any.whl"
+        wheel.write_bytes(b"not really a wheel")
+        self.age(wheel, 100 * alt_venv.CULL_GRACE)
+        self.assertEqual(venv.cull(), [wheel])
+        self.assertFalse(wheel.exists())
+
+    def test_cull_keeps_a_wheel_a_record_names(self) -> None:
+        """A live record protects its wheels, however old they are.
+
+        Which is what keeps `ALT_VENV_APPROVE=write` working from a warm
+        cache: an author regenerating approvals needs the wheels that
+        answered the request.
+        """
+        # Named, ancient, and still there afterwards.
+        venv: alt_venv.AltVEnv = alt_venv.AltVEnv(self.root / "live_wheel")
+        wheel: Path = venv.paths()[1] / "widget-1.2.3-py3-none-any.whl"
+        wheel.write_bytes(b"not really a wheel")
+        tree: Path = venv.paths()[2] / "widget-1.2.3-py3-none-any"
+        tree.mkdir()
+        venv.remember("widget", [tree.name], [wheel.name])
+        self.age(wheel, 100 * alt_venv.CULL_GRACE)
+        self.age(tree, 100 * alt_venv.CULL_GRACE)
+        self.assertEqual(venv.cull(), [])
+        self.assertTrue(wheel.is_file())
+
+    def test_a_young_wheel_is_spared(self) -> None:
+        """A wheel that has just arrived belongs to somebody.
+
+        The same grace period as the rest: a wheel is renamed into
+        `wheels/` a moment before the record naming it is written, so a
+        young wheel may belong to a program still running.
+        """
+        # No record names it, and it survives anyway, because it is new.
+        venv: alt_venv.AltVEnv = alt_venv.AltVEnv(self.root / "new_wheel")
+        wheel: Path = venv.paths()[1] / "widget-1.2.3-py3-none-any.whl"
+        wheel.write_bytes(b"not really a wheel")
+        self.assertEqual(venv.litter(), [])
+
+    def test_cull_tolerates_a_path_that_vanishes(self) -> None:
+        """Another program sweeping first is not an error."""
+        # `litter` names it, then it goes away before `cull` gets there.
+        venv: alt_venv.AltVEnv = alt_venv.AltVEnv(self.root / "vanishing")
+        junk: Path = venv.paths()[0] / "unpacking-racing"
+        junk.mkdir()
+        self.age(junk, 2 * alt_venv.CULL_GRACE)
+        named: list[Path] = venv.litter()
+        self.assertEqual(named, [junk])
+        shutil.rmtree(junk)
+        self.assertEqual(venv.cull(), [])
+
+    def test_a_warm_hit_keeps_a_request_alive(self) -> None:
+        """Using a package is what stops it going stale.
+
+        The distinction the whole policy rests on: age here means
+        unused, not old.  A package fetched long ago and used this
+        morning must not be collectable.
+        """
+        # Back-date the record past the threshold, then use it again.
+        target: Path = self.root / "kept_alive"
+        self.assertEqual(self.install(target, "widget"), "widget 1.2.3")
+        venv: alt_venv.AltVEnv = alt_venv.AltVEnv(target)
+        record: Path = venv.paths()[3].glob("*.json").__next__()
+        self.age(record, 2 * alt_venv.CULL_DAYS)
+        self.assertEqual(venv.stale(), [record])
+
+        # A warm install is a hit, and a hit is a use.
+        self.assertEqual(self.install(target, "widget"), "widget 1.2.3")
+        self.assertEqual(venv.stale(), [])
+
+    def test_an_unused_request_goes_stale(self) -> None:
+        """A record nothing has touched for long enough is collectable."""
+        # Nothing else is aged: the record is the only thing with a clock.
+        target: Path = self.root / "unused"
+        self.assertEqual(self.install(target, "widget"), "widget 1.2.3")
+        venv: alt_venv.AltVEnv = alt_venv.AltVEnv(target)
+        record: Path = venv.paths()[3].glob("*.json").__next__()
+        self.assertEqual(venv.stale(), [])
+        self.age(record, 2 * alt_venv.CULL_DAYS)
+        self.assertEqual(venv.stale(), [record])
+
+    def test_a_stale_request_takes_its_packages_with_it(self) -> None:
+        """One sweep removes the record and then the trees it named.
+
+        The two halves are one mechanism: dropping the record makes the
+        trees unreachable, and the litter pass in the same sweep collects
+        them.
+        """
+        # Age the record past the threshold and the tree past the grace
+        # period, which is what a genuinely disused package looks like.
+        target: Path = self.root / "stale_sweep"
+        self.assertEqual(self.install(target, "widget"), "widget 1.2.3")
+        venv: alt_venv.AltVEnv = alt_venv.AltVEnv(target)
+        record: Path = venv.paths()[3].glob("*.json").__next__()
+        trees: list[Path] = list(venv.paths()[2].iterdir())
+        self.assertEqual(len(trees), 1, trees)
+        self.age(record, 2 * alt_venv.CULL_DAYS)
+        self.age(trees[0], 2 * alt_venv.CULL_GRACE)
+
+        removed: list[Path] = venv.cull()
+        self.assertIn(record, removed)
+        self.assertIn(trees[0], removed)
+        self.assertFalse(trees[0].exists())
+        self.assertFalse(record.exists())
+
+        # And the package comes back by itself, which is the point.
+        self.assertEqual(self.install(target, "widget"), "widget 1.2.3")
+
+    def test_a_tree_two_requests_name_survives_one_going_stale(self) -> None:
+        """A shared package outlives the older of its two requests.
+
+        `widget` here is asked for twice, once on its own and once
+        alongside another package, so two records name the same tree.
+        The tree goes only when the last of them does.
+        """
+        # Two requests, one shared tree.
+        target: Path = self.root / "shared_tree"
+        self.assertEqual(self.install(target, "widget"), "widget 1.2.3")
+        self.assertEqual(self.install(target, ["widget", "sprocket"]),
+                         "widget 1.2.3\nsprocket 2.0.0")
+        venv: alt_venv.AltVEnv = alt_venv.AltVEnv(target)
+        records: list[Path] = sorted(venv.paths()[3].glob("*.json"))
+        self.assertEqual(len(records), 2, records)
+        widget: Path = next(
+            tree for tree in venv.paths()[2].iterdir()
+            if tree.name.startswith("widget"))
+
+        # Age one record only, and sweep.
+        self.age(records[0], 2 * alt_venv.CULL_DAYS)
+        self.age(widget, 2 * alt_venv.CULL_GRACE)
+        venv.cull()
+        self.assertTrue(widget.is_dir())
+
+    def test_the_threshold_is_a_parameter(self) -> None:
+        """Both halves take their thresholds as arguments.
+
+        Which is what makes this testable without inventing a clock: a
+        test asks for every record to count as stale, or for none to.
+        """
+        # Nothing has aged at all here; the numbers do the work.
+        target: Path = self.root / "thresholds"
+        self.assertEqual(self.install(target, "widget"), "widget 1.2.3")
+        venv: alt_venv.AltVEnv = alt_venv.AltVEnv(target)
+        self.assertEqual(venv.stale(days=10.0 ** 9), [])
+        self.assertEqual(len(venv.stale(days=0.0)), 1)
+
+    def test_due_is_true_until_a_sweep_happens(self) -> None:
+        """The daily gate opens once, then closes until tomorrow."""
+        # A cache that has never been swept is due by definition.
+        venv: alt_venv.AltVEnv = alt_venv.AltVEnv(self.root / "gate")
+        self.assertTrue(venv.due())
+        venv.cull()
+        self.assertFalse(venv.due())
+        self.age(venv.root / "last_cull", 2 * alt_venv.CULL_INTERVAL)
+        self.assertTrue(venv.due())
+
+    def test_installing_sweeps_at_most_once_a_day(self) -> None:
+        """An install sweeps the cache, and the next one does not."""
+        # The stamp is the observable part, so watch it rather than the
+        # litter: a second install must leave it untouched.
+        target: Path = self.root / "install_sweep"
+        self.assertEqual(self.install(target, "widget"), "widget 1.2.3")
+        stamp: Path = target / "last_cull"
+        self.assertTrue(stamp.is_file())
+        self.age(stamp, 60.0)
+        before: int = stamp.stat().st_mtime_ns
+        self.assertEqual(self.install(target, "sprocket"),
+                         "sprocket 2.0.0")
+        self.assertEqual(stamp.stat().st_mtime_ns, before)
+
     def test_contains_reports_what_is_cached(self) -> None:
         """`contains` is False before an install and True after."""
         # A single module counts, not only a package directory.

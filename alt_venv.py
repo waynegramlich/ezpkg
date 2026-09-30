@@ -69,6 +69,7 @@ import subprocess
 import sys
 import sysconfig
 import tempfile
+import time
 import tokenize
 import tomllib
 import zipfile
@@ -81,6 +82,23 @@ from typing import IO, Any, overload
 # answer is neither yes nor no.  Bounded, so that a terminal feeding
 # nonsense cannot keep a program alive indefinitely.
 ATTEMPTS: int = 3
+
+# How long something has to have been lying about before it is taken for
+# litter, and how often the cache is swept.  The grace period is about
+# concurrency rather than tidiness: a download in progress lives under
+# `pending/`, and an unpacked tree appears in `versions/` a moment before
+# the record naming it is written, so anything young may belong to a
+# program that is still running.  A day is far longer than either window
+# and short enough to keep a crashed run's leftovers from accumulating.
+# See Step 6.11 in `LOGBOOK.md`.
+CULL_GRACE: float = 86400.0
+CULL_INTERVAL: float = 86400.0
+
+# How long a request may go unanswered before the cache stops keeping the
+# packages that answered it.  Six months, because the cost of being wrong
+# is one download and the cost of being right is a little disk, and those
+# are not symmetrical.  See Step 6.11 in `LOGBOOK.md`.
+CULL_DAYS: float = 180.0 * 86400.0
 
 # The one place the version is written down.  `bootstrap.py`
 # prints it after importing, and the test suite stamps it into
@@ -1452,6 +1470,13 @@ class AltVEnv:
         if not asking:
             return
 
+        # A good moment to sweep: something is about to be fetched, so a
+        # little work here is invisible beside a download, and anything
+        # this program is about to create is younger than the grace
+        # period and so cannot be swept by mistake.
+        if self.due():
+            self.cull()
+
         # Refuse the one thing `pip` would accept and should not: a
         # leading dash reads as an option, so `install("--index-url=")`
         # could aim the fetch at somebody else's index.  Requirement
@@ -1532,6 +1557,181 @@ class AltVEnv:
                 site.addsitedir(str(tree))
         importlib.invalidate_caches()
 
+    def litter(self, grace: float = CULL_GRACE) -> list[Path]:
+        """Return what is in the cache that nothing can reach.
+
+        Three kinds, none of which needs a policy to identify.  A
+        program killed while fetching or unpacking leaves a directory
+        under `pending/`, which is staging space and never on the import
+        path.  A tree in `versions/` that no request record names is
+        unreachable too: `install` finds trees through those records, so
+        a tree nothing names will never be found again.  And a wheel in
+        `wheels/` that no record names is in the same position, since the
+        only thing that ever looks at a kept wheel is
+        `ALT_VENV_APPROVE=write` working from a record.
+
+        A live record protects its wheels, which is what keeps that
+        author flow working: an author can still regenerate approvals
+        from a warm cache without emptying it first.  A record that has
+        aged out takes its wheels with it, which is what stops `wheels/`
+        being the one directory that grows for ever.
+
+        Both wait out `grace` first, and that is about concurrency, not
+        tidiness: another program's download is sitting in `pending/`
+        right now, and a tree is renamed into `versions/` a moment
+        before the record naming it is written.  Anything young may
+        belong to somebody still running.
+
+        Arguments:
+        * `grace` (`float`):
+          How many seconds old a thing must be to count.  Tests pass a
+          small number; a test wanting the boundary passes a large one.
+
+        Returns:
+        * (`list[Path]`): Paths that can be removed, sorted, without
+          removing them.  Deciding is kept separate from deleting so that
+          a caller -- or a test -- can look without acting.
+        """
+        # Which trees are still spoken for?
+        pending: Path
+        versions: Path
+        requests: Path
+        kept: Path
+        pending, kept, versions, requests = self.paths()
+        spoken: set[str] = set()
+        record: Path
+        key: str
+        for record in requests.glob("*.json"):
+            try:
+                known: object = json.loads(record.read_text())
+            except (OSError, ValueError):
+                continue
+            if not isinstance(known, dict):
+                continue
+            for key in ("trees", "wheels"):
+                named: object = known.get(key)
+                if isinstance(named, list):
+                    spoken.update(str(one) for one in named)
+
+        # Anything old enough, in staging or unspoken for.
+        cutoff: float = time.time() - grace
+        found: list[Path] = []
+        entry: Path
+        for entry in (list(pending.iterdir()) + list(versions.iterdir())
+                      + list(kept.iterdir())):
+            if entry.parent != pending and entry.name in spoken:
+                continue
+            try:
+                if entry.stat().st_mtime < cutoff:
+                    found.append(entry)
+            except OSError:
+                continue
+        return sorted(found)
+
+    def stale(self, days: float = CULL_DAYS) -> list[Path]:
+        """Return the request records nothing has used for a long time.
+
+        A record's modification time is when its request was last
+        answered, because `remember` touches it on every hit, warm or
+        cold.  So age here means *unused*, not merely *old*, which is the
+        distinction that matters: a package fetched two years ago and
+        used this morning is not stale.
+
+        Nothing else is aged.  Trees are kept or dropped by whether a
+        record still names them, so removing a record is what makes its
+        packages collectable, and `litter` does the rest.  One rule each,
+        rather than two overlapping ones.
+
+        Arguments:
+        * `days` (`float`):
+          Seconds of disuse before a record counts as stale.  Named for
+          the unit a person thinks in; `CULL_DAYS` does the arithmetic.
+
+        Returns:
+        * (`list[Path]`): The records, sorted, removed by nobody.
+        """
+        # An unreadable record is `litter`'s business, not this one's.
+        cutoff: float = time.time() - days
+        found: list[Path] = []
+        record: Path
+        for record in self.paths()[3].glob("*.json"):
+            try:
+                if record.stat().st_mtime < cutoff:
+                    found.append(record)
+            except OSError:
+                continue
+        return sorted(found)
+
+    def due(self, interval: float = CULL_INTERVAL) -> bool:
+        """Say whether the cache is due for a sweep.
+
+        A stamp file records when the last one happened, so that a
+        machine running a hundred programs an hour sweeps once rather
+        than a hundred times.  An absent stamp means it has never been
+        swept, which is due.
+
+        Arguments:
+        * `interval` (`float`):
+          Seconds between sweeps.
+
+        Returns:
+        * (`bool`): True when a sweep is due.
+        """
+        # An unreadable stamp is treated as absent, not as an error.
+        try:
+            return (self.root / "last_cull").stat().st_mtime < (
+                time.time() - interval)
+        except OSError:
+            return True
+
+    def cull(self, grace: float = CULL_GRACE,
+             days: float = CULL_DAYS) -> list[Path]:
+        """Sweep the cache: stale requests first, then anything unreachable.
+
+        The order is what makes the two halves one mechanism.  A stale
+        record is removed, which leaves the trees and wheels it named
+        spoken for by nobody, and the same sweep then collects them as
+        litter.  So *unused* is expressed once, about records, and
+        *unreachable* is expressed once, about everything else.
+
+        Arguments:
+        * `grace` (`float`):
+          Passed to `litter`.
+        * `days` (`float`):
+          Passed to `stale`.
+
+        Returns:
+        * (`list[Path]`): What was removed.  A path that has gone by
+          itself -- another program swept first -- is not an error and is
+          not reported, because the point is what the cache no longer
+          holds, not who removed it.
+        """
+        removed: list[Path] = []
+        record: Path
+        for record in self.stale(days):
+            try:
+                record.unlink()
+            except OSError:
+                continue
+            removed.append(record)
+
+        # A kept wheel is a file; everything else here is a directory.
+        entry: Path
+        for entry in self.litter(grace):
+            try:
+                if entry.is_dir():
+                    shutil.rmtree(entry)
+                else:
+                    entry.unlink()
+            except OSError:
+                continue
+            removed.append(entry)
+
+        # Stamp it even when nothing was found, so that an empty cache is
+        # not swept again a second later.
+        (self.root / "last_cull").write_text("", encoding="utf-8")
+        return removed
+
     def remember(self, request: str, trees: list[str] | None = None,
                  wheels: list[str] | None = None
                  ) -> tuple[list[str], list[str]] | None:
@@ -1596,6 +1796,15 @@ class AltVEnv:
             known = json.loads(record.read_text())
         except (OSError, ValueError):
             return None
+
+        # Reading a record is using it, and being used is what keeps a
+        # package in the cache; see `stale`.  Touched before the checks
+        # below, because a record naming a tree somebody deleted by hand
+        # is still evidence that this request was wanted today.
+        try:
+            record.touch()
+        except OSError:
+            pass
 
         # A record counts only if it is this request and its trees are
         # all still there.

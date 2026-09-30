@@ -246,7 +246,7 @@ def main() -> None:
                 "platbase": str(root), "installed_base": str(root)}))
             if not (target / PACKAGE).is_dir():
                 from pip._internal.cli.main import main as pip_main
-                if pip_main(["install", "--quiet", "--no-input",
+                if pip_main(["install", "--no-input",
                              "--disable-pip-version-check", "--target",
                              str(target), PACKAGE]):
                     raise RuntimeError("pip failed")
@@ -268,7 +268,7 @@ def main() -> None:
                 "platbase": str(root), "installed_base": str(root)}))
             if not (target / PACKAGE).is_dir():
                 subprocess.run([sys.executable, "-m", "pip", "install",
-                                "--quiet", "--no-input",
+                                "--no-input",
                                 "--disable-pip-version-check", "--target",
                                 str(target), PACKAGE], check=True)
             sys.path.insert(0, str(target))
@@ -336,7 +336,7 @@ def main() -> None:
             sys.path.insert(0, str(target))
             if not (target / PACKAGE).is_dir():
                 from pip._internal.cli.main import main as pip_main
-                if pip_main(["install", "--quiet", "--no-input",
+                if pip_main(["install", "--no-input",
                              "--disable-pip-version-check", "--target",
                              str(target), PACKAGE]):
                     raise RuntimeError("pip failed")
@@ -361,7 +361,7 @@ def main() -> None:
                 "platbase": str(root), "installed_base": str(root)}))
             if not (target / PACKAGE).is_dir():
                 from pip._internal.cli.main import main as pip_main
-                if pip_main(["install", "--quiet", "--no-input",
+                if pip_main(["install", "--no-input",
                              "--disable-pip-version-check", "--target",
                              str(target), PACKAGE]):
                     raise RuntimeError("pip failed")
@@ -373,7 +373,7 @@ def main() -> None:
             target = pathlib.Path.home() / ".alt_venv"
             if not (target / PACKAGE).is_dir():
                 from pip._internal.cli.main import main as pip_main
-                if pip_main(["install", "--quiet", "--no-input",
+                if pip_main(["install", "--no-input",
                              "--disable-pip-version-check", "--target",
                              str(target), PACKAGE]):
                     raise RuntimeError("pip failed")
@@ -386,7 +386,7 @@ def main() -> None:
             target = pathlib.Path.home() / ".alt_venv"
             if not (target / PACKAGE).is_dir():
                 subprocess.run([sys.executable, "-m", "pip", "install",
-                                "--quiet", "--no-input",
+                                "--no-input",
                                 "--disable-pip-version-check", "--target",
                                 str(target), PACKAGE], check=True)
             sys.path.insert(0, str(target))
@@ -401,7 +401,7 @@ def main() -> None:
                 sys.path.insert(0, str(next(
                     pathlib.Path(shipped).glob("pip-*.whl"))))
                 from pip._internal.cli.main import main as pip_main
-                if pip_main(["install", "--quiet", "--no-input",
+                if pip_main(["install", "--no-input",
                              "--disable-pip-version-check", "--target",
                              str(target), PACKAGE]):
                     raise RuntimeError("pip failed")
@@ -413,7 +413,7 @@ def main() -> None:
             target = pathlib.Path.home() / ".alt_venv"
             if not (target / PACKAGE).is_dir():
                 from pip._internal.cli.main import main as pip_main
-                if pip_main(["install", "--quiet", "--no-input",
+                if pip_main(["install", "--no-input",
                              "--no-compile", "--disable-pip-version-check",
                              "--target", str(target), PACKAGE]):
                     raise RuntimeError("pip failed")
@@ -426,7 +426,7 @@ def main() -> None:
             target = pathlib.Path.home() / ".alt_venv"
             if not (target / PACKAGE).is_dir():
                 subprocess.run([sys.executable, "-m", "pip", "install",
-                                "--quiet", "--no-input", "--no-compile",
+                                "--no-input", "--no-compile",
                                 "--disable-pip-version-check", "--target",
                                 str(target), PACKAGE], check=True)
             sys.path.insert(0, str(target))
@@ -448,7 +448,7 @@ def main() -> None:
                 "platbase": str(root), "installed_base": str(root)}))
             if not (target / PACKAGE).is_dir():
                 subprocess.run([str(root / "bin" / "python3"), "-m", "pip",
-                                "install", "--quiet", "--no-input",
+                                "install", "--no-input",
                                 "--disable-pip-version-check", "--target",
                                 str(target), PACKAGE], check=True)
                 shutil.rmtree(target / "pip", ignore_errors=True)
