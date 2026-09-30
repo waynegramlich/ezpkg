@@ -49,18 +49,18 @@ not a sketch of it.
 03: # requires-python = ">=3.11"
 04: # dependencies = [
 05: #   "requests<3",
-06: #   "python-dateutil",
+06: #   "python-dateutil>=2.8",
 07: # ]
 08: # ///
 09: """Report yesterday's weather."""
 10:
-11: # Needed for the AltVEnv bootstrap code.
+11: # Imports needed for the AltVEnv bootstrap try block.
 12: import importlib
 13: import pathlib
 14: import subprocess
 15: import sys
 16:
-17: # Beginning of the AltVEnv bootstrap code.
+17: # Never edit the AltVEnv bootstrap try block.
 18: try:
 19:     target = pathlib.Path.home() / ".alt_venv"
 20:     if not (target / "alt_venv").is_dir():
@@ -73,15 +73,15 @@ not a sketch of it.
 27: except Exception as error:  # noqa: BLE001
 28:     raise SystemExit(f"cannot fetch alt_venv: {error}") from None
 29:
-30: import requests  # type: ignore[import-not-found]
-31: import dateutil.parser  # type: ignore[import-not-found]
-32:
-33: print(requests.__name__, dateutil.parser.__name__)
+30: # Example imports fetched via AltVEnv.
+31: import requests  # type: ignore[import-not-found]
+32: import dateutil.parser  # type: ignore[import-not-found]
+33:
+34: print(requests.__name__, dateutil.parser.__name__)
 ```
 
 The line numbers are for reference and are **not** part of the program;
 there is a copy without them further down, for pasting.
-
 * **`01`** -- The shebang, which lets the file be run directly as
   `./weather.py` on macOS and Linux once it is marked executable.  Windows
   ignores it and runs the file through its own launcher.
@@ -98,17 +98,79 @@ there is a copy without them further down, for pasting.
   [PEP 508](https://peps.python.org/pep-0508/) form: a name, optionally
   followed by a [PEP 440](https://peps.python.org/pep-0440/) version
   constraint.  `"requests<3"` means any `requests` before 3;
-  `"python-dateutil"` means any version at all.  **These are the names the
-  index knows, which are not always the names you import** --
-  `python-dateutil` is imported as `dateutil`, as line `31` shows.
+  `"python-dateutil>=2.8"` means 2.8 or newer; a bare name means any
+  version at all.
+
+  **Each string is handed to `pip` exactly as you wrote it.**  Nothing
+  here parses it, edits it, or decides anything about it: `pip` works out
+  which versions satisfy the whole list together, which build fits this
+  machine, and what else has to come along, and `AltVEnv` puts the result
+  where your program can import it.  That division is the whole design,
+  and it is why `pip` must be pre-installed.
+
+  **These are the names the index knows, which are not always the names
+  you import** -- `python-dateutil` is imported as `dateutil`, as line
+  `32` shows.
 * **`09`** -- The docstring.  It is still the docstring even with eight
   lines above it, because comments are not statements.
-* **`11`-`15`** -- The standard library imports the bootstrap needs.  They
+* **`11`-`15`** -- The standard library imports the try block needs.  They
   are at the top of the file, where Python expects imports, rather than
-  buried inside the bootstrap: your program very likely wants `pathlib`
-  and `sys` anyway, and may want `subprocess` too.
-* **`17`** -- Where the pasted part begins.  Everything from here to `28`
-  is the bootstrap, unchanged from this page.
+  buried inside it: your program very likely wants `pathlib` and `sys`
+  anyway, and may want `subprocess` too.
+* **`30`-`32`** -- Your program's own imports, which have to come
+  **after** the try block because the packages do not exist until it has
+  run.  `# type: ignore[import-not-found]` tells `mypy` not to complain
+  about a package that is not installed on the machine doing the
+  checking; on your own machine, where you have them, you will not need
+  it.  `ruff` has no objection to imports here at all.
+* **`34`** -- Your program.
+
+### The Bootstrap, Which You Do Not Edit
+
+Lines `17` to `28` -- the try block -- are boilerplate.  Paste them and
+leave them alone: they are the same in every program that uses `AltVEnv`,
+they are the part a future version may ask you to replace wholesale, and
+nothing in them is meant to be adjusted to taste.  Your program's own
+business is the metadata block at the top and the code at the bottom.
+
+Because the metadata format is the standard one, the same file also runs
+unchanged under [`uv`](https://docs.astral.sh/uv/): `uv run weather.py`
+reads the block, installs into its own cache, and never reaches this
+bootstrap at all.
+
+One alternative worth knowing about: a program that works out what it needs
+while it runs -- the database driver named in a configuration file, say --
+cannot say so in a static block.  For that, `install("some-package")` takes
+the requirement as an argument and returns the imported module.
+
+#### For The Curious
+
+None of what follows has to be understood to use `AltVEnv`, and none of it
+is a decision you are being asked to make.  It is here because somebody
+always wants to know what the code they pasted actually does.
+
+Here is the `AltVEnv` bootstrap try block again without the line numbers,
+so that nothing below needs scrolling to follow -- and this is the copy to
+paste:
+
+```python
+# Never edit the AltVEnv bootstrap try block.
+try:
+    target = pathlib.Path.home() / ".alt_venv"
+    if not (target / "alt_venv").is_dir():
+        subprocess.run([sys.executable, "-m", "pip", "install",
+                        "--no-input", "--disable-pip-version-check",
+                        "--target", str(target), "alt_venv"], check=True)
+    sys.path.insert(0, str(target))
+    importlib.invalidate_caches()
+    importlib.import_module("alt_venv").AltVEnv().install(bootstrap="7")
+except Exception as error:  # noqa: BLE001
+    raise SystemExit(f"cannot fetch alt_venv: {error}") from None
+```
+
+* **`17`** -- The comment that says not to edit what follows.  The try
+  block is the whole of the bootstrap, and it ends where its `except`
+  clause does, on `28`.
 * **`18`, `27`, `28`** -- The wrapper that turns any failure -- no
   network, no `pip`, a package you refused -- into one line of explanation
   instead of forty lines of traceback.  `# noqa: BLE001` on `27` tells
@@ -132,45 +194,63 @@ there is a copy without them further down, for pasting.
   program wants to call `install("something")` later on.  `bootstrap="7"`
   just says which version of this pasted code you copied, so that a
   future release can tell you when a better one exists.
-* **`30`-`31`** -- Your program's own imports, which have to come
-  **after** the bootstrap because the packages do not exist until it has
-  run.  `# type: ignore[import-not-found]` tells `mypy` not to complain
-  about a package that is not installed on the machine doing the
-  checking; on your own machine, where you have them, you will not need
-  it.  `ruff` has no objection to imports here at all.
-* **`33`** -- Your program.
-
-### The Part You Paste
-
-Lines `17` to `28`, without the numbers.  You write the metadata block
-yourself, and your program's own imports go after this:
-
-```python
-# Beginning of the AltVEnv bootstrap code.
-try:
-    target = pathlib.Path.home() / ".alt_venv"
-    if not (target / "alt_venv").is_dir():
-        subprocess.run([sys.executable, "-m", "pip", "install",
-                        "--no-input", "--disable-pip-version-check",
-                        "--target", str(target), "alt_venv"], check=True)
-    sys.path.insert(0, str(target))
-    importlib.invalidate_caches()
-    importlib.import_module("alt_venv").AltVEnv().install(bootstrap="7")
-except Exception as error:  # noqa: BLE001
-    raise SystemExit(f"cannot fetch alt_venv: {error}") from None
-```
-
-Because the metadata format is the standard one, the same file also runs
-unchanged under [`uv`](https://docs.astral.sh/uv/): `uv run weather.py`
-reads the block, installs into its own cache, and never reaches this
-bootstrap at all.
-
-One alternative worth knowing about: a program that works out what it needs
-while it runs -- the database driver named in a configuration file, say --
-cannot say so in a static block.  For that, `install("some-package")` takes
-the requirement as an argument and returns the imported module.
 
 <!-- Claude: Feel free to propose text below this line. -->
+
+### Saying Exactly What You Want
+
+The strings in `dependencies` are handed to `pip` untouched, so anything
+`pip` understands works here, and understanding them is the hard part that
+`pip` is required for.  Every form below was tried rather than assumed:
+
+```
+# dependencies = [
+#   "requests",                     any version at all
+#   "requests<3",                   anything before 3
+#   "requests>=2.28,<3",            a range
+#   "requests~=2.32.0",             2.32.anything, but not 2.33
+#   "requests!=2.31.0",             any version except this one
+#   "requests===2.32.3",            that version and no other
+#   "requests[socks]",              with an optional extra
+# ]
+```
+
+`pip` resolves the whole list at once rather than one package at a time, so
+it can notice that two of your dependencies disagree about a third -- which
+is the sort of thing that is very hard to get right by hand, and the reason
+this project does not try.
+
+**A dependency can also apply only sometimes.**  Put a semicolon and a
+condition after it, and it is installed only where the condition holds:
+
+```
+# dependencies = [
+#   "pywin32; sys_platform == 'win32'",
+#   "tomli; python_version < '3.11'",
+#   "uvloop; sys_platform != 'win32' and platform_machine == 'x86_64'",
+# ]
+```
+
+That is how one file can carry what it needs on Windows, on Linux, and on
+an older Python, without you writing any of the tests yourself.  Where a
+condition does not hold, nothing is installed, nothing is downloaded, and
+nothing is said about it -- the program simply runs.  The conditions
+available are the ones
+[PEP 508](https://peps.python.org/pep-0508/) defines, and
+`python_version`, `sys_platform`, `platform_machine` and `os_name` are the
+four that come up.
+
+**If you need to change how `pip` itself behaves**, `install` passes extra
+arguments along:
+
+```python
+alt_venv.AltVEnv().install(argv=["--no-deps"])
+```
+
+Those go on the `pip` command line after ours, so where `pip` takes the
+last of a repeated option, yours wins.  And `PIP_INDEX_URL` in the
+environment points the whole thing at a private index or a mirror instead
+of PyPI, which is also how every test in this project fetches.
 
 ## What You Need
 

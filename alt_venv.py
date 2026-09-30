@@ -1516,6 +1516,16 @@ class AltVEnv:
             arrived: list[Path] = self.download(asking, argv)
             holding: Path
             try:
+                # Nothing arriving is a real answer, not a failure: every
+                # requirement may have been excluded by an environment
+                # marker, as `"pywin32; sys_platform == \'win32\'"` is on
+                # anything but Windows.  There is then nothing to say and
+                # nobody to ask, and asking whether to install no
+                # packages is worse than silence.  Measured 2026-09-30,
+                # when it printed `1 requested, 0 downloaded`.
+                if not arrived:
+                    return
+
                 # Say what turned up, then check it against what the
                 # author approved, and only then unpack.  Nothing in a
                 # wheel has run at the moment it is refused; see 6.6.

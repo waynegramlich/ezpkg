@@ -2178,6 +2178,65 @@ expected every time the order changes, and is Claude's job.
       reasoning rather than the instructions.
     * **Where to report a problem**, once there is somewhere to report it.
 
+  * 6.10.9 - Requirement forms, measured 2026-09-30 before being
+    documented, because the `README.md` was about to claim that anything
+    `pip` understands works.  Against the local index, all of these
+    resolve correctly through `install()`: `sprocket>=1.0,<2`,
+    `sprocket~=1.0.0`, `sprocket!=2.0.0`, `sprocket===1.0.0`,
+    `sprocket>1.0.0`, `widget[extra]`, and environment markers both true
+    and false.  Three tests pin the constraint forms and the two marker
+    outcomes.
+
+    **A defect fell out of the false marker.**
+    `"widget; sys_platform == 'win32'"` on Linux printed
+    `1 requested, 0 downloaded into ...` followed by an empty list, and on
+    a terminal it would have **asked a person whether to install no
+    packages at all**.  Nothing arriving is a real answer and not a
+    failure -- a platform conditional dependency is a normal thing to
+    write -- so `install` now returns quietly when the download brings
+    back nothing.  Two tests: the excluded case says nothing whatever,
+    and the same requirement with a true marker still installs.
+  * 6.10.10 - The `README.md` as it stands on 2026-09-30, recorded because
+    Wayne is about to reorganise it and the next session will not have
+    this conversation.  Sections in order: Introduction; *How an `AltVEnv`
+    Enabled Program Works* with a 34 line complete program listed with
+    `01:` style line numbers and a bullet per line group; *The Bootstrap,
+    Which You Do Not Edit* -- Wayne's framing, the try block is
+    boilerplate -- with a *For The Curious* subsection holding the
+    pasteable copy and the notes on it; *Saying Exactly What You Want*, on
+    requirement forms and markers; *What You Need*; *Where Things Land*;
+    *Being Asked Before Anything Is Downloaded*; *What This Protects You
+    Against, And What It Does Not*.
+
+    The reorganisation Wayne intends: the file is what PyPI shows as a
+    project's front page, so the top has to **sell** the package to a
+    stranger who found it by accident, and the manual follows.  See
+    6.10.11 for what that changes.
+  * 6.10.11 - Advice on selling first, written 2026-09-30 so that the
+    intent survives a `/clear`:
+
+    * The first fifteen lines are the whole of the sale.  PyPI shows the
+      project name and summary itself, so the page can open on the
+      problem in a reader's own words -- a single file program that needs
+      `requests` -- rather than on a heading that repeats the name.
+    * The strongest trust signal costs nothing and belongs near the top:
+      **when not to use this.**  `uv run` is better whenever the people
+      running the program can install `uv`; `zipapp` is better when there
+      is no network; a virtual environment is better for a project rather
+      than a script.  A page that says so is believed about everything
+      else.
+    * Four honesty constraints must survive the rewrite, because hiding
+      any of them converts a sale into a support burden: `pip` must be
+      preinstalled, the project is experimental, packages are fetched and
+      run from an index, and everything has been measured on Linux with
+      CPython 3.12 only.
+    * The numbered walkthrough is worth keeping and belongs in the manual
+      half, not the sale.  It is unusual in a way that helps a reader who
+      has decided to commit, and it is noise to one who has not.
+    * Two PyPI rendering facts: relative links break, since there is no
+      repository context, and HTML comments are not rendered, so the
+      `<!-- Claude: ... -->` notes can stay.
+
   * 6.10.1 - The project's `README.md` still describes the Scavenger
     Hunt, at lines 17 and 27, which nothing implements any more: nobody
     is sent to visit web pages and paste titles back.  What replaced it
@@ -2368,6 +2427,16 @@ expected every time the order changes, and is Claude's job.
     So the author asks rather than being told: silent by default, and a
     report on request, in the same shape as `ALT_VENV_APPROVE=write`.
     That removes the question of how to reach an author entirely.
+  * 6.12.4 - `install` takes a `bootstrap` label, added 2026-09-30 at
+    Wayne's request while the `README.md` example was being tuned:
+    `install(bootstrap="7")`, keyword-only so it cannot collide with the
+    requirements argument.  It is kept as `self.bootstrap` and **read by
+    nothing yet** -- this step is what will read it.  The pasted example
+    passes `"7"`, which is the case this project ships, and
+    `bootstrap.py`'s epilogue passes `sys.argv[1]`, so all twelve cases
+    exercise the parameter.  A label is cheaper for the caller than
+    hashing the pasted text and is what a message would quote; hashing
+    remains the way to tell *which* version it is, per this step's plan.
   * 6.12.3 - What to do about a stale bootstrap -- report it, refuse to
     run, or offer to rewrite the file -- is still open, but 6.12.2 makes
     reporting the obvious default.

@@ -3671,6 +3671,60 @@ class InstallTest(unittest.TestCase):
         self.assertEqual(done.returncode, 0, done.stderr[-400:])
         self.assertEqual(done.stdout.strip(), "1.2.3")
 
+    def test_a_marker_that_excludes_everything_is_silent(self) -> None:
+        """A requirement for another platform installs nothing, quietly.
+
+        `"widget; sys_platform == \'win32\'"` is a real thing to write and
+        it is right that nothing happens here.  Before 2026-09-30 it
+        printed `1 requested, 0 downloaded` and would have asked a person
+        on a terminal whether to install no packages at all.
+        """
+        # Nothing said, nothing installed, and the program still runs.
+        program: Path = self.declaring_program(
+            "excluded",
+            'dependencies = ["widget; sys_platform == \'win32\'"]',
+            "print('ran')")
+        done: subprocess.CompletedProcess[str] = self.run_program(program)
+        self.assertEqual(done.returncode, 0, done.stderr[-400:])
+        self.assertEqual(done.stdout.strip(), "ran")
+        self.assertEqual(done.stderr.strip(), "")
+
+        # The directory itself is made by `paths`, so emptiness is the
+        # thing to check rather than absence.
+        versions: Path = program.parent / "cache" / "versions"
+        self.assertEqual(list(versions.iterdir()), [])
+
+    def test_a_marker_that_applies_here_installs(self) -> None:
+        """The same requirement, with a marker that is true, installs."""
+        # The other half, so that the silence above means what it says.
+        program: Path = self.declaring_program(
+            "included",
+            'dependencies = ["widget; python_version >= \'3.11\'"]',
+            "import widget\nprint(widget.__version__)")
+        done: subprocess.CompletedProcess[str] = self.run_program(program)
+        self.assertEqual(done.returncode, 0, done.stderr[-400:])
+        self.assertEqual(done.stdout.strip(), "1.2.3")
+
+    def test_the_declared_forms_pip_understands(self) -> None:
+        """Ranges, compatible releases, exclusions and extras all pass.
+
+        None of this is our work: the string goes to `pip` untouched and
+        `pip` resolves it, which is the whole reason `pip` is required.
+        This records that nothing on our side mangles the forms.
+        """
+        # `sprocket` is published twice, so a constraint has to choose.
+        form: str
+        wanted: str
+        for form, wanted in (("sprocket>=1.0,<2", "1.0.0"),
+                             ("sprocket~=1.0.0", "1.0.0"),
+                             ("sprocket!=2.0.0", "1.0.0"),
+                             ("sprocket===1.0.0", "1.0.0"),
+                             ("sprocket>1.0.0", "2.0.0")):
+            with self.subTest(form=form):
+                target: Path = self.root / f"form-{abs(hash(form))}"
+                self.assertEqual(self.install(target, form),
+                                 f"sprocket {wanted}")
+
     def test_a_declared_constraint_is_honoured(self) -> None:
         """A PEP 508 constraint in the block reaches `pip` unaltered."""
         # Two versions are published, so the choice is a real one.
