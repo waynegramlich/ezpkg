@@ -397,6 +397,9 @@ class AltVEnv:
         * `pending/` is scratch space used while fetching and
           unpacking.  Anything left in it is litter from an interrupted
           run and is safe to remove.
+        * `pip.whl` is a private copy of `pip`, which the bootstrap
+          fetched so that this machine needs no `pip` of its own.  It
+          is run straight from the wheel and never installed.
 
         Deleting this whole directory is safe.  The next program that
         needs one of these packages will fetch it again.
@@ -460,7 +463,7 @@ class AltVEnv:
         installed with, so its second run has nothing to install with
         and fails.  This is the `0cctfd` issue in `LOGBOOK.md`.
 
-        Rather than edit twelve case bodies that people paste, the
+        Rather than edit every case body that people paste, the
         second stage repairs the layout once, the first time it runs.
         The file this module was imported from becomes
         `<name>/__init__.py` in the same directory, which every case's
@@ -1046,6 +1049,31 @@ class AltVEnv:
         return (f"{fields[0]}-{fields[1]}-{tag}-"
                 f"{sysconfig.get_platform()}")
 
+    def pip(self) -> list[str]:
+        """Return the command that runs `pip`, preferring a private copy.
+
+        The bootstrap leaves `pip`'s own wheel in the cache as
+        `pip.whl`, and a wheel is a zip that Python can run directly:
+        `python pip.whl/pip` is how `pip` documents running itself
+        without being installed.  That copy is preferred whenever it is
+        there, so that a machine with no `pip` at all needs nothing
+        beyond Python and the pasted bootstrap.
+
+        Without it, which is every bootstrap except the one that ships,
+        the interpreter's own `pip` is used, as it always was.  If that
+        is missing too, `pip`'s own complaint reaches the caller through
+        `download`.
+
+        Returns:
+        * (`list[str]`): The interpreter followed by whatever makes it
+          run `pip`, ready to have `pip` arguments appended.
+        """
+        # The stash wins, because it is the one copy known to exist.
+        stashed: Path = self.root / "pip.whl"
+        if stashed.is_file():
+            return [sys.executable, str(stashed / "pip")]
+        return [sys.executable, "-m", "pip"]
+
     def download(self, requirements: Sequence[str],
                  argv: Sequence[str] = ()) -> list[Path]:
         """Fetch wheels into the holding area without installing them.
@@ -1097,7 +1125,7 @@ class AltVEnv:
         # wanting pip's defaults back passes them in `argv`, which wins.
         # See Step 6.8.7 in `LOGBOOK.md`.
         done: subprocess.CompletedProcess[str] = subprocess.run(
-            [sys.executable, "-m", "pip", "download", "--retries", "1",
+            [*self.pip(), "download", "--retries", "1",
              "--no-input", "--disable-pip-version-check",
              "--only-binary", ":all:", *argv, "--dest", str(holding),
              *requirements],

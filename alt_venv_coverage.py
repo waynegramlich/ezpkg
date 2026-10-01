@@ -30,7 +30,7 @@ more than they look:
 Two blind spots remain, and neither is a defect in the tests:
 
 * **Child processes are not followed.**  `bootstrap.py` reports about
-  7% because its twelve cases only ever run in child interpreters.
+  7% because its thirteen cases only ever run in child interpreters.
   They are covered by `test_every_case_bootstraps` and
   `test_every_case_bootstraps_repeatedly` instead, and the percentage
   here measures only the module level code that an import executes.
@@ -138,7 +138,7 @@ def trace_children(counts: Path) -> None:
     """Arrange for child processes to be traced as well.
 
     Most of what this suite does happens in children: every `pip`, and
-    `bootstrap.py` four or twelve times over.  `trace` follows neither
+    `bootstrap.py` once or thirteen times over.  `trace` follows neither
     those nor threads by itself, so `bootstrap.py` reads as about 7%
     however thoroughly its cases are exercised.
 

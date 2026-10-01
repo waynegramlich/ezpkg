@@ -130,11 +130,24 @@ A log where every entry is meaningful is worth more than a log that
 records everything that happened.  Mercurial already records everything
 that happened.
 
+## Who owns which file
+
+* `CLAUDE.md` is Claude's.  Wayne does not read it, so keeping it
+  accurate is Claude's job, done without asking; a rule Wayne states
+  in conversation belongs here.
+* `claude_notes.md` and `python_with_markdown.md` are Wayne's.  Both
+  are symbolic links into other directories with git repositories of
+  their own.  Claude reads them and never edits them.
+* `README.md` is Wayne's, and being rewritten by him.  Suggestions go
+  to him, or into an HTML comment addressed to him, rather than into
+  the text.
+* `LOGBOOK.md` is joint, as described above.
+
 ## The code, and how to run it
 
 Five files, and it matters which is which:
 
-* `bootstrap.py` -- the twelve pasted bootstrap cases, plus the harness
+* `bootstrap.py` -- the thirteen pasted bootstrap cases, plus the harness
   that measures them.  Run with no arguments it prints the comparison
   table; with a case label it runs one case, which is internal.
 * `alt_venv.py` -- the second stage, fetched as a wheel.  `AltVEnv`
@@ -148,18 +161,24 @@ Five files, and it matters which is which:
   is in a directory of its own on purpose, because a `sitecustomize.py`
   in the project root would affect every interpreter started here.
 
-Before any piece of work is called finished, all four of these are
-clean: `ruff check`, `mypy`, no line over 79 columns in any file
-including the Markdown, and the suite passing.
+Before any piece of work is called finished, three things are clean:
+`ruff check`, `mypy`, and no line over 79 columns in any file including
+the Markdown.  The tests that bear on the change are run by name, as
+`python3 -m unittest alt_venv_test.SomeTest.test_one ...`, and pass.
+
+The **full suite** is run only for two things: closing a task, which
+cannot happen until it passes, and measuring coverage.  It takes too
+long to run otherwise.  Steps have no open or closed status, so
+finishing one does not call for it.
 
     python3 alt_venv_test.py                  # about 90 seconds
     ALT_VENV_TEST=COMPLETE python3 alt_venv_test.py
 
-`ALT_VENV_TEST` chooses how many of the twelve bootstrap cases the
-all-case tests exercise.  Unset or `FAST` uses four, one per distinct
-mechanism plus the one that used to fail; `COMPLETE` uses all twelve and
-takes several times longer.  Anything else is refused rather than
-quietly treated as `FAST`.
+`ALT_VENV_TEST` chooses how many of the thirteen bootstrap cases the
+all-case tests exercise.  Unset or `FAST` uses one, case 13, the one
+that ships; `COMPLETE` uses all thirteen and takes several times
+longer.  Anything else is refused rather than quietly treated as
+`FAST`.
 
     ./alt_venv_coverage.py <directory>             # this process only
     ./alt_venv_coverage.py --children <directory>  # much slower

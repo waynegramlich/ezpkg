@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Twelve ways to get a package onto `sys.path` with nothing preinstalled.
+"""Thirteen ways to get a package onto `sys.path` with nothing preinstalled.
 
 Run it with no arguments: `python3 bootstrap.py`.  It runs every case
 three times and prints the table below to standard output, so
@@ -50,15 +50,15 @@ module level imports, are the whole of `SHARED_LINES`, which is 6.  The
 at `lines + 4` from before the wrapper was charged, and then dropped by
 one again when `PACKAGE` stopped being charged.
 
-`JSON_API` is the same arrangement for the same reason.  Cases 3 and
-12 read PyPI's JSON API with `urllib`, which knows nothing of
+`JSON_API` is the same arrangement for the same reason.  Cases 3, 12
+and 13 read PyPI's JSON API with `urllib`, which knows nothing of
 `PIP_INDEX_URL`, so there is no environment variable already able to
 steer them at a local server.  A pasted case carries the literal
 `https://pypi.org/pypi`; here `BOOTSTRAP_JSON_API` can replace it.
 The substitution costs a case no lines, so the `paste` column is
 unchanged.
 
-Measuring twelve cases against one `~/.alt_venv` would be wrong: the
+Measuring thirteen cases against one `~/.alt_venv` would be wrong: the
 second case onwards would find `coverage` already on disk and report a
 warm time as its cold time.  Each run therefore gets its own `HOME`,
 which `pathlib.Path.home()` honours -- the isolation is in the
@@ -92,6 +92,8 @@ user would type.  The real `~/.alt_venv` is never touched.
 |      | subprocess      |         |       |       |        |        |        |
 | 12   | venv(no pip),   | 7       | 51    | 57    | 1.42 s | 0.16 s | 1714   |
 |      | stdlib wheel    |         |       |       |        |        |        |
+| 13   | no venv, PyPI   | 3       | 25    | 31    | 3.11 s | 0.14 s | 3538   |
+|      | pip subprocess  |         |       |       |        |        |        |
 +------+-----------------+---------+-------+-------+--------+--------+--------+
 
 What the columns mean, in the order they appear above:
@@ -119,10 +121,11 @@ What the columns mean, in the order they appear above:
 * **paste** -- **the number that matters.**  This bootstrap is not
   installed, it is copied by hand into the top of every program that
   wants it, so its real cost is how much text the author has to carry
-  around.  It is `lines` plus the four shared lines every case needs:
-  `import importlib`, `import pathlib`, `import sys` and `PACKAGE`.
-  Nothing else lives above `main()`.  The closing `print` is
-  diagnostics and is not counted.
+  around.  It is `lines` plus the six shared lines every case needs:
+  `import importlib`, `import pathlib` and `import sys`, and the three
+  lines of the `try` wrapper described above.  `PACKAGE`, `JSON_API`
+  and `import os` live above `main()` too, but are harness machinery
+  and are not counted, and neither is the closing `print`.
 
 * **cold** -- wall clock for the first run into an empty `HOME`: venv
   creation if any, the download, and the install.  Median of
@@ -133,7 +136,7 @@ What the columns mean, in the order they appear above:
 
 * **warm** -- wall clock for the second run, when the package is already
   on disk.  Median of `REPETITIONS` runs.  It is ~0.14 s for every case
-  because all twelve then do the same thing: one existence check, one
+  because all thirteen then do the same thing: one existence check, one
   `sys.path.insert`, and one import.  Cold cost is paid once per
   machine; warm cost is paid on every run of the program, forever.
 
@@ -150,19 +153,21 @@ What the columns mean, in the order they appear above:
   bootstrap imports the package two lines later and Python compiles
   what it imports anyway.  Case 3 is smallest at 1682 precisely
   because it never generates the console scripts, and case 12 is
-  1714, which is case 3 plus 32 KB of empty venv.
+  1714, which is case 3 plus 32 KB of empty venv.  Case 13 is case 7's
+  1762 plus the 1.8 MB `pip.whl` it keeps for `AltVEnv` to use.
 
-The clusters: cases 6, 7, 9 and 10 are the floor at 15 pasted lines but
-need pip already present; cases 4 and 11 manufacture a pip with
-`ensurepip`, use it once, then delete it, for a machine that has `venv`
-but no pip; cases 3 and 12 need neither, and cost 49 and 55 lines for
-it.
+The clusters: cases 6 and 7 are the floor at 16 pasted lines, with 9
+and 10 one line above it, but all four need pip already present; cases
+4 and 11 manufacture a pip with `ensurepip`, use it once, then delete
+it, for a machine that has `venv` but no pip; cases 3 and 12 need
+neither, and cost 51 and 57 lines for it.  Case 13 needs neither as
+well, by fetching a pip of its own.
 
-Cases 4 and 11 are the same mechanism reached two ways, and they are
-identical on every column: 5 imports, 26 lines, 30 pasted, 1790 KB.
+Cases 4 and 11 are the same mechanism reached two ways, and they differ
+by one line: 5 imports each, 31 and 32 pasted, 1790 KB each.
 Case 4 imports the manufactured pip; case 11 runs the venv's own
 interpreter as a child instead.  Case 11 therefore reaches the middle
-cluster without touching `pip._internal` at all, and costs nothing for
+cluster without touching `pip._internal` at all, and costs one line for
 the privilege.
 
 Running pip in process is not free of the user's program.  After a
@@ -171,18 +176,27 @@ single in-process install, `sys.modules` grows from 99 entries to 740,
 on the *root* logger.  A `log.warning("...")` in the user's program
 prints bare before the bootstrap runs and `WARNING: ...` through pip's
 handler afterwards.  Every in-process case (1, 4, 5, 6, 8, 9) does
-this; the subprocess cases (2, 7, 10, 11) cannot, since that state dies
+this; the subprocess cases (2, 7, 10, 11, 13) cannot, since that state dies
 with the child process, and cases 3 and 12 cannot because they never
 load pip at all.
 
 Case 12 exists to answer a question about the instructions rather than
 to be shipped.  Those asked for a venv built with `venv`, no spawning
 of `python3 -m pip install`, only `venv` and standard libraries, and
-an `importlib` import.  Case 12 is the only one of the twelve that
+an `importlib` import.  Case 12 is the only one of the thirteen that
 does all four, and it costs 57 pasted lines against case 3's 51.  The
 extra 6 lines and 32 KB buy a virtual environment that nothing then
 reads, which is finding 3 of the log book arriving from yet another
 direction.
+
+Case 13 is the one that ships; see Step 6.15 of `LOGBOOK.md`.  It is
+case 7 with the one thing case 7 assumes taken away.  Rather than run
+the machine's pip, it fetches pip's own wheel from the JSON API, keeps
+it as `~/.alt_venv/pip.whl`, and runs it as `python pip.whl/pip`, which
+is how pip documents running itself without being installed.  `AltVEnv`
+then uses that same copy, so nothing on the machine needs pip at all.
+It is a subprocess case, so none of pip's state reaches the program,
+and it costs 31 pasted lines against case 7's 16.
 
 MIT No Attribution
 
@@ -214,7 +228,7 @@ import sys
 # case carries a literal, while the harness steers this one instead.
 PACKAGE: str = os.environ.get("BOOTSTRAP_PACKAGE", "coverage")
 
-# Where cases 3 and 12 look for the JSON API, steered the same way.
+# Where cases 3, 12 and 13 look for the JSON API, steered the same way.
 JSON_API: str = os.environ.get("BOOTSTRAP_JSON_API",
                                "https://pypi.org/pypi")
 
@@ -506,6 +520,32 @@ def main() -> None:
             sys.path.insert(0, str(target))
             importlib.invalidate_caches()
             module = importlib.import_module(PACKAGE)
+        case "13":
+            # Ensure `alt_venv` is downloaded.
+            import json
+            import subprocess
+            import urllib.request
+            target = pathlib.Path.home() / ".alt_venv"
+            wheel = target / "pip.whl"
+            if not (target / PACKAGE).is_dir():
+                if not wheel.is_file():
+                    with urllib.request.urlopen(f"{JSON_API}/pip/json",
+                                                timeout=30) as r:
+                        metadata = json.load(r)
+                    entry = next(e for e in metadata["urls"]
+                                 if e["packagetype"] == "bdist_wheel")
+                    target.mkdir(parents=True, exist_ok=True)
+                    with urllib.request.urlopen(entry["url"],
+                                                timeout=60) as r:
+                        wheel.with_suffix(".part").write_bytes(r.read())
+                    wheel.with_suffix(".part").replace(wheel)
+                subprocess.run([sys.executable, str(wheel / "pip"),
+                                "install", "--no-input",
+                                "--disable-pip-version-check", "--target",
+                                str(target), PACKAGE], check=True)
+            sys.path.insert(0, str(target))
+            importlib.invalidate_caches()
+            module = importlib.import_module(PACKAGE)
     # `type(sys)` is `types.ModuleType`, reached without importing
     # `types`, because `sys` is a module and is already imported.
     assert isinstance(module, type(sys)), f"{PACKAGE} gave {module!r}"
@@ -514,7 +554,7 @@ def main() -> None:
     # neither is idle here: the constructor repairs a single module
     # install so that this case's own `is_dir()` guard recognises it on
     # the following run, and `install()` walks the declared path in every
-    # one of the twelve shapes, virtual environments included.  This file
+    # one of the thirteen shapes, virtual environments included.  This file
     # has no PEP 723 block, so nothing is fetched.  See `0cctfd` and Step
     # 6.7.8.  Harness machinery, so `paste` does not count it.
     if hasattr(module, "AltVEnv"):
@@ -537,6 +577,7 @@ MECHANISMS = {
     "10": "as 7 plus --no-compile",
     "11": "as 4 but subprocess",
     "12": "venv(no pip), stdlib wheel",
+    "13": "no venv, PyPI pip subprocess",
 }
 # Lines a case needs but does not contain: the three module level
 # imports, PACKAGE, and the three of the `try` wrapper that turns a

@@ -2512,8 +2512,65 @@ expected every time the order changes, and is Claude's job.
     with no `pip` at all.  It costs 52 pasted lines and carries the two
     matcher bugs, so offering it means fixing the abi3 comparison first --
     a comparison of integers, not a version parser.
+  * 6.14.4 - Superseded on 2026-10-01 by Step 6.15: case 13 ships in
+    place of case 7, because it needs no preinstalled `pip`.  The
+    subprocess argument of 6.14.1 carries over unchanged, and 6.15.1
+    found `pip` itself now making it.
 
-* Step 6.15: And more.  A place holder for additional steps.
+* Step 6.15: No preinstalled `pip`.  Step 6.14.1 chose case 7 and named
+  its cost: `pip` must be installed, and Debian and Ubuntu ship
+  `python3-pip` separately.  The `README.md` rewrite needed to know
+  whether that cost is real, and so whether the claim could be that
+  Python and the pasted bootstrap are all a machine needs.
+  * 6.15.1 - Three experiments, 2026-10-01, each fetching `pip`'s own
+    wheel from the JSON API and installing with it, run on an
+    interpreter made by `venv --without-pip` so that no `pip` could
+    help.  All three worked against the real PyPI.  The two that ran
+    `pip` in process, one from a temporary file and one straight out of
+    memory through a hand-written importer, each printed forty
+    `DEPRECATION: Unexpected import ... after pip install started`
+    warnings.  `pip` 26 objects to a program importing, in the same
+    process, what `pip` just installed, and says 26.3 will enforce it.
+    That is the in-process argument of 6.14.1 again, made this time by
+    `pip`.  Both were dropped, and the subprocess one became case 13.
+  * 6.15.2 - **`alt_venv` needed `pip` as well.**  `AltVEnv.download`
+    ran `python -m pip download`, so a bootstrap free of `pip` only
+    moved the failure to the program's first declared dependency.  The
+    answer is a private copy.  Case 13 keeps the wheel it fetched as
+    `~/.alt_venv/pip.whl`, and `AltVEnv.pip` runs it as
+    `python pip.whl/pip`, which is how `pip` documents running itself
+    without being installed.  With no stash, which is every other case,
+    it falls back to `python -m pip` as before.
+  * 6.15.3 - Measured with the harness: 3 imports, 25 lines, 31 pasted,
+    3.11 s cold, 0.14 s warm, 3538 KB, of which 1.8 MB is `pip.whl`.
+    Against case 7 that is 15 more pasted lines and a 1.8 MB download
+    on the first run only.
+  * 6.15.4 - Verified 2026-10-01 on Linux under CPython 3.12.3 and
+    3.11.16, each with no `pip`: case 13 against the real PyPI, and
+    `test_nothing_but_python_and_the_bootstrap`, which runs case 13 and
+    then a program declaring a dependency, against the local index.
+    The 3.11 interpreter came from `uv python install 3.11`.  That run
+    is a one-off rather than part of the suite: the floor is 3.11 only
+    because `tomllib` arrived in it, and nothing in this change is
+    expected to break there.  To repeat it, run the suite's two
+    private-`pip` tests,
+    `InstallTest.test_pip_prefers_the_private_copy` and
+    `InstallTest.test_nothing_but_python_and_the_bootstrap`, under
+    `~/.local/share/uv/python/cpython-3.11-linux-x86_64-gnu/bin/python3.11`.
+  * 6.15.5 - The suite never reaches the network, so every index that
+    `build_index` makes now publishes a `pip` wheel as well, zipped by
+    `pip_wheel` from the `pip` running the suite.  That works only for
+    a `pip` carrying its vendored libraries; a debundled one cannot run
+    alone, and the no-`pip` test skips.
+  * 6.15.6 - **Case 13 ships**, 2026-10-01.  Wayne's words: "If the
+    bootstrap grows some to eliminate the pip preinstalled issue I'm
+    probably good with that."  The claim the `README.md` can make is
+    Python 3.11 or later, the pasted bootstrap and a network that
+    reaches PyPI.  `FAST_CASES` became `("13",)`.  Still open: `1bfnprp`,
+    `2btosc`, `3fpfipe` and `3spinu`, and Windows and macOS are untried,
+    which is `2hmmdrpe`.
+
+* Step 6.16: And more.  A place holder for additional steps.
 
 ### Step 6.1: Error on a failed fetch
 
@@ -2723,6 +2780,20 @@ Not yet started, in priority order.
     places.  I will point out that the reason why we have 10 bootstrap code
     candidates gives us some flexibility dealing with this issue.
 
+* **The bootstrap fetches the newest `pip` regardless of Python.
+  (1bfnprp)**  Case 13 takes whatever wheel the JSON API lists for the
+  current `pip` release.  `pip` 26.2.1 requires Python 3.10, so today
+  that is harmless, but when `pip` drops 3.11 every pasted copy of the
+  bootstrap running on 3.11 will fetch a `pip` it cannot run.  That is
+  a defect in code pasted into somebody else's program, where nobody is
+  around to fix it, which is an argument for priority 0.  A possible
+  solution is to read `/pypi/pip/json` for every release and pick the
+  newest whose `requires_python` admits the running interpreter, at the
+  cost of some pasted lines.
+
+  Various thoughts:
+  * Wayne (2026-10-01): Needs more discussion.
+
 * **An already-importable package is installed anyway. (2apiia)**  All
   twelve cases ask whether the package is on disk at their own target,
   never whether it is already importable.  With `coverage` present in an
@@ -2747,6 +2818,14 @@ Not yet started, in priority order.
     it stays open on its own merits rather than as `0whwnn`'s twin.  The
     fix is now cheaper than it was, since Step 6.3 has to rework the
     same guard for the versioned cache.
+
+* **The bootstrap trusts only system certificates. (2btosc)**  Case
+  13 reaches PyPI with `urllib`, which verifies against the operating
+  system's certificate store, where case 7 handed the whole fetch to
+  `pip` and its own bundled store.  Linux distributions provide one.
+  The python.org installer for macOS does not until its
+  `Install Certificates.command` has been run, so there the bootstrap
+  would fail on its first request.  Untested; nobody here has a Mac.
 
 * **How many machines does requiring `pip` exclude? (2hmmdrpe)**  The
   decision to require `pip`, recorded under the preinstalled
@@ -2773,6 +2852,12 @@ Not yet started, in priority order.
   * Wayne (2026-09-22): It would be nice to test on Windows and MacOS.
   * Wayne (2026-09-22): I know people who have these machines and would be glad
     to help.  Until then, the answer is currently unknown.
+  * Claude (2026-10-01): Step 6.15 removes the requirement this issue
+    measures.  Case 13 fetches its own `pip`, so a machine without one
+    gets a bootstrap rather than a diagnosed failure, and the question
+    of how many such machines exist no longer decides anything.  What
+    survives is Wayne's first thought: Windows and macOS are untried.
+    I would close this and carry that part into a new issue.
 
 * **How should required packages be declared? (2hsrpbd)**  Every case has
   `PACKAGE = "coverage"` written into it.  Reusing the PEP 723
@@ -2851,6 +2936,16 @@ Not yet started, in priority order.
     wheel wearing a compiled name cannot show.  Wayne's call whether
     that is still a priority 2.
 
+* **A failed `pip` fetch is poorly explained. (3fpfipe)**  If the JSON
+  API lists no wheel for `pip`, case 13's `next(...)` raises a bare
+  `StopIteration`, and the person sees `cannot fetch alt_venv: ` with
+  nothing after it.  The SHA-256 digest is in the same JSON and is
+  never checked, so a truncated download surfaces as a zip error from
+  `python pip.whl/pip` rather than as a failed fetch.
+
+  Various thoughts:
+  * Wayne (2026-10-01): We'll improve this later.
+
 * **`.pth` files are installed but never executed. (3pfaibne)**  Every case
   writes coverage's `a1_coverage.pth`, its hook for measuring
   subprocesses, and no case runs it, because only `site.addsitedir()`
@@ -2880,6 +2975,13 @@ Not yet started, in priority order.
     them in braces would also bury the reviewer names one level deeper.  But
     `claude_notes.md` is the general write-up, in another repository and in
     Wayne's voice, so this is a proposal rather than an edit.
+
+* **The stashed `pip` is never updated. (3spinu)**  `pip.whl` is
+  fetched once and kept until `~/.alt_venv` is deleted, so a machine
+  that bootstrapped this year is still running this year's `pip` in
+  five years, with whatever it did not yet know about indexes, wheel
+  tags and security fixes.  A possible solution is for `AltVEnv` to
+  refresh it during `cull`, which already runs about once a day.
 
 * **The venv executable directory is hard-coded. (3vedih)**  Cases
   4 and 11 reach into `root / "bin"` at `bootstrap.py:296`, `400` and

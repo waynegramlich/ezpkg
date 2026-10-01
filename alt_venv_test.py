@@ -132,15 +132,13 @@ PROMPT: str = "go ahead? [y=>Yes/n=>No/a=>Always/?=>Explanation]"
 CONFIRM: str = "Really never ask again? [y=>Yes/n=>No]"
 
 # Which cases the all-case tests exercise.  The default is one case, on
-# the grounds that this project is not shipping a virtual environment
-# and the quick run should exercise the case most likely to be the
-# product.  Case 7 is it: the shortest paste at fifteen lines, tied with
-# 6, 9 and 10 but preferred over all three, because 6 and 9 run `pip` in
-# process and leave 451 of its modules and three handlers on the root
-# logger behind, and 10 adds `--no-compile` for 60 KB.  The other
-# eleven, including the no-`pip` case 3, run under
-# `ALT_VENV_TEST=COMPLETE`, which is what the end of a task gets.
-FAST_CASES: tuple[str, ...] = ("7",)
+# the grounds that the quick run should exercise the case that ships.
+# That is case 13, which fetches a `pip` of its own and runs it as a
+# subprocess, so it needs no `pip` on the machine and leaves none of
+# `pip`'s state in the program; see Step 6.15 in `LOGBOOK.md`.  The
+# other twelve run under `ALT_VENV_TEST=COMPLETE`, which is what the
+# end of a task gets.
+FAST_CASES: tuple[str, ...] = ("13",)
 
 def platform_tag() -> str:
     """Return a compatibility tag this interpreter would accept.
@@ -198,7 +196,8 @@ def cases() -> tuple[str, ...]:
 
 
 def run_bootstrap_case(label: str, home: Path, index_url: str,
-                       extra: dict[str, str] | None = None
+                       extra: dict[str, str] | None = None,
+                       python: str = sys.executable
                        ) -> subprocess.CompletedProcess[str]:
     """Run one `bootstrap.py` case against a local index.
 
@@ -217,6 +216,9 @@ def run_bootstrap_case(label: str, home: Path, index_url: str,
       The base URL of the index, ending in a slash.
     * `extra` (`dict[str, str] | None`):
       More environment, such as the trust store the TLS tests set.
+    * `python` (`str`):
+      The interpreter to run the case with.  The default is this one;
+      the no-`pip` test passes one that has never had `pip`.
 
     Returns:
     * (`subprocess.CompletedProcess[str]`): The finished child.
@@ -229,7 +231,7 @@ def run_bootstrap_case(label: str, home: Path, index_url: str,
         **(extra or {}))
     environment.pop("VIRTUAL_ENV", None)
     return subprocess.run(
-        [sys.executable, str(script), label],
+        [python, str(script), label],
         env=environment, capture_output=True, text=True, check=False)
 
 
@@ -536,6 +538,52 @@ def add_root_member(wheel: Path, name: str, text: str) -> Path:
     return wheel
 
 
+# The `pip` wheel every index publishes, built once on first use.
+_PIP_WHEEL: tuple[str, bytes] | None = None
+
+
+def pip_wheel() -> tuple[str, bytes]:
+    """Return a runnable `pip` wheel built from the one installed here.
+
+    Case 13 of `bootstrap.py` fetches `pip` itself from the JSON API,
+    and the suite never reaches the network, so every index has to be
+    able to hand out a `pip`.  The installed `pip` package is zipped as
+    it stands, with just enough `.dist-info` to be called a wheel.  It
+    is never installed, only run as `python pip.whl/pip`, which needs
+    nothing but `pip/__main__.py` and the vendored libraries beside it.
+
+    A distribution that strips those vendored libraries out, which
+    `pip._vendor.DEBUNDLED` reports, yields a wheel that only runs
+    where that distribution's own `pip` is present.  The no-`pip`
+    test checks for that and skips.
+
+    Returns:
+    * (`tuple[str, bytes]`): The wheel's filename and its contents.
+    """
+    # Zip it once; every index after the first copies the bytes.
+    global _PIP_WHEEL
+    if _PIP_WHEEL is None:
+        import pip
+        package: Path = Path(pip.__file__).parent
+        version: str = pip.__version__
+        buffer: io.BytesIO = io.BytesIO()
+        with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
+            member: Path
+            for member in sorted(package.rglob("*")):
+                if member.is_file() and "__pycache__" not in member.parts:
+                    archive.write(member, PurePath(
+                        "pip", member.relative_to(package)).as_posix())
+            information: str = f"pip-{version}.dist-info"
+            archive.writestr(f"{information}/METADATA",
+                             "Metadata-Version: 2.1\nName: pip\n"
+                             f"Version: {version}\n")
+            archive.writestr(f"{information}/WHEEL",
+                             "Wheel-Version: 1.0\nRoot-Is-Purelib: true\n"
+                             "Tag: py3-none-any\n")
+        _PIP_WHEEL = (f"pip-{version}-py3-none-any.whl", buffer.getvalue())
+    return _PIP_WHEEL
+
+
 def build_index(wheels: list[Path],
                 root: Path) -> Path:
     """Lay wheels out as a PEP 503 simple repository.
@@ -552,7 +600,8 @@ def build_index(wheels: list[Path],
 
     Arguments:
     * `wheels` (`list[Path]`):
-      The wheels to publish.  Each is copied into the tree.
+      The wheels to publish.  Each is copied into the tree, and a
+      `pip` wheel from `pip_wheel` joins them unless one is given.
     * `root` (`Path`):
       Where to build the tree.  Created if it does not exist.
 
@@ -585,6 +634,18 @@ def build_index(wheels: list[Path],
             f"<!DOCTYPE html><html><body>{links}</body></html>")
         for wheel in files:
             (directory / wheel.name).write_bytes(wheel.read_bytes())
+
+    # Publish `pip` as well, so that case 13 has one to fetch.
+    name: str
+    contents: bytes
+    name, contents = pip_wheel()
+    if "pip" not in projects:
+        projects["pip"] = []
+        (root / "pip").mkdir(exist_ok=True)
+        (root / "pip" / name).write_bytes(contents)
+        (root / "pip" / "index.html").write_text(
+            f'<!DOCTYPE html><html><body><a href="{name}">{name}</a><br>'
+            "</body></html>")
 
     # Finish with the root page that lists the projects.
     links = "".join(f'<a href="{project}/">{project}</a><br>'
@@ -761,7 +822,7 @@ class _IndexHandler(http.server.SimpleHTTPRequestHandler):
             self.send_error(404, f"no project {normalized}")
             return
 
-        # Build the subset of the payload that cases 3 and 12 read.
+        # Build the subset of the payload that cases 3, 12 and 13 read.
         host: str = self.headers.get("Host", "127.0.0.1")
         payload: dict[str, Any] = {"urls": [
             {"filename": wheel.name, "yanked": False,
@@ -1765,7 +1826,7 @@ class TlsTest(unittest.TestCase):
 
         `SSL_CERT_FILE` is what `urllib` honours, through OpenSSL's own
         default verify paths, and `PIP_CERT` is what `pip` honours.
-        Both are environment variables, so cases 3 and 12 need no
+        Both are environment variables, so cases 3, 12 and 13 need no
         `ssl` context written into them and no case gains a line.
         """
         # One trust store, two spellings, because two clients read it.
@@ -1872,8 +1933,13 @@ class InstallTest(unittest.TestCase):
             "import sys; setattr(sys, 'alt_venv_pth_ran', True)\n"
             "inner\n")
 
+        # This project too, for the bootstrap the no-`pip` test runs.
+        project: Path = build_wheel(
+            Path(__file__).resolve().parent / f"{MODULE}.py",
+            DISTRIBUTION, VERSION, SUMMARY, cls.root / "dist", floor=FLOOR)
+
         cls.index = build_index([wheel, two_named, depending, shipping,
-                                 *versions], cls.root / "index")
+                                 project, *versions], cls.root / "index")
         cls.cache = cls.root / "cache"
 
         # Start the server last, so nothing can fail after it is up.
@@ -1981,6 +2047,82 @@ class InstallTest(unittest.TestCase):
         self.assertTrue(any(p.name.startswith("widget-1.2.3")
                             for p in
                             (self.cache / "versions").iterdir()))
+
+    def test_pip_prefers_the_private_copy(self) -> None:
+        """A stashed `pip.whl` is what `download` runs, and it runs."""
+        # Without the stash, the interpreter's own `pip` is the answer.
+        cache: Path = self.root / "stash"
+        venv: alt_venv.AltVEnv = alt_venv.AltVEnv(cache)
+        self.assertEqual(venv.pip(), [sys.executable, "-m", "pip"])
+
+        # With it, the wheel is run directly, and says so itself.
+        (cache / "pip.whl").write_bytes(pip_wheel()[1])
+        self.assertEqual(venv.pip(), [sys.executable,
+                                      str(cache / "pip.whl" / "pip")])
+        done: subprocess.CompletedProcess[str] = subprocess.run(
+            [*venv.pip(), "--version"], capture_output=True, text=True,
+            check=False)
+        self.assertEqual(done.returncode, 0, done.stderr[-400:])
+        self.assertIn(str(cache / "pip.whl"), done.stdout)
+
+    def test_nothing_but_python_and_the_bootstrap(self) -> None:
+        """A machine with no `pip` runs a declaring program anyway.
+
+        This is the claim `README.md` makes: Python and the pasted
+        bootstrap are all that is needed.  An interpreter that has never
+        had `pip` stands in for such a machine.  Case 13 fetches `pip`'s
+        wheel, keeps it as `pip.whl`, installs this project with it, and
+        `AltVEnv` then uses that same copy to fetch what the program
+        declares.
+        """
+        # The zipped `pip` only runs alone if its libraries are inside.
+        import pip._vendor
+        if getattr(pip._vendor, "DEBUNDLED", False):
+            self.skipTest("this pip is debundled, so cannot run alone")
+
+        # A virtual environment made without `pip` is the bare machine.
+        bare: Path = self.root / "bare"
+        made: subprocess.CompletedProcess[str] = subprocess.run(
+            [sys.executable, "-m", "venv", "--without-pip", str(bare)],
+            capture_output=True, text=True, check=False)
+        if made.returncode != 0:
+            self.skipTest(f"no venv here: {made.stderr.strip()[-200:]}")
+        python: Path = (bare / "Scripts" / "python.exe" if os.name == "nt"
+                        else bare / "bin" / "python")
+        missing: subprocess.CompletedProcess[str] = subprocess.run(
+            [str(python), "-c", "import pip"], capture_output=True,
+            text=True, check=False)
+        self.assertNotEqual(missing.returncode, 0, "pip is not missing")
+
+        # The bootstrap installs this project and leaves `pip` behind.
+        home: Path = self.root / "bare-home"
+        done: subprocess.CompletedProcess[str] = run_bootstrap_case(
+            "13", home, self.index_url, python=str(python))
+        self.assertEqual(done.returncode, 0, done.stderr[-400:])
+        cache: Path = home / ".alt_venv"
+        self.assertTrue((cache / "pip.whl").is_file())
+
+        # The program's own declaration is fetched with that same copy.
+        program: Path = self.root / "bare-program" / "prog.py"
+        program.parent.mkdir(parents=True, exist_ok=True)
+        program.write_text(
+            "# /// script\n"
+            '# dependencies = ["widget"]\n'
+            "# ///\n"
+            "import sys\n"
+            f"sys.path.insert(0, {str(cache)!r})\n"
+            "import alt_venv\n"
+            "alt_venv.AltVEnv().install()\n"
+            "import widget\n"
+            "print(widget.__version__)\n")
+        environment: dict[str, str] = dict(
+            os.environ, HOME=str(home), PIP_INDEX_URL=self.index_url)
+        environment.pop("VIRTUAL_ENV", None)
+        ran: subprocess.CompletedProcess[str] = subprocess.run(
+            [str(python), str(program)], env=environment,
+            capture_output=True, text=True, check=False)
+        self.assertEqual(ran.returncode, 0, ran.stderr[-400:])
+        self.assertEqual(ran.stdout.strip(), "1.2.3")
 
     def test_install_passes_argv_to_pip(self) -> None:
         """Extra arguments reach `pip install`."""
@@ -3944,7 +4086,7 @@ class HarnessTest(unittest.TestCase):
         path is the one where a case does not work: the numbers are
         meaningless then, and saying which case broke is the only useful
         output.  `subprocess.run` is patched rather than breaking a real
-        index, which makes twelve cases times three repetitions
+        index, which makes thirteen cases times three repetitions
         instantaneous instead of minutes.
         """
         # Every case "fails", so every case must be named.
