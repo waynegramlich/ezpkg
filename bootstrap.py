@@ -56,15 +56,15 @@ and means the text a person copies is the text that was measured.
 `SHARED_LINES` is now just the three module level imports.
 
 The message names a **stage** where a case sets one.  `nopip3` sets
-`stage` before each step of its work -- `find home`, `choose pip`,
-`download pip`, `install alt_venv`, `import alt_venv`, two words at
-most -- and its `except` reports the stage that was running, then the
-exception's type and its one line of text: `cannot fetch alt_venv,
-choose pip failed: HTTPError: HTTP Error 404: Not Found`.  The type
-matters because some exceptions have no text at all: a bare
-`StopIteration` used to print `cannot fetch alt_venv: ` and nothing
-more.  The other cases name no stage and report the type and text
-alone.  See issue `3fpfipe`.
+its stage, `s`, before each step of its work -- `find home`, `choose
+pip`, `download pip`, `install alt_venv`, `import alt_venv`, two words
+at most -- and its `except` reports the stage that was running, then
+the exception's `repr`, which carries its type as well as its text:
+`cannot fetch alt_venv, choose pip failed: <HTTPError 404: 'Not
+Found'>`.  The type matters because some exceptions have no text at
+all: a bare `StopIteration` used to print `cannot fetch alt_venv: ` and
+nothing more.  The other cases name no stage and report the type and
+text alone.  See issue `3fpfipe`.
 
 The `paste` column was corrected twice on 2026-09-29: it had been left
 at `lines + 4` from before the `try` was charged, and then dropped by
@@ -115,7 +115,7 @@ user would type.  The real `~/.alt_venv` is never touched.
 |        | stdlib wheel  |         |       |       |        |        |        |
 | nopip2 | venv(no pip), | 7       | 54    | 57    | 1.42 s | 0.16 s | 1714   |
 |        | stdlib wheel  |         |       |       |        |        |        |
-| nopip3 | no venv, PyPI | 3       | 38    | 41    | 3.05 s | 0.14 s | 3538   |
+| nopip3 | no venv, PyPI | 3       | 27    | 30    | 3.05 s | 0.14 s | 3538   |
 |        | pip           |         |       |       |        |        |        |
 |        | subprocess    |         |       |       |        |        |        |
 +--------+---------------+---------+-------+-------+--------+--------+--------+
@@ -231,11 +231,26 @@ it as `~/.alt_venv/pip.whl`, and runs it as `python pip.whl/pip`, which
 is how pip documents running itself without being installed.  `AltVEnv`
 then uses that same copy, so nothing on the machine needs pip at all.
 It is a subprocess case, so none of pip's state reaches the program,
-and it costs 41 pasted lines against `pip2`'s 17.
+and it costs 30 pasted lines against `pip2`'s 17.
 
-Twelve of those lines, added on 2026-10-01, are the best spent.  Five
-set `stage`, so that a failure says where it happened.  Seven, one of
-them a comment, choose which pip to fetch: not the newest, but
+It is also the one case **squeezed on purpose**, on 2026-10-01: a
+bootstrap is meant to feel like magic, and a short one is pasted with
+less hesitation.  The ugliness is kept inside the `try`.  There, names
+are single letters, short statements on one topic share a line, `/`
+goes without spaces, the downloads skip `with`, and the message uses
+`repr`.  Outside it, the imports are one to a line, in order, and
+named plainly except for `urllib.request as req`, because the person
+moves them to the top of their program, where many tools check exactly
+that.  That took it from 41 pasted lines to 30.  `ruff.toml` exempts
+this file from the one rule the squeeze breaks, `E702`.  The comment
+on the choice of pip went too, at Wayne's word, since this docstring
+explains it.  Not squeezed: pip's `--no-input` and
+`--disable-pip-version-check`, which change what pip does.  Its lines
+are checked at the width they will have once pasted, with the URL
+spelled out; the widest is 74.
+
+Of its lines, the best spent set the stage, so that a failure says
+where it happened, and choose which pip to fetch: not the newest, but
 the newest upload whose `requires_python` floor this Python meets, so
 that when pip drops a Python every bootstrap already pasted on that
 Python keeps working.  Sorting by upload time rather than by version
@@ -743,41 +758,30 @@ def nopip3() -> None:
     # Ensure `alt_venv` is downloaded.
     import json
     import subprocess
-    import urllib.request
+    import urllib.request as req
     try:
-        stage = "find home"
-        target = pathlib.Path.home() / ".alt_venv"
-        wheel = target / "pip.whl"
-        if not (target / PACKAGE).is_dir():
-            if not wheel.is_file():
-                stage = "choose pip"
-                with urllib.request.urlopen(f"{JSON_API}/pip/json",
-                                            timeout=30) as r:
-                    releases = json.load(r)["releases"].values()
-                # Newest pip wheel whose `>=3.N` floor we meet.
-                entry = max(
-                    (e for files in releases for e in files
-                     if e["packagetype"] == "bdist_wheel" and not e["yanked"]
-                     and (floor := e["requires_python"] or "")[:4] == ">=3."
-                     and "," not in floor
-                     and int(floor.split(".")[1]) <= sys.version_info[1]),
-                    key=lambda e: e["upload_time_iso_8601"])
-                stage = "download pip"
-                target.mkdir(parents=True, exist_ok=True)
-                with urllib.request.urlopen(entry["url"], timeout=60) as r:
-                    wheel.with_suffix(".part").write_bytes(r.read())
-                wheel.with_suffix(".part").replace(wheel)
-            stage = f"install {PACKAGE}"
-            subprocess.run([sys.executable, str(wheel / "pip"), "install",
+        s = "find home"; t = pathlib.Path.home()/".alt_venv"; w = t/"pip.whl"
+        if not (t/PACKAGE).is_dir():
+            if not w.is_file():
+                s = "choose pip"; v = sys.version_info[1]
+                d = json.load(req.urlopen(f"{JSON_API}/pip/json",
+                                          timeout=30))
+                e = max((e for f in d["releases"].values() for e in f
+                         if e["url"][-4:] == ".whl" and not e["yanked"]
+                         and (q := e["requires_python"] or "")[:4] == ">=3."
+                         and "," not in q and int(q.split(".")[1]) <= v),
+                        key=lambda e: e["upload_time"])
+                s = "download pip"; r = req.urlopen(e["url"], None, 60).read()
+                t.mkdir(parents=True, exist_ok=True); p = t/"pip.part"
+                p.write_bytes(r); p.replace(w)
+            s = f"install {PACKAGE}"
+            subprocess.run([sys.executable, str(w/"pip"), "install",
                             "--no-input", "--disable-pip-version-check",
-                            "--target", str(target), PACKAGE], check=True)
-        stage = f"import {PACKAGE}"
-        sys.path.insert(0, str(target))
-        importlib.invalidate_caches()
-        module = importlib.import_module(PACKAGE)
-    except Exception as error:
-        raise SystemExit(f"cannot fetch {PACKAGE}, {stage} failed: "
-                         f"{type(error).__name__}: {error}") from None
+                            "--target", str(t), PACKAGE], check=True)
+        s = f"import {PACKAGE}"; sys.path.insert(0, str(t))
+        importlib.invalidate_caches(); importlib.import_module(PACKAGE)
+    except Exception as x:
+        raise SystemExit(f"cannot fetch {PACKAGE}, {s} failed: {x!r}")
 
 
 def main() -> None:

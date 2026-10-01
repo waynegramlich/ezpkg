@@ -2475,6 +2475,42 @@ expected every time the order changes, and is Claude's job.
     `nopip3` is 41 pasted lines, `pip2` 17, `nopip1` 51.  `venv4`,
     `pip4` and `pip5` keep calls that cannot lose a line at this depth.
 
+  * 6.15.11 - **`nopip3` squeezed to 28 pasted lines**, from 41, on
+    2026-10-01.  Wayne: "Squeezing the bootstrap down to few lines will
+    make people less hesitant to use it.  It is meant to be 'magic'."
+    Single letter names, short statements sharing a line, one import
+    line, `/` without spaces, no `with` around the downloads, PyPI's
+    shorter `upload_time`, and `repr` in the message, which carries the
+    exception's type and so freed the `raise`'s second line.  `from
+    None` went too, since `SystemExit` never prints a traceback.  Only
+    `nopip3`; the other twelve are untouched.  `ruff.toml` now exempts
+    `bootstrap.py` from `E401`, `E702` and `I001` as well.
+
+    Three things nearly slipped through.  A first pass swapped pip's
+    `--no-input` and `--disable-pip-version-check` for `-q`, which is
+    the `--quiet` that 6.17.7 removed because it hides pip's diagnosis
+    of a bad certificate; put back.  `t.mkdir(exist_ok=True)` dropped
+    `parents=True`, and the no-`pip` test caught it.  And a harness
+    name is shorter than what a paste carries: `JSON_API` becomes
+    `https://pypi.org/pypi`, so pasted widths are checked separately,
+    four columns shallower with the literals spelled out, and the widest
+    is exactly 79.  Run against the real PyPI on 3.12 and 3.11 without
+    `pip`, cold and warm.
+
+  * 6.15.12 - **Imports one to a line again**, 2026-10-01, at Wayne's
+    request: the combined `import json as j, subprocess, urllib.request
+    as u` was too un-Pythonic, and the person moves a case's imports to
+    the top of their program, where many tools insist on one import to
+    a line and sort them.  Semicolons stay, but only between statements
+    on one topic, which Wayne finds tools tolerate.  Then, keeping the
+    ugliness inside the `try`, `json` lost its alias and
+    `urllib.request` became `req`; the longer names cost one line, the
+    fetch of `pip`'s release list split in two, since a timeout is not
+    worth giving up to save it.  The comment on the choice of `pip`
+    then went, at Wayne's word, the docstring explaining it instead.
+    `nopip3` is 30 pasted lines, and
+    `ruff.toml` exempts `E702` alone of the three squeeze rules.
+
 * Step 6.16: Test suite cleanup, headed towards deleting some of the
   cases in `bootstrap.py` now that `nopip3` ships.
   * 6.16.1 - **Cases are named, not numbered**, 2026-10-01, at Wayne's

@@ -25,4 +25,10 @@ target-version = "py311"
 # name for the program it is pasted into.  Here every case is a function
 # of its own, so the name looks unused (`F841`) though it is not, once
 # pasted; the harness reads the module back from `sys.modules` instead.
-"bootstrap.py" = ["BLE001", "F841"]
+#
+# And a bootstrap is meant to be small enough to feel like magic, so the
+# shipping case is squeezed on purpose, with short statements on one
+# topic sharing a line (`E702`).  Its imports stay one to a line and in
+# order, because the person moves them to the top of their program and
+# many tools there check exactly that.
+"bootstrap.py" = ["BLE001", "F841", "E702"]

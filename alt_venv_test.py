@@ -926,17 +926,18 @@ class _IndexHandler(http.server.SimpleHTTPRequestHandler):
 
         # Build the subset of the payload that the `nopip` cases read:
         # `urls` for `nopip1` and `nopip2`, and `releases` for `nopip3`,
-        # which chooses a `pip` by `requires_python` and upload time.
+        # which chooses a `pip` by `requires_python` and `upload_time`.
         # Both are taken from the wheels themselves, the floor from their
-        # `METADATA` and the time from the file, so a test controls them
-        # by building the wheel it wants.
+        # `METADATA` and the time from the file, in PyPI's own format, so
+        # a test controls them by building the wheel it wants.
         host: str = self.headers.get("Host", "127.0.0.1")
         files: list[dict[str, Any]] = [
             {"filename": wheel.name, "yanked": False,
              "packagetype": "bdist_wheel",
              "requires_python": requires_python(wheel),
-             "upload_time_iso_8601": datetime.datetime.fromtimestamp(
-                 wheel.stat().st_mtime, datetime.UTC).isoformat(),
+             "upload_time": datetime.datetime.fromtimestamp(
+                 wheel.stat().st_mtime, datetime.UTC).strftime(
+                     "%Y-%m-%dT%H:%M:%S"),
              "url": f"{cast(_IndexServer, self.server).scheme}"
                     f"://{host}/{normalized}/{wheel.name}"}
             for wheel in wheels]
@@ -1617,7 +1618,7 @@ class AltVEnvTest(unittest.TestCase):
         self.assertNotEqual(done.returncode, 0)
         self.assertNotIn("Traceback", done.stderr)
         self.assertIn(f"cannot fetch {MODULE}, choose pip failed: "
-                      "HTTPError", done.stderr)
+                      "<HTTPError 404", done.stderr)
 
     @runs_cases
     def test_the_shipping_case_chooses_a_pip_this_python_runs(self) -> None:
