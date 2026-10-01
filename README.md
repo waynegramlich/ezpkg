@@ -4,12 +4,13 @@
 of dealing with concurrent Python program development where each program has
 its own Python virtual environment.  When switching from one program 
 to the next, it is easy to forget to deactivate the current one before
-activating the next one.  If you forget, you end up running one program
-against another program's packages.  The question that arose was "Is there a way to avoid virtual
-environments entirely?"  Ultimately `AltVEnv` was born as a result.
+activating the next one.  If you forget, you end up running one program against
+another program's packages.  The question that arose was "Is there a way to
+avoid Python virtual environments entirely?"  Ultimately `AltVEnv` grew out of
+this investigation and answer turned out to be "absolutely yes!!!".
 
 <!-- Claude:
-When we get ready to upload AltVEnv to PyPI, N needs to be updated.
+When we get ready to upload AltVEnv to PyPI, TBD needs to be updated.
 -->
 `AltVEnv` provides a way to avoid virtual environments entirely.  It does
 this by requiring N lines of "bootstrap" code be installed near the front
@@ -17,17 +18,16 @@ of the Python program called the `AltVEnv` bootstrap.  The bootstrap code
 deals with everything else -- setting up program's environment variables,
 downloading packages, etc.  A further advantage is that a single file
 program can literally be E-mailed to somebody and it will just work.
-
-With `AltVenv`, neither the developer nor the end-user have to deal with the
+With `AltVEnv`, neither the developer nor the end-user have to deal with the
 dreaded missing Python package problem.
 
 ## Requirements
 
 The requirements for `AltVEnv` are:
 1. Python3 version 3.11 or more is required.
-2. Required modules are simply listed in metadata at the front of the program.
+2. Required packages are simply listed in metadata at the front of the program.
 3. A small piece of bootstrap code (~N lines) must be added to your code
-   before attempting to `import` the modules listed in step 2.
+   before attempting to `import` the packages listed in step 2.
 4. An active network connection is required for the initial run.  Afterwards
    the packages are cached and a network connection is no longer needed.
 That's it!
@@ -50,6 +50,8 @@ The following is a short list to explore:
 
 ## A Small Annotated Example
 
+<!--
+Claude: Remind me to replace `bootstrap="TBD"` before we upload to PyPI. -->
 Here is a complete simple program where each line preceded by a line number for
 expository purposes.  
 
@@ -169,9 +171,9 @@ Next is the imports after the bootstrap:
   While these are standard Python `import` statements, they must occur after
   the `AltVEnv` bootstrap because.  The `# type: ignore[import-not_found]`
   is only needed if when use the `pylint` program, since it will complain
-  about an unrecognized module name.
+  about an unrecognized package name.
 * `34`:
-  This is the program body that shows that both modules have been successfully
+  This is the program body that shows that both packages have been successfully
   imported.
 
 ## The `.alt_venv` directory:
@@ -184,7 +186,7 @@ in your home directory.  The location depends upon your operating system:
 There is a `README.md` inside `.alt_venv/` that describes its purpose.
 In addition, there are four sub-directories:
 * `versions/`:
-  This holds one directory per module version, named after the
+  This holds one directory per package version, named after the
   Python wheel it came from.  These are added Python's import path.
 * `wheels/`:
   Each Python wheel is also represented as a directory
@@ -202,13 +204,13 @@ executed.  To delete the directory:
 
 ## The Security Prompt
 
-The first time `AltEnv` decides to download some Python modules (and you
+The first time `AltEnv` decides to download some Python packages (and you
 are using the command line interface) it will prompt you with the following
 question:
 
 <!-- Claude: I changed the message, so the code need to be updated. -->
 ```
-AltVEnv wants download 2 modules with 3 dependencies into /home/YOU/.alt_venv .
+AltVEnv wants download 2 packages with 3 dependencies into /home/YOU/.alt_venv .
 Go ahead? [y=>Yes, n=>No, a=>Always, ?=>Explanation]:
 ```
 * Capital letters work as well as small ones, and a bare newline means `n`.
@@ -233,14 +235,14 @@ by `cron`, a build system, a service manager, or by double clicking an icon
 has nobody to put a question to, so it just says what it downloaded and
 carries on.  This avoids annoying hangs with no way to unhang them.
 
-The primary purpose of the prompt is to remind you that one or more modules
+The primary purpose of the prompt is to remind you that one or more packages
 are to be downloaded.  There is no way for `AltVEnv` to determine any of the
 following:
 * Maliciousness:
   There is now way to magically determine if the package has malicious intent.
   The program maintainer decides what goes on the `dependencies = [...]`.
 * Typos:
-  There is now way to fix typos (e.g. `reqeusts` vs. `requests`)
+  There is now way to fix typos (e.g. `requests` vs. `requests`)
 * Unexpected early execution:
   The moment it is placed on Python's import path, before your program
   imports anything from it, by shipping a file that Python executes during
@@ -253,9 +255,9 @@ following:
 ## Miscellaneous
 
 Removing old files:
-* `AltVEnv` also keeps track of how recently a module has been used.  When
+* `AltVEnv` also keeps track of how recently a package has been used.  When
   they have not been used in a while they get deleted.  Again, there is no
-  harm in doing this since, the modules can easily be fetched over the network.
+  harm in doing this since, the packages can easily be fetched over the network.
 
 * 
 **Old packages are cleared out on their own.**  A package that no program
@@ -269,7 +271,7 @@ The sweep happens at most once a day, when a program is about to fetch
 something anyway, so you will never notice it.
 
 **Programs share the directory safely, and nothing is stored twice.**  When two
-programs want the same package, the second one recognises that the identical
+programs want the same package, the second one recognizes that the identical
 package is already there and uses it.  That holds even if both programs
 start at the same moment.
 

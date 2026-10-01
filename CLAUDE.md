@@ -15,9 +15,10 @@ working directory.  They serve different purposes and must not be confused:
 Each ignores the other: `.hgignore` excludes `.git/`, `.gitignore`
 excludes `.hg/`.
 
-The division is absolute in both directions: Claude never runs `git`, and
-Wayne never runs `hg`.  Wayne includes `CLAUDE.md` in every git commit, so
-the rules stay versioned alongside the work they govern.
+The division is absolute in both directions: Claude never changes the
+git repository, and Wayne never runs `hg`.  Wayne includes `CLAUDE.md`
+in every git commit, so the rules stay versioned alongside the work
+they govern.
 
 ### Rules for Claude
 
@@ -27,12 +28,16 @@ the rules stay versioned alongside the work they govern.
    are notes to our future selves, not publishable history; they do not
    need to be good.
 
-2. **Claude never runs `git` at all.**  Not `commit`, not `add`, not
-   `amend`, not `init`, not a branch or a tag.  Wayne does every git
-   operation himself, by hand.  When a chunk of work looks finished, say
-   so and stop there; do not offer to commit it, and do not stage
-   anything in preparation.  Reading state with `git status` or
-   `git log` is also off limits -- if that information is needed, ask.
+2. **Claude never changes the git repository.**  Not `commit`, not
+   `add`, not `amend`, not `init`, not `stash`, not `checkout` or
+   `restore`, not a branch or a tag.  Wayne owns every git write, and
+   `git commit` above all, because the point is a git log free of the
+   checkpoint traffic that mercurial carries.  When a chunk of work
+   looks finished, say so and stop there; do not offer to commit it,
+   and do not stage anything in preparation.
+
+   Reading is allowed, as of 2026-10-01: `git status`, `git log`,
+   `git diff` and `git show` are fine, since they change nothing.
 
    This rule exists because Claude previously made three unrequested
    commits while setting up the repository, which is exactly the
@@ -178,10 +183,13 @@ finishing one does not call for it.
     ALT_VENV_TEST=COMPLETE python3 alt_venv_test.py
 
 `ALT_VENV_TEST` chooses how many of the thirteen bootstrap cases the
-all-case tests exercise.  Unset or `FAST` uses one, `nopip3`, the one
-that ships; `COMPLETE` uses all thirteen and takes several times
-longer.  Anything else is refused rather than quietly treated as
-`FAST`.
+all-case tests exercise.  Unset or `FAST` uses the three that need no
+pip, `nopip1` to `nopip3`; `COMPLETE` uses all thirteen and takes
+several times longer.  The cull follows the same setting.  `nopip3` is
+the one that ships, and the suite names it `SHIPPING`.  Case names,
+such as `pip2` or `pip1,pip2`, select just those, and `NONE` selects no
+case at all, which is the cull's baseline.  Anything else is refused
+rather than quietly treated as `FAST`.
 
     ./alt_venv_coverage.py <directory>             # this process only
     ./alt_venv_coverage.py --children <directory>  # much slower

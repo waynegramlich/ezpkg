@@ -2648,6 +2648,25 @@ expected every time the order changes, and is Claude's job.
     `sys.base_prefix` among the directories to ignore.  The report reads
     only this project's files, so the answer is unaffected; the cost is
     time and the size of the counts.  Not yet looked into.
+  * 6.16.5 - **The other ten cases stay but stop running**, 2026-10-01.
+    Wayne: "leaving the tests around hurts nothing.  From now on just
+    run nopip1-3."  `FAST_CASES` became `nopip1` to `nopip3`, and the
+    cull takes its cases from `ALT_VENV_TEST` as the suite does, so it
+    measures those three unless told `COMPLETE`.  `FAST_CASES` had been
+    standing in for "the case that ships", which three cases cannot do,
+    so that meaning moved to a constant of its own, `SHIPPING`.
+  * 6.16.6 - **The cull has tests**, 2026-10-01: `CoverageToolTest`,
+    twelve of them, on counts written by hand and with child processes
+    mocked, so that nothing is traced inside a run the tool may itself
+    be tracing.  They cover `flatten`, `marked` (pulled out of
+    `run_suite` to be testable), `case_bodies`, `covered`, `compare`,
+    `report`, `merge_children`, `trace_children`, `measure_one`,
+    `measure_cases` and `main`'s `--compare` path.  Two bugs found
+    earlier in the day were put back one at a time, the own-body count
+    and the greedy order ignoring the shipping case, and the comparison
+    test failed on each.  Not covered: `run_suite` and `main`'s
+    measuring path, which run the suite itself, and `_credit` in the
+    trace hook, which only exists inside a traced child.
 
 * Step 6.17: And more.  A place holder for additional steps.
 

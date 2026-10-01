@@ -13,18 +13,20 @@ is honoured by the suite as usual, so `COMPLETE` measures every
 `bootstrap.py` case and costs several minutes.
 
 `--per-case <directory>` answers a different question: what does each
-`bootstrap.py` case add?  It makes one baseline run of the whole suite
-with `ALT_VENV_TEST=NONE`, so that no case runs, and then one run per
-case of only the tests marked `runs_cases`, with `ALT_VENV_TEST`
-naming that case.  Children are traced throughout.  Runs go two at a
-time by default (`--jobs`), since each is a busy tree of processes in
-its own right, and each writes only under `<directory>/<run>/`, so runs
-side by side cannot overwrite each other.  Then it compares them and
-writes `report.md`: what each case adds beyond the baseline, the lines
-only one case reaches, and a greedy ordering from the case that ships
-showing which cases add nothing.  `--compare <directory>` redoes just
-the comparison from the saved counts, in seconds, which is what makes
-culling cases cheap to repeat.  See Step 6.16 of `LOGBOOK.md`.
+`bootstrap.py` case add?  The cases are those `ALT_VENV_TEST` selects,
+so `nopip1` to `nopip3` unless it says `COMPLETE`.  It makes one
+baseline run of the whole suite with `ALT_VENV_TEST=NONE`, so that no
+case runs, and then one run per case of only the tests marked
+`runs_cases`, with `ALT_VENV_TEST` naming that case.  Children are
+traced throughout.  Runs go two at a time by default (`--jobs`), since
+each is a busy tree of processes in its own right, and each writes only
+under `<directory>/<run>/`, so runs side by side cannot overwrite each
+other.  Then it compares them and writes `report.md`: what each case
+adds beyond the baseline, the lines only one case reaches, and a greedy
+ordering from the case that ships showing which cases add nothing.
+`--compare <directory>` redoes just the comparison from the saved
+counts, in seconds, which is what makes culling cases cheap to repeat.
+See Step 6.16 of `LOGBOOK.md`.
 
 Two workarounds here were each found the hard way, and both matter
 more than they look:
@@ -152,10 +154,7 @@ def run_suite(marked_only: bool = False) -> bool:
     if marked_only:
         loaded: unittest.TestSuite = (
             unittest.defaultTestLoader.loadTestsFromModule(alt_venv_test))
-        kept: unittest.TestSuite = unittest.TestSuite(
-            test for test in flatten(loaded)
-            if getattr(getattr(test, test._testMethodName, None),
-                       "runs_cases", False))
+        kept: unittest.TestSuite = unittest.TestSuite(marked(loaded))
         return unittest.TextTestRunner().run(kept).wasSuccessful()
     try:
         program: unittest.TestProgram = unittest.main(
@@ -163,6 +162,22 @@ def run_suite(marked_only: bool = False) -> bool:
     except SystemExit:
         return False
     return program.result.wasSuccessful()
+
+
+def marked(suite: unittest.TestSuite) -> list[unittest.TestCase]:
+    """Return the tests in `suite` whose method is marked `runs_cases`.
+
+    Arguments:
+    * `suite` (`unittest.TestSuite`):
+      What the loader produced.
+
+    Returns:
+    * (`list[unittest.TestCase]`): The marked tests, in loader order.
+    """
+    # The mark is on the function, and a bound method reads through.
+    return [test for test in flatten(suite)
+            if getattr(getattr(test, test._testMethodName, None),
+                       "runs_cases", False)]
 
 
 def flatten(suite: unittest.TestSuite) -> list[unittest.TestCase]:
@@ -384,7 +399,7 @@ def compare(directory: Path) -> str:
             # others' `case` lines are covered too.
             own[label] = lines & {("bootstrap.py", number) for number
                                   in bodies.get(label, (set(), set()))[1]}
-    missing: list[str] = [label for label in bootstrap.MECHANISMS
+    missing: list[str] = [label for label in alt_venv_test.cases()
                           if label not in runs]
     if not base.is_file():
         missing.insert(0, BASELINE)
@@ -436,7 +451,7 @@ def compare(directory: Path) -> str:
     step: int = 0
     while remaining:
         shipping: list[str] = [label for label in remaining
-                               if label in alt_venv_test.FAST_CASES]
+                               if label == alt_venv_test.SHIPPING]
         best: str = (shipping[0] if shipping else max(
             remaining, key=lambda one: len(runs[one] - total)))
         added: int = len(runs[best] - total)
@@ -504,7 +519,11 @@ def measure_one(name: str, selection: str, marked_only: bool,
 
 
 def measure_cases(directory: Path, jobs: int) -> bool:
-    """Measure a baseline, then every case separately, `jobs` at a time.
+    """Measure a baseline, then each case separately, `jobs` at a time.
+
+    The cases are the ones `ALT_VENV_TEST` selects, as for the suite
+    itself: `nopip1` to `nopip3` by default, and all thirteen under
+    `COMPLETE`.
 
     The baseline is the whole suite with no case selected, and is the
     one long run.  Each case then runs only the tests that run cases,
@@ -522,13 +541,13 @@ def measure_cases(directory: Path, jobs: int) -> bool:
     * (`bool`): Whether every run passed its tests.
     """
     # Each run is a process of its own, so threads only wait on them.
-    import bootstrap
+    import alt_venv_test
     passed: bool = True
     with concurrent.futures.ThreadPoolExecutor(max_workers=jobs) as pool:
         pending: list[concurrent.futures.Future[tuple[str, int, float]]] = [
             pool.submit(measure_one, BASELINE, "NONE", False, directory)]
         pending += [pool.submit(measure_one, label, label, True, directory)
-                    for label in bootstrap.MECHANISMS]
+                    for label in alt_venv_test.cases()]
         future: concurrent.futures.Future[tuple[str, int, float]]
         for future in concurrent.futures.as_completed(pending):
             label: str

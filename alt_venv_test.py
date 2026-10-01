@@ -56,6 +56,7 @@ import inspect
 import io
 import json
 import os
+import pickle
 import pty
 import re
 import shutil
@@ -66,6 +67,7 @@ import sysconfig
 import tempfile
 import threading
 import time
+import trace
 import unittest
 import unittest.mock
 import urllib.error
@@ -77,6 +79,7 @@ from types import ModuleType
 from typing import IO, Any, TypeVar, cast
 
 import alt_venv
+import alt_venv_coverage
 import bootstrap
 
 # The version comes from the module, so it is written down once.
@@ -132,14 +135,16 @@ FLOOR: str = floor()
 PROMPT: str = "go ahead? [y=>Yes/n=>No/a=>Always/?=>Explanation]"
 CONFIRM: str = "Really never ask again? [y=>Yes/n=>No]"
 
-# Which cases the all-case tests exercise.  The default is one case, on
-# the grounds that the quick run should exercise the case that ships.
-# That is `nopip3`, which fetches a `pip` of its own and runs it as a
-# subprocess, so it needs no `pip` on the machine and leaves none of
-# `pip`'s state in the program; see Step 6.15 in `LOGBOOK.md`.  The
-# other twelve run under `ALT_VENV_TEST=COMPLETE`, which is what the
-# end of a task gets.
-FAST_CASES: tuple[str, ...] = ("nopip3",)
+# The case that ships: `nopip3` fetches a `pip` of its own and runs it
+# as a subprocess, so it needs no `pip` on the machine and leaves none of
+# `pip`'s state in the program.  See Step 6.15 in `LOGBOOK.md`.
+SHIPPING: str = "nopip3"
+
+# Which cases the all-case tests exercise by default: the three that
+# need no `pip`, since the first cull found that only they add anything
+# to coverage (Step 6.16.3).  The other ten are kept, because keeping
+# them costs nothing, and run under `ALT_VENV_TEST=COMPLETE`.
+FAST_CASES: tuple[str, ...] = ("nopip1", "nopip2", "nopip3")
 
 def platform_tag() -> str:
     """Return a compatibility tag this interpreter would accept.
@@ -2249,7 +2254,7 @@ class InstallTest(unittest.TestCase):
         # The bootstrap installs this project and leaves `pip` behind.
         home: Path = self.root / "bare-home"
         done: subprocess.CompletedProcess[str] = run_bootstrap_case(
-            "nopip3", home, self.index_url, python=str(python))
+            SHIPPING, home, self.index_url, python=str(python))
         self.assertEqual(done.returncode, 0, done.stderr[-400:])
         cache: Path = home / ".alt_venv"
         self.assertTrue((cache / "pip.whl").is_file())
@@ -4171,7 +4176,7 @@ class HarnessTest(unittest.TestCase):
         self.assertEqual(sorted(counts), sorted(bootstrap.MECHANISMS))
         imports: int
         lines: int
-        imports, lines = counts["nopip3"]
+        imports, lines = counts[SHIPPING]
         self.assertEqual(imports, 3)
         self.assertGreater(lines, 5)
 
@@ -4288,6 +4293,282 @@ class HarnessTest(unittest.TestCase):
         self.assertIn("subprocess", table)
         self.assertIn("wrap", table)
         self.assertEqual(table.count("| nopip2 |"), 1, table)
+
+
+class CoverageToolTest(unittest.TestCase):
+    """Exercise `alt_venv_coverage.py`, the tool that decides what to cull.
+
+    The cull reads saved counts and says which cases add nothing, and
+    cases get deleted on its word, so it needs tests as much as anything
+    it measures.  Everything here runs on counts written by hand, with
+    child processes mocked, so nothing is traced: the suite may itself
+    be running under this tool, and a second tracer would switch the
+    first one off.
+
+    Attributes:
+    * `root` (`Path`):
+      A temporary directory, removed after each test.
+
+    Constructor:
+    * `CoverageToolTest()`, by `unittest` rather than by hand.
+    """
+
+    # Set by `setUp`.
+    root: Path
+
+    def setUp(self) -> None:
+        """Make a scratch directory, and choose the default cases."""
+        # `ALT_VENV_TEST` may name one case when the cull runs this
+        # suite, and `compare` and `measure_cases` both consult it.
+        self.root = Path(tempfile.mkdtemp(prefix="cull-"))
+        self.addCleanup(shutil.rmtree, self.root, True)
+        patcher: Any = unittest.mock.patch.dict(
+            os.environ, {"ALT_VENV_TEST": "FAST"})
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def save(self, run: str, lines: Sequence[tuple[str, int]]) -> None:
+        """Write `lines` as the counts of one run, the way `report` does.
+
+        Arguments:
+        * `run` (`str`):
+          The run's directory name: a case label or `BASELINE`.
+        * `lines` (`Sequence[tuple[str, int]]`):
+          Lines of this project's files, as bare names and numbers.
+        """
+        # The same tuple `trace` reads back through `infile`.
+        here: Path = Path(__file__).resolve().parent
+        counts: dict[tuple[str, int], int] = {
+            (str(here / name), number): 1 for name, number in lines}
+        target: Path = self.root / run
+        target.mkdir(parents=True, exist_ok=True)
+        with open(target / alt_venv_coverage.COUNTS, "wb") as opened:
+            pickle.dump((counts, {}, {}), opened)
+
+    def test_flatten_and_marked(self) -> None:
+        """Nested suites flatten, and only marked tests are kept."""
+        # A class of its own, with one marked test and one not.
+        class Sample(unittest.TestCase):
+            """Two tests, one of which runs cases."""
+
+            @runs_cases
+            def test_marked(self) -> None:
+                """Marked."""
+
+            def test_plain(self) -> None:
+                """Not marked."""
+
+        inner: unittest.TestSuite = unittest.TestSuite(
+            [Sample("test_marked"), Sample("test_plain")])
+        outer: unittest.TestSuite = unittest.TestSuite([inner])
+        self.assertEqual(len(alt_venv_coverage.flatten(outer)), 2)
+        kept: list[unittest.TestCase] = alt_venv_coverage.marked(outer)
+        self.assertEqual([test.id().split(".")[-1] for test in kept],
+                         ["test_marked"])
+
+    def test_case_bodies_cover_every_case(self) -> None:
+        """Each case's range holds its statements but not its `case`."""
+        # One entry per case, and no two ranges overlap.
+        bodies: dict[str, tuple[set[int], set[int]]] = (
+            alt_venv_coverage.case_bodies())
+        self.assertEqual(sorted(bodies), sorted(bootstrap.MECHANISMS))
+        seen: set[int] = set()
+        label: str
+        whole: set[int]
+        statements: set[int]
+        for label, (whole, statements) in bodies.items():
+            with self.subTest(case=label):
+                self.assertTrue(statements)
+                self.assertLessEqual(statements, whole)
+                self.assertNotIn(min(whole), statements)
+                self.assertFalse(whole & seen)
+                seen |= whole
+
+    def test_covered_keeps_only_this_project(self) -> None:
+        """Other files, the instrument itself and zero counts are dropped."""
+        # Four kinds of key, of which only one survives.
+        here: Path = Path(__file__).resolve().parent
+        counts: dict[tuple[str, int], int] = {
+            (str(here / "alt_venv.py"), 5): 2,
+            (str(here / "alt_venv.py"), 6): 0,
+            ("/usr/lib/python3/somewhere.py", 1): 3,
+            (str(here / "alt_venv_coverage.py"), 1): 1}
+        saved: Path = self.root / "counts"
+        with open(saved, "wb") as opened:
+            pickle.dump((counts, {}, {}), opened)
+        self.assertEqual(alt_venv_coverage.covered(saved),
+                         {("alt_venv.py", 5)})
+
+    def test_compare_attributes_lines_to_cases(self) -> None:
+        """Beyond, only, own body and the greedy order all add up.
+
+        The shipping case goes first in the greedy order however little
+        it adds, and a `case` line that a `match` merely passed through
+        on the way is nobody's.
+        """
+        # `nopip1` adds 12 and 13, `nopip2` only 12, and the shipping
+        # case 12 and 14, all over a baseline of 10 and 11.
+        bodies: dict[str, tuple[set[int], set[int]]] = (
+            alt_venv_coverage.case_bodies())
+        statement: int = min(bodies["nopip1"][1])
+        passed_through: int = min(bodies["nopip1"][0])
+        self.save(alt_venv_coverage.BASELINE,
+                  [("alt_venv.py", 10), ("alt_venv.py", 11)])
+        self.save("nopip1", [("alt_venv.py", 10), ("alt_venv.py", 12),
+                             ("alt_venv.py", 13),
+                             ("bootstrap.py", statement)])
+        self.save("nopip2", [("alt_venv.py", 12)])
+        self.save(SHIPPING, [("alt_venv.py", 12), ("alt_venv.py", 14),
+                             ("bootstrap.py", passed_through)])
+        text: str = alt_venv_coverage.compare(self.root)
+
+        # The per-case table, the greedy order, and the line listings.
+        self.assertIn("The baseline covers 2 lines", text)
+        self.assertNotIn("No counts for", text)
+        self.assertIn("| nopip1 | 1 of ", text)
+        self.assertIn(" | 2 | 2 | 1 | 1 |", text)
+        self.assertIn(f"| {SHIPPING} | 0 of ", text)
+        self.assertIn("| 1 | nopip3 | 2 | 4 |", text)
+        self.assertIn("| 2 | nopip1 | 1 | 5 |", text)
+        self.assertIn("| 3 | nopip2 | 0 | 5 |", text)
+        self.assertIn("## Only `nopip3`", text)
+        self.assertIn("alt_venv.py:14:", text)
+        self.assertNotIn("## Only `nopip2`", text)
+        self.assertNotIn(f"bootstrap.py:{passed_through}:", text)
+
+    def test_compare_names_missing_runs(self) -> None:
+        """Runs that never finished are named rather than ignored."""
+        # An empty directory is missing everything the default selects.
+        text: str = alt_venv_coverage.compare(self.root)
+        self.assertIn("No counts for: baseline, nopip1, nopip2, nopip3.",
+                      text)
+
+    def test_report_keeps_the_counts(self) -> None:
+        """`report` saves what `compare` later reads back."""
+        # Counts set by hand, so no second tracer is ever started.  The
+        # stubs type `counts` by file name alone, though `trace` keys it
+        # by file and line, hence the cast.
+        here: Path = Path(__file__).resolve().parent
+        tracer: trace.Trace = alt_venv_coverage.build_tracer()
+        tracer.counts = cast(Any, {(str(here / "alt_venv.py"), 7): 1,
+                                   (str(self.root / "gone.py"), 1): 1})
+        with (contextlib.redirect_stdout(io.StringIO()),
+              contextlib.redirect_stderr(io.StringIO())):
+            alt_venv_coverage.report(tracer, self.root / "out")
+        self.assertEqual(alt_venv_coverage.covered(
+            self.root / "out" / alt_venv_coverage.COUNTS),
+            {("alt_venv.py", 7)})
+
+    def test_merge_children_folds_every_file(self) -> None:
+        """Each child's counts are added into the parent's."""
+        # Two children counting the same line, and one a second line.
+        tracer: trace.Trace = alt_venv_coverage.build_tracer()
+        tracer.counts = cast(Any, {("a.py", 1): 1})
+        children: Path = self.root / "children"
+        children.mkdir()
+        child: int
+        for child, counts in enumerate(({("a.py", 1): 2},
+                                        {("a.py", 1): 3, ("a.py", 2): 1})):
+            with open(children / f"counts-{child}", "wb") as opened:
+                pickle.dump((counts, {}, {}), opened)
+        self.assertEqual(
+            alt_venv_coverage.merge_children(tracer, children), 2)
+        self.assertEqual(tracer.counts, {("a.py", 1): 6, ("a.py", 2): 1})
+
+    def test_trace_children_sets_the_environment(self) -> None:
+        """Children find the hook on `PYTHONPATH` and the directory."""
+        # Restored afterwards by the patch, whatever the call sets.
+        hook: str = str(Path(__file__).resolve().parent / "trace_hook")
+        counts: Path = self.root / "child-counts"
+        with unittest.mock.patch.dict(os.environ, {"PYTHONPATH": "x"}):
+            alt_venv_coverage.trace_children(counts)
+            self.assertEqual(os.environ["PYTHONPATH"],
+                             f"{hook}{os.pathsep}x")
+            self.assertEqual(os.environ["ALT_VENV_COVER"], str(counts))
+        self.assertTrue(counts.is_dir())
+
+    def test_measure_one_writes_only_under_its_own_name(self) -> None:
+        """A run's command, selection and log are all its own."""
+        # The child is mocked; what matters is how it would be started.
+        finished: subprocess.CompletedProcess[bytes] = (
+            subprocess.CompletedProcess([], 0))
+        with unittest.mock.patch.object(
+                alt_venv_coverage.subprocess, "run",
+                return_value=finished) as run:
+            name, status, seconds = alt_venv_coverage.measure_one(
+                "pip2", "pip2", True, self.root)
+        self.assertEqual((name, status), ("pip2", 0))
+        self.assertGreaterEqual(seconds, 0.0)
+        self.assertTrue((self.root / "pip2" / "log.txt").is_file())
+        command: list[str] = run.call_args.args[0]
+        self.assertIn(str(self.root / "pip2"), command)
+        self.assertIn("--children", command)
+        self.assertIn("--marked-only", command)
+        self.assertEqual(run.call_args.kwargs["env"]["ALT_VENV_TEST"],
+                         "pip2")
+
+        # The baseline runs everything, so it asks for no narrowing.
+        with unittest.mock.patch.object(
+                alt_venv_coverage.subprocess, "run",
+                return_value=finished) as run:
+            alt_venv_coverage.measure_one(alt_venv_coverage.BASELINE,
+                                          "NONE", False, self.root)
+        self.assertNotIn("--marked-only", run.call_args.args[0])
+
+    def test_measure_cases_runs_the_baseline_and_each_case(self) -> None:
+        """One baseline and one run per selected case; failure is told."""
+        # Recorded rather than run, with one case made to fail.
+        calls: list[tuple[str, str, bool]] = []
+
+        def fake(name: str, selection: str, marked_only: bool,
+                 directory: Path) -> tuple[str, int, float]:
+            """Record a run instead of making it.
+
+            Arguments:
+            * `name` (`str`): The run's name.
+            * `selection` (`str`): Its `ALT_VENV_TEST`.
+            * `marked_only` (`bool`): Whether it narrows to marked tests.
+            * `directory` (`Path`): Where it would write.
+
+            Returns:
+            * (`tuple[str, int, float]`): As `measure_one` returns.
+            """
+            # Only `nopip2` fails, so the verdict has to notice it.
+            calls.append((name, selection, marked_only))
+            return name, int(name == "nopip2"), 0.0
+
+        with (unittest.mock.patch.object(alt_venv_coverage, "measure_one",
+                                         fake),
+              contextlib.redirect_stderr(io.StringIO()) as told):
+            passed: bool = alt_venv_coverage.measure_cases(self.root, 2)
+        self.assertFalse(passed)
+        self.assertIn("FAILED", told.getvalue())
+        self.assertEqual(sorted(calls), sorted(
+            [(alt_venv_coverage.BASELINE, "NONE", False)]
+            + [(label, label, True) for label in FAST_CASES]))
+
+    def test_main_compare_needs_a_directory(self) -> None:
+        """`--compare` alone is refused, as `argparse` refuses things."""
+        # Exit status 2 is `argparse`'s for a usage error.
+        with (unittest.mock.patch.object(sys, "argv", ["x", "--compare"]),
+              contextlib.redirect_stderr(io.StringIO()),
+              self.assertRaises(SystemExit) as caught):
+            alt_venv_coverage.main()
+        self.assertEqual(caught.exception.code, 2)
+
+    def test_main_compare_writes_the_report(self) -> None:
+        """`--compare` writes `report.md` and prints the same text."""
+        # An empty directory still makes a report, saying what is missing.
+        with (unittest.mock.patch.object(
+                  sys, "argv", ["x", "--compare", str(self.root)]),
+              unittest.mock.patch.object(sys, "path", list(sys.path)),
+              contextlib.redirect_stdout(io.StringIO()) as printed,
+              contextlib.redirect_stderr(io.StringIO())):
+            status: int = alt_venv_coverage.main()
+        self.assertEqual(status, 0)
+        written: str = (self.root / "report.md").read_text()
+        self.assertIn("No counts for", written)
+        self.assertIn(written.strip(), printed.getvalue())
 
 
 @unittest.skipUnless(os.environ.get("ALT_VENV_REPORT"),
