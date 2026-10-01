@@ -115,7 +115,7 @@ user would type.  The real `~/.alt_venv` is never touched.
 |        | stdlib wheel  |         |       |       |        |        |        |
 | nopip2 | venv(no pip), | 7       | 54    | 57    | 1.42 s | 0.16 s | 1714   |
 |        | stdlib wheel  |         |       |       |        |        |        |
-| nopip3 | no venv, PyPI | 3       | 27    | 30    | 3.05 s | 0.14 s | 3538   |
+| nopip3 | no venv, PyPI | 3       | 24    | 27    | 3.05 s | 0.14 s | 3538   |
 |        | pip           |         |       |       |        |        |        |
 |        | subprocess    |         |       |       |        |        |        |
 +--------+---------------+---------+-------+-------+--------+--------+--------+
@@ -231,7 +231,7 @@ it as `~/.alt_venv/pip.whl`, and runs it as `python pip.whl/pip`, which
 is how pip documents running itself without being installed.  `AltVEnv`
 then uses that same copy, so nothing on the machine needs pip at all.
 It is a subprocess case, so none of pip's state reaches the program,
-and it costs 30 pasted lines against `pip2`'s 17.
+and it costs 27 pasted lines against `pip2`'s 17.
 
 It is also the one case **squeezed on purpose**, on 2026-10-01: a
 bootstrap is meant to feel like magic, and a short one is pasted with
@@ -241,13 +241,18 @@ goes without spaces, the downloads skip `with`, and the message uses
 `repr`.  Outside it, the imports are one to a line, in order, and
 named plainly except for `urllib.request as req`, because the person
 moves them to the top of their program, where many tools check exactly
-that.  That took it from 41 pasted lines to 30.  `ruff.toml` exempts
+that.  That took it from 41 pasted lines to 27.  `ruff.toml` exempts
 this file from the one rule the squeeze breaks, `E702`.  The comment
 on the choice of pip went too, at Wayne's word, since this docstring
 explains it.  Not squeezed: pip's `--no-input` and
-`--disable-pip-version-check`, which change what pip does.  Its lines
-are checked at the width they will have once pasted, with the URL
-spelled out; the widest is 74.
+`--disable-pip-version-check`, which change what pip does.  It fetches
+pip whenever `alt_venv` is missing, even if an earlier run that failed
+before installing left a `pip.whl` behind; skipping that rare download
+cost a whole level of indentation.  Paths go to `subprocess.run` as
+they are, and pip's `--target` is spelled `-t`.  What comments it has
+sit at the ends of lines, where they cost nothing.  Its lines are
+checked at the width they will have once pasted, with the URL spelled
+out; the widest is 78.
 
 Of its lines, the best spent set the stage, so that a failure says
 where it happened, and choose which pip to fetch: not the newest, but
@@ -761,23 +766,20 @@ def nopip3() -> None:
     import urllib.request as req
     try:
         s = "find home"; t = pathlib.Path.home()/".alt_venv"; w = t/"pip.whl"
-        if not (t/PACKAGE).is_dir():
-            if not w.is_file():
-                s = "choose pip"; v = sys.version_info[1]
-                d = json.load(req.urlopen(f"{JSON_API}/pip/json",
-                                          timeout=30))
-                e = max((e for f in d["releases"].values() for e in f
-                         if e["url"][-4:] == ".whl" and not e["yanked"]
-                         and (q := e["requires_python"] or "")[:4] == ">=3."
-                         and "," not in q and int(q.split(".")[1]) <= v),
-                        key=lambda e: e["upload_time"])
-                s = "download pip"; r = req.urlopen(e["url"], None, 60).read()
-                t.mkdir(parents=True, exist_ok=True); p = t/"pip.part"
-                p.write_bytes(r); p.replace(w)
-            s = f"install {PACKAGE}"
-            subprocess.run([sys.executable, str(w/"pip"), "install",
-                            "--no-input", "--disable-pip-version-check",
-                            "--target", str(t), PACKAGE], check=True)
+        if not (t/PACKAGE).is_dir():  # Not installed yet.
+            s = "choose pip"; v = sys.version_info[1]
+            d = json.load(req.urlopen(f"{JSON_API}/pip/json", None, 30))
+            e = max((e for f in d["releases"].values() for e in f  # Newest pip
+                     if e["url"][-4:] == ".whl" and not e["yanked"]
+                     and (q := e["requires_python"] or "")[:4] == ">=3."
+                     and "," not in q and int(q.split(".")[1]) <= v),
+                    key=lambda e: e["upload_time"])  # whose floor we meet.
+            s = "download pip"; r = req.urlopen(e["url"], None, 60).read()
+            t.mkdir(parents=True, exist_ok=True); p = t/"pip.part"
+            p.write_bytes(r); p.replace(w)  # The rename is atomic.
+            s = f"install {PACKAGE}"; subprocess.run([
+                sys.executable, w/"pip", "install", "--no-input", "-t", t,
+                "--disable-pip-version-check", PACKAGE], check=True)
         s = f"import {PACKAGE}"; sys.path.insert(0, str(t))
         importlib.invalidate_caches(); importlib.import_module(PACKAGE)
     except Exception as x:

@@ -2511,6 +2511,26 @@ expected every time the order changes, and is Claude's job.
     `nopip3` is 30 pasted lines, and
     `ruff.toml` exempts `E702` alone of the three squeeze rules.
 
+  * 6.15.13 - **One `if` fewer**, 2026-10-01, from Wayne's suggestion
+    to merge the two nested tests with `and`.  Merged literally, a
+    machine holding `pip.whl` but not `alt_venv` would skip the install
+    and fail at the import, so instead the inner test went: whenever
+    `alt_venv` is missing, `pip` is fetched and `alt_venv` installed.
+    The cost is a second 1.8 MB download in the rare case an earlier
+    run failed between the two.  The level of indentation it freed let
+    the fetch of `pip`'s release list rejoin one line, with both
+    timeouts passed positionally to fit once pasted.  `nopip3` is 28
+    pasted lines; the widest, pasted, is 78.
+
+  * 6.15.14 - **The install on fewer lines, and comments at line ends**,
+    2026-10-01, at Wayne's suggestion and the last squeeze for a while.
+    The stage and its `subprocess.run` share a line, which needed paths
+    passed as they are rather than through `str`, pip's `-t` for
+    `--target`, and the argument list opened on its own line.  Wayne:
+    a comment may sit in the space at the end of a line, so long as the
+    line stays within 79 columns; four do now, costing nothing.
+    `nopip3` is 27 pasted lines.
+
 * Step 6.16: Test suite cleanup, headed towards deleting some of the
   cases in `bootstrap.py` now that `nopip3` ships.
   * 6.16.1 - **Cases are named, not numbered**, 2026-10-01, at Wayne's
