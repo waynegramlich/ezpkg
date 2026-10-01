@@ -52,6 +52,7 @@ import hashlib
 import html
 import http.server
 import importlib
+import importlib.metadata
 import inspect
 import io
 import json
@@ -611,6 +612,29 @@ def add_root_member(wheel: Path, name: str, text: str) -> Path:
     return wheel
 
 
+def requires_python(wheel: Path) -> str | None:
+    """Return the `Requires-Python` a wheel declares, as PyPI reports it.
+
+    Arguments:
+    * `wheel` (`Path`):
+      The wheel to read.
+
+    Returns:
+    * (`str | None`): The specifier, or `None` when the wheel declares
+      none, which is what PyPI's JSON says for such a file.
+    """
+    # The one `METADATA` in the `.dist-info` directory holds it.
+    with zipfile.ZipFile(wheel) as archive:
+        name: str
+        for name in archive.namelist():
+            if name.endswith(".dist-info/METADATA"):
+                line: str
+                for line in archive.read(name).decode().splitlines():
+                    if line.startswith("Requires-Python:"):
+                        return line.partition(":")[2].strip()
+    return None
+
+
 # The `pip` wheel every index publishes, built once on first use.
 _PIP_WHEEL: tuple[str, bytes] | None = None
 
@@ -647,9 +671,14 @@ def pip_wheel() -> tuple[str, bytes]:
                     archive.write(member, PurePath(
                         "pip", member.relative_to(package)).as_posix())
             information: str = f"pip-{version}.dist-info"
+            # A single valued field, though the stubs allow a list.
+            floor: object = importlib.metadata.metadata(
+                "pip").json.get("requires_python")
             archive.writestr(f"{information}/METADATA",
                              "Metadata-Version: 2.1\nName: pip\n"
-                             f"Version: {version}\n")
+                             f"Version: {version}\n"
+                             + (f"Requires-Python: {floor}\n"
+                                if isinstance(floor, str) else ""))
             archive.writestr(f"{information}/WHEEL",
                              "Wheel-Version: 1.0\nRoot-Is-Purelib: true\n"
                              "Tag: py3-none-any\n")
@@ -895,14 +924,28 @@ class _IndexHandler(http.server.SimpleHTTPRequestHandler):
             self.send_error(404, f"no project {normalized}")
             return
 
-        # Build the subset of the payload that the `nopip` cases read.
+        # Build the subset of the payload that the `nopip` cases read:
+        # `urls` for `nopip1` and `nopip2`, and `releases` for `nopip3`,
+        # which chooses a `pip` by `requires_python` and upload time.
+        # Both are taken from the wheels themselves, the floor from their
+        # `METADATA` and the time from the file, so a test controls them
+        # by building the wheel it wants.
         host: str = self.headers.get("Host", "127.0.0.1")
-        payload: dict[str, Any] = {"urls": [
+        files: list[dict[str, Any]] = [
             {"filename": wheel.name, "yanked": False,
              "packagetype": "bdist_wheel",
+             "requires_python": requires_python(wheel),
+             "upload_time_iso_8601": datetime.datetime.fromtimestamp(
+                 wheel.stat().st_mtime, datetime.UTC).isoformat(),
              "url": f"{cast(_IndexServer, self.server).scheme}"
                     f"://{host}/{normalized}/{wheel.name}"}
-            for wheel in wheels]}
+            for wheel in wheels]
+        releases: dict[str, list[dict[str, Any]]] = {}
+        entry: dict[str, Any]
+        for entry in files:
+            releases.setdefault(entry["filename"].split("-")[1],
+                                []).append(entry)
+        payload: dict[str, Any] = {"urls": files, "releases": releases}
         body: bytes = json.dumps(payload).encode()
 
         # Send it with a length, so `urllib` does not wait for a close.
@@ -1557,6 +1600,70 @@ class AltVEnvTest(unittest.TestCase):
                 self.assertNotEqual(done.returncode, 0)
                 self.assertIn("no compatible wheel found", done.stderr)
                 self.assertNotIn("Traceback", done.stderr)
+
+    @runs_cases
+    def test_the_shipping_case_says_which_stage_failed(self) -> None:
+        """A failure names the stage it happened in, and the error's type.
+
+        Before 2026-10-01 a bare exception reached the person as
+        `cannot fetch alt_venv: ` with nothing after it whenever the
+        exception had no text.  See issue `3fpfipe`.
+        """
+        # A 404 for `pip`'s own page fails the very first stage.
+        if not selected(SHIPPING):
+            self.skipTest(f"{SHIPPING} is not selected")
+        self.inject("/pip/json", "missing")
+        done: subprocess.CompletedProcess[str] = self.run_case(SHIPPING)
+        self.assertNotEqual(done.returncode, 0)
+        self.assertNotIn("Traceback", done.stderr)
+        self.assertIn(f"cannot fetch {MODULE}, choose pip failed: "
+                      "HTTPError", done.stderr)
+
+    @runs_cases
+    def test_the_shipping_case_chooses_a_pip_this_python_runs(self) -> None:
+        """The newest `pip` whose floor this Python meets, not the newest.
+
+        Three `pip` releases: an old one for any Python 3, one whose
+        floor is exactly this Python, and the newest, which wants a
+        Python that does not exist yet.  The middle one is right.  When
+        `pip` drops a Python, this is what keeps every pasted bootstrap
+        on that Python working; see issue `1bfnprp`.  The releases are
+        stand-ins that cannot install anything, so the case fails at the
+        next stage, and the wheel it kept says which one it chose.
+        """
+        # Stand-in `pip` wheels, uploaded oldest to newest.
+        if not selected(SHIPPING):
+            self.skipTest(f"{SHIPPING} is not selected")
+        minor: int = sys.version_info[1]
+        offered: list[tuple[str, str]] = [("97.0", ">=3.0"),
+                                          ("98.0", f">=3.{minor}"),
+                                          ("99.0", f">=3.{minor + 1}")]
+        wheels: list[Path] = []
+        version: str
+        floor: str
+        for version, floor in offered:
+            source: Path = self.root / f"pip-{version}" / "pip.py"
+            source.parent.mkdir(parents=True, exist_ok=True)
+            source.write_text('"""A stand-in."""\n')
+            wheels.append(build_wheel(source, "pip", version, "A stand-in.",
+                                      self.root / "pip-dist", floor=floor))
+        index: Path = build_index(wheels, self.root / "pip-index")
+        moment: float
+        for moment, wheel in enumerate(wheels):
+            os.utime(index / "pip" / wheel.name, (moment, moment))
+        server: _IndexServer
+        url: str
+        server, url = serve_index(index)
+        self.addCleanup(server.server_close)
+        self.addCleanup(server.shutdown)
+
+        # It gets past choosing and downloading, then cannot install.
+        home: Path = Path(tempfile.mkdtemp(prefix="choose-", dir=self.root))
+        done: subprocess.CompletedProcess[str] = run_bootstrap_case(
+            SHIPPING, home, url)
+        self.assertIn(f"install {MODULE} failed", done.stderr)
+        with zipfile.ZipFile(home / ".alt_venv" / "pip.whl") as kept:
+            self.assertIn("pip-98.0.dist-info/METADATA", kept.namelist())
 
     @runs_cases
     def test_json_api_cases_bootstrap_end_to_end(self) -> None:

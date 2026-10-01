@@ -12,3 +12,12 @@
 # that way, so this file and `mypy.ini` still say 3.11 by hand, and
 # `test_the_linters_agree_with_the_block` is what stops them drifting.
 target-version = "py311"
+
+[lint.per-file-ignores]
+# Every case in `bootstrap.py` is text that a person pastes into their
+# own program, so it carries its own `try`, and that `try` catches
+# `Exception` on purpose: a missing network must read as one line of
+# diagnosis rather than a traceback, while a control-C still reads as
+# a control-C.  A `noqa` comment would be pasted along with it, into
+# code whose readers never run `ruff`, so the exception lives here.
+"bootstrap.py" = ["BLE001"]

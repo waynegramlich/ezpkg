@@ -2405,6 +2405,51 @@ expected every time the order changes, and is Claude's job.
     `2btosc`, `3fpfipe` and `3spinu`, and Windows and macOS are untried,
     which is `2hmmdrpe`.
 
+  * 6.15.7 - **The paste grew to 43 lines, on purpose**, 2026-10-01.
+    Two changes to `nopip3`, both in code nobody can fix once pasted.
+    It now fetches not the newest `pip` but the newest **upload** whose
+    `requires_python` floor this Python meets, which closes `1bfnprp`:
+    when `pip` drops a Python, that Python keeps getting the last `pip`
+    that supported it.  Against the real index, simulated: 3.7 gets
+    24.0, 3.8 gets 25.0.1, 3.9 gets 26.0.1, 3.10 to 3.12 get 26.2.1.
+    Sorting by upload time avoids parsing versions, and `pip` has
+    written its floor as a plain `>=3.N` since it dropped Python 2.
+    Pinning a version was considered and declined: a pinned `pip` is
+    frozen into every pasted copy, and `pip` releases before 23.2 crash
+    on Python 3.12, so a 2022 paste pinning 22.x would fail today.
+
+    And it sets a `stage` before each step, which the `try` wrapper
+    reports with the exception's type and text, at Wayne's suggestion,
+    in two words at most at his request: `cannot fetch alt_venv, choose
+    pip failed: HTTPError: ...`.  The wrapper's `raise` no longer fits
+    one line, so `SHARED_LINES` became 7 and every case's `paste` rose
+    by one.  Cold
+    time is unchanged at 3.05 s; `pip`'s whole release list is 228 KB.
+    Two tests: a 404 for `pip`'s page names the first stage, and of
+    three stand-in `pip` releases the one whose floor is exactly this
+    Python is chosen over a newer one that wants a later Python.  The
+    local index now serves `releases`, with each file's floor read from
+    its own `METADATA` and its upload time from the file.
+
+  * 6.15.8 - **Each case body is exactly what gets pasted**, 2026-10-01,
+    at Wayne's direction: "The code is supposed to be exactly what is
+    pasted into the user's code."  The `try` had lived once, at the
+    entry point of `bootstrap.py`, so that no body had to be indented
+    under it, which meant the text a person copied was not the text in
+    the file.  Now every case opens with its comment and its imports,
+    which the person moves to the top of their program, and wraps the
+    rest in its own `try`; the entry point wraps nothing, `stage` needs
+    no `global`, and `SHARED_LINES` is just the three module level
+    imports.  The deeper indentation pushed eighteen lines past 79
+    columns, and re-wrapping them added a line to some cases, so the
+    figures moved once more: `nopip3` is 44 pasted, `pip2` 18.  `ruff`'s
+    `BLE001` objected to every `except Exception`; the exemption went
+    into `ruff.toml` rather than into a `noqa` comment that would be
+    pasted along with the code.  All thirteen cases were run against
+    the real PyPI afterwards, and a dead network reads `cannot fetch
+    coverage, choose pip failed: URLError: <urlopen error [Errno 111]
+    Connection refused>`.
+
 * Step 6.16: Test suite cleanup, headed towards deleting some of the
   cases in `bootstrap.py` now that `nopip3` ships.
   * 6.16.1 - **Cases are named, not numbered**, 2026-10-01, at Wayne's
@@ -2843,20 +2888,6 @@ Being worked on right now, in priority order.  None at present.
 
 Not yet started, in priority order.
 
-* **The bootstrap fetches the newest `pip` regardless of Python.
-  (1bfnprp)**  Case 13 takes whatever wheel the JSON API lists for the
-  current `pip` release.  `pip` 26.2.1 requires Python 3.10, so today
-  that is harmless, but when `pip` drops 3.11 every pasted copy of the
-  bootstrap running on 3.11 will fetch a `pip` it cannot run.  That is
-  a defect in code pasted into somebody else's program, where nobody is
-  around to fix it, which is an argument for priority 0.  A possible
-  solution is to read `/pypi/pip/json` for every release and pick the
-  newest whose `requires_python` admits the running interpreter, at the
-  cost of some pasted lines.
-
-  Various thoughts:
-  * Wayne (2026-10-01): Needs more discussion.
-
 * **An already-importable package is installed anyway. (2apiia)**  All
   twelve cases ask whether the package is on disk at their own target,
   never whether it is already importable.  With `coverage` present in an
@@ -3008,6 +3039,10 @@ Not yet started, in priority order.
 
   Various thoughts:
   * Wayne (2026-10-01): We'll improve this later.
+  * Claude (2026-10-01): Half done by Step 6.15.7.  The message now
+    names the stage and the exception's type, so the empty `StopIteration`
+    case reads `... choose pip failed: ValueError: ...` instead of
+    nothing.  The unchecked SHA-256 digest remains.
 
 * **`.pth` files are installed but never executed. (3pfaibne)**  Every case
   writes coverage's `a1_coverage.pth`, its hook for measuring
@@ -3073,6 +3108,24 @@ are not proposed again.
 Resolved, most recent first, each dated.  They are purged once
 nobody wants to read them any more, after every reference to them
 is gone.
+
+* **The bootstrap fetches the newest `pip` regardless of Python.
+  (1bfnprp)**
+  (CLOSED 2026-10-01)  Case 13 takes whatever wheel the JSON API lists for the
+  current `pip` release.  `pip` 26.2.1 requires Python 3.10, so today
+  that is harmless, but when `pip` drops 3.11 every pasted copy of the
+  bootstrap running on 3.11 will fetch a `pip` it cannot run.  That is
+  a defect in code pasted into somebody else's program, where nobody is
+  around to fix it, which is an argument for priority 0.  A possible
+  solution is to read `/pypi/pip/json` for every release and pick the
+  newest whose `requires_python` admits the running interpreter, at the
+  cost of some pasted lines.
+
+  Various thoughts:
+  * Wayne (2026-10-01): Needs more discussion.
+  * Claude (2026-10-01): Fixed by Step 6.15.7.  `nopip3` takes the newest
+    upload whose `requires_python` floor this Python meets, so a Python
+    that `pip` drops keeps the last `pip` that supported it.
 
 * **Nothing identifies a cache as valid. (0nicav)**
   (CLOSED 2026-10-01)  Every case installs into

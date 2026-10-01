@@ -38,16 +38,32 @@ for the name overstated what a program actually carries.  `PACKAGE`,
 `import os`, `sys.argv[1]` and the closing `print` are all excluded from
 the count for that reason.
 
-The `try` wrapper is the one piece of harness machinery that `paste`
-does charge, because a pasted case really does carry it.  Here it sits
-at the entry point so that no case body has to be re-indented, but a
-program with one case pasted into it spells the same three lines around
-that case: `try:`, `except Exception as error:`, and the `raise
-SystemExit`.  Without it a missing network is a traceback rather than a
-message, which is the `0whwnn` issue.  Those three lines, plus the three
-module level imports, are the whole of `SHARED_LINES`, which is 6.  The
-`paste` column below was corrected twice on 2026-09-29: it had been left
-at `lines + 4` from before the wrapper was charged, and then dropped by
+**Each case body is exactly what gets pasted**, `try` and all, as of
+2026-10-01 at Wayne's direction.  A case opens with its comment and its
+imports, which the person moves to the top of their program, and the
+rest sits inside a `try` whose `except Exception` turns any failure into
+one line on standard error and exit status 1.  Without it a missing
+network is a traceback rather than a message, which is the `0whwnn`
+issue.  `Exception` rather than `BaseException`, so that a control-C
+still reads as a control-C.  The `try` used to live once, at this file's
+entry point, so that no case body had to be indented under it; moving
+it into the bodies costs nothing in `paste`, which always charged it,
+and means the text a person copies is the text that was measured.
+`SHARED_LINES` is now just the three module level imports.
+
+The message names a **stage** where a case sets one.  `nopip3` sets
+`stage` before each step of its work -- `find home`, `choose pip`,
+`download pip`, `install alt_venv`, `import alt_venv`, two words at
+most -- and its `except` reports the stage that was running, then the
+exception's type and its one line of text: `cannot fetch alt_venv,
+choose pip failed: HTTPError: HTTP Error 404: Not Found`.  The type
+matters because some exceptions have no text at all: a bare
+`StopIteration` used to print `cannot fetch alt_venv: ` and nothing
+more.  The other cases name no stage and report the type and text
+alone.  See issue `3fpfipe`.
+
+The `paste` column was corrected twice on 2026-09-29: it had been left
+at `lines + 4` from before the `try` was charged, and then dropped by
 one again when `PACKAGE` stopped being charged.
 
 `JSON_API` is the same arrangement for the same reason.  The three
@@ -68,34 +84,34 @@ user would type.  The real `~/.alt_venv` is never touched.
 +--------+---------------+---------+-------+-------+--------+--------+--------+
 | case   | mechanism     | imports | lines | paste | cold   | warm   | size   |
 +--------+---------------+---------+-------+-------+--------+--------+--------+
-| venv1  | venv(pip),    | 4       | 19    | 25    | 6.12 s | 0.16 s | 16981  |
+| venv1  | venv(pip),    | 4       | 24    | 27    | 6.12 s | 0.16 s | 16981  |
 |        | pip in        |         |       |       |        |        |        |
 |        | process       |         |       |       |        |        |        |
-| venv2  | venv(pip),    | 4       | 19    | 25    | 6.68 s | 0.15 s | 16981  |
+| venv2  | venv(pip),    | 4       | 24    | 27    | 6.68 s | 0.15 s | 16981  |
 |        | pip           |         |       |       |        |        |        |
 |        | subprocess    |         |       |       |        |        |        |
-| venv3  | venv(pip),    | 5       | 25    | 31    | 6.85 s | 0.16 s | 1790   |
+| venv3  | venv(pip),    | 5       | 30    | 33    | 6.85 s | 0.16 s | 1790   |
 |        | then delete   |         |       |       |        |        |        |
 |        | pip           |         |       |       |        |        |        |
-| venv4  | as venv3 but  | 5       | 26    | 32    | 5.25 s | 0.15 s | 1790   |
+| venv4  | as venv3 but  | 5       | 30    | 33    | 5.25 s | 0.15 s | 1790   |
 |        | subprocess    |         |       |       |        |        |        |
-| venv5  | venv(no pip), | 4       | 19    | 25    | 2.65 s | 0.15 s | 1790   |
+| venv5  | venv(no pip), | 4       | 24    | 27    | 2.65 s | 0.15 s | 1790   |
 |        | pip in proc   |         |       |       |        |        |        |
-| pip1   | no venv, pip  | 1       | 10    | 16    | 2.65 s | 0.14 s | 1762   |
+| pip1   | no venv, pip  | 1       | 15    | 18    | 2.65 s | 0.14 s | 1762   |
 |        | in process    |         |       |       |        |        |        |
-| pip2   | no venv, pip  | 1       | 10    | 16    | 2.73 s | 0.14 s | 1762   |
+| pip2   | no venv, pip  | 1       | 15    | 18    | 2.73 s | 0.14 s | 1762   |
 |        | subprocess    |         |       |       |        |        |        |
-| pip3   | no venv, pip  | 2       | 14    | 20    | 4.22 s | 0.15 s | 1762   |
+| pip3   | no venv, pip  | 2       | 19    | 22    | 4.22 s | 0.15 s | 1762   |
 |        | from wheel    |         |       |       |        |        |        |
-| pip4   | as pip1 plus  | 1       | 11    | 17    | 2.62 s | 0.14 s | 1698   |
+| pip4   | as pip1 plus  | 1       | 15    | 18    | 2.62 s | 0.14 s | 1698   |
 |        | --no-compile  |         |       |       |        |        |        |
-| pip5   | as pip2 plus  | 1       | 11    | 17    | 2.69 s | 0.14 s | 1698   |
+| pip5   | as pip2 plus  | 1       | 15    | 18    | 2.69 s | 0.14 s | 1698   |
 |        | --no-compile  |         |       |       |        |        |        |
-| nopip1 | no venv,      | 5       | 45    | 51    | 1.41 s | 0.15 s | 1682   |
+| nopip1 | no venv,      | 5       | 53    | 56    | 1.41 s | 0.15 s | 1682   |
 |        | stdlib wheel  |         |       |       |        |        |        |
-| nopip2 | venv(no pip), | 7       | 51    | 57    | 1.42 s | 0.16 s | 1714   |
+| nopip2 | venv(no pip), | 7       | 59    | 62    | 1.42 s | 0.16 s | 1714   |
 |        | stdlib wheel  |         |       |       |        |        |        |
-| nopip3 | no venv, PyPI | 3       | 25    | 31    | 3.11 s | 0.14 s | 3538   |
+| nopip3 | no venv, PyPI | 3       | 41    | 44    | 3.05 s | 0.14 s | 3538   |
 |        | pip           |         |       |       |        |        |        |
 |        | subprocess    |         |       |       |        |        |        |
 +--------+---------------+---------+-------+-------+--------+--------+--------+
@@ -134,9 +150,9 @@ What the columns mean, in the order they appear above:
 * **paste** -- **the number that matters.**  This bootstrap is not
   installed, it is copied by hand into the top of every program that
   wants it, so its real cost is how much text the author has to carry
-  around.  It is `lines` plus the six shared lines every case needs:
-  `import importlib`, `import pathlib` and `import sys`, and the three
-  lines of the `try` wrapper described above.  `PACKAGE`, `JSON_API`
+  around.  It is `lines` plus the three shared lines every case needs:
+  `import importlib`, `import pathlib` and `import sys`.  The `try`
+  is inside `lines`, since each case carries its own.  `PACKAGE`, `JSON_API`
   and `import os` live above `main()` too, but are harness machinery
   and are not counted, and neither is the closing `print`.
 
@@ -169,18 +185,18 @@ What the columns mean, in the order they appear above:
   1714, which is `nopip1` plus 32 KB of empty venv.  `nopip3` is
   `pip2`'s 1762 plus the 1.8 MB `pip.whl` it keeps for `AltVEnv`.
 
-The clusters: `pip1` and `pip2` are the floor at 16 pasted lines,
-with `pip4` and `pip5` one line above it, but all four need pip already
-present; `venv3` and `venv4` manufacture a pip with `ensurepip`, use it
-once, then delete it, for a machine that has `venv` but no pip;
-`nopip1` and `nopip2` need neither, and cost 51 and 57 lines for it.
-`nopip3` needs neither as well, by fetching a pip of its own.
+The clusters: `pip1`, `pip2`, `pip4` and `pip5` are the floor at 18
+pasted lines, but all four need pip already present; `venv3` and `venv4`
+manufacture a pip with `ensurepip`, use it once, then delete it, for a
+machine that has `venv` but no pip; `nopip1` and `nopip2` need neither,
+and cost 56 and 62 lines for it.  `nopip3` needs neither as well, by
+fetching a pip of its own.
 
 `venv3` and `venv4` are the same mechanism reached two ways, and they
-differ by one line: 5 imports each, 31 and 32 pasted, 1790 KB each.
+are the same size: 5 imports each, 33 pasted, 1790 KB each.
 `venv3` imports the manufactured pip; `venv4` runs the venv's own
 interpreter as a child instead.  `venv4` therefore reaches the middle
-cluster without touching `pip._internal` at all, and costs one line for
+cluster without touching `pip._internal` at all, and costs nothing for
 the privilege.
 
 Running pip in process is not free of the user's program.  After a
@@ -198,7 +214,7 @@ load pip at all.
 to be shipped.  Those asked for a venv built with `venv`, no spawning
 of `python3 -m pip install`, only `venv` and standard libraries, and
 an `importlib` import.  `nopip2` is the only one of the thirteen that
-does all four, and it costs 57 pasted lines against `nopip1`'s 51.  The
+does all four, and it costs 62 pasted lines against `nopip1`'s 56.  The
 extra 6 lines and 32 KB buy a virtual environment that nothing then
 reads, which is finding 3 of the log book arriving from yet another
 direction.
@@ -210,7 +226,20 @@ it as `~/.alt_venv/pip.whl`, and runs it as `python pip.whl/pip`, which
 is how pip documents running itself without being installed.  `AltVEnv`
 then uses that same copy, so nothing on the machine needs pip at all.
 It is a subprocess case, so none of pip's state reaches the program,
-and it costs 31 pasted lines against `pip2`'s 16.
+and it costs 44 pasted lines against `pip2`'s 18.
+
+Thirteen lines arrived on 2026-10-01, and eleven are the best spent.
+Five set `stage`, so that a failure says where it happened.  Six choose
+which pip to fetch: not the newest, but the newest upload whose
+`requires_python` floor this Python meets, so that when pip drops a
+Python every bootstrap already pasted on that Python keeps working.
+Sorting by upload time rather than by version avoids parsing version
+strings, and pip has written its floor as a plain `>=3.N` since it
+dropped Python 2; an older or odder specifier is simply passed over.
+Against the real index that gives pip 24.0 on 3.7, 25.0.1 on 3.8 and
+26.0.1 on 3.9, each the last release for its Python.  The other two
+are the `raise`'s second line and one line wrapped to fit under the
+`try`.  See issue `1bfnprp`.
 
 MIT No Attribution
 
@@ -267,67 +296,82 @@ def main() -> None:
             import os
             import sysconfig
             import venv
-            root = pathlib.Path.home() / ".alt_venv"
-            if not (root / "pyvenv.cfg").exists():
-                venv.EnvBuilder(with_pip=True, symlinks=(os.name != "nt")
-                                ).create(root)
-            target = pathlib.Path(sysconfig.get_path(
-                "purelib", scheme="venv", vars={"base": str(root),
-                "platbase": str(root), "installed_base": str(root)}))
-            if not (target / PACKAGE).is_dir():
-                from pip._internal.cli.main import main as pip_main
-                if pip_main(["install", "--no-input", "--target", str(target),
-                             "--disable-pip-version-check", PACKAGE]):
-                    raise RuntimeError("pip failed")
-            sys.path.insert(0, str(target))
-            importlib.invalidate_caches()
-            module = importlib.import_module(PACKAGE)
+            try:
+                root = pathlib.Path.home() / ".alt_venv"
+                if not (root / "pyvenv.cfg").exists():
+                    venv.EnvBuilder(with_pip=True, symlinks=(os.name != "nt")
+                                    ).create(root)
+                target = pathlib.Path(sysconfig.get_path(
+                    "purelib", scheme="venv", vars={"base": str(root),
+                    "platbase": str(root), "installed_base": str(root)}))
+                if not (target / PACKAGE).is_dir():
+                    from pip._internal.cli.main import main as pip_main
+                    if pip_main(["install", "--no-input", "--target",
+                                 str(target), "--disable-pip-version-check",
+                                 PACKAGE]):
+                        raise RuntimeError("pip failed")
+                sys.path.insert(0, str(target))
+                importlib.invalidate_caches()
+                module = importlib.import_module(PACKAGE)
+            except Exception as error:
+                raise SystemExit(f"cannot fetch {PACKAGE}: "
+                                 f"{type(error).__name__}: {error}") from None
         case "venv2":
             # Ensure `alt_venv` is downloaded.
             import os
             import subprocess
             import sysconfig
             import venv
-            root = pathlib.Path.home() / ".alt_venv"
-            if not (root / "pyvenv.cfg").exists():
-                venv.EnvBuilder(with_pip=True, symlinks=(os.name != "nt")
-                                ).create(root)
-            target = pathlib.Path(sysconfig.get_path(
-                "purelib", scheme="venv", vars={"base": str(root),
-                "platbase": str(root), "installed_base": str(root)}))
-            if not (target / PACKAGE).is_dir():
-                subprocess.run([sys.executable, "-m", "pip", "install",
-                                "--no-input", "--disable-pip-version-check",
-                                "--target", str(target), PACKAGE], check=True)
-            sys.path.insert(0, str(target))
-            importlib.invalidate_caches()
-            module = importlib.import_module(PACKAGE)
+            try:
+                root = pathlib.Path.home() / ".alt_venv"
+                if not (root / "pyvenv.cfg").exists():
+                    venv.EnvBuilder(with_pip=True, symlinks=(os.name != "nt")
+                                    ).create(root)
+                target = pathlib.Path(sysconfig.get_path(
+                    "purelib", scheme="venv", vars={"base": str(root),
+                    "platbase": str(root), "installed_base": str(root)}))
+                if not (target / PACKAGE).is_dir():
+                    subprocess.run([sys.executable, "-m", "pip", "install",
+                                    "--no-input", "--target", str(target),
+                                    "--disable-pip-version-check", PACKAGE],
+                                   check=True)
+                sys.path.insert(0, str(target))
+                importlib.invalidate_caches()
+                module = importlib.import_module(PACKAGE)
+            except Exception as error:
+                raise SystemExit(f"cannot fetch {PACKAGE}: "
+                                 f"{type(error).__name__}: {error}") from None
         case "venv3":
             # Ensure `alt_venv` is downloaded.
             import os
             import shutil
             import sysconfig
             import venv
-            root = pathlib.Path.home() / ".alt_venv"
-            if not (root / "pyvenv.cfg").exists():
-                venv.EnvBuilder(with_pip=True, symlinks=(os.name != "nt")
-                                ).create(root)
-            target = pathlib.Path(sysconfig.get_path(
-                "purelib", scheme="venv", vars={"base": str(root),
-                "platbase": str(root), "installed_base": str(root)}))
-            sys.path.insert(0, str(target))
-            if not (target / PACKAGE).is_dir():
-                from pip._internal.cli.main import main as pip_main
-                if pip_main(["install", "--no-input", "--target", str(target),
-                             "--disable-pip-version-check", PACKAGE]):
-                    raise RuntimeError("pip failed")
-                shutil.rmtree(target / "pip", ignore_errors=True)
-                for leftover in target.glob("pip-*.dist-info"):
-                    shutil.rmtree(leftover)
-                for leftover in (root / "bin").glob("pip*"):
-                    leftover.unlink()
-            importlib.invalidate_caches()
-            module = importlib.import_module(PACKAGE)
+            try:
+                root = pathlib.Path.home() / ".alt_venv"
+                if not (root / "pyvenv.cfg").exists():
+                    venv.EnvBuilder(with_pip=True, symlinks=(os.name != "nt")
+                                    ).create(root)
+                target = pathlib.Path(sysconfig.get_path(
+                    "purelib", scheme="venv", vars={"base": str(root),
+                    "platbase": str(root), "installed_base": str(root)}))
+                sys.path.insert(0, str(target))
+                if not (target / PACKAGE).is_dir():
+                    from pip._internal.cli.main import main as pip_main
+                    if pip_main(["install", "--no-input", "--target",
+                                 str(target), "--disable-pip-version-check",
+                                 PACKAGE]):
+                        raise RuntimeError("pip failed")
+                    shutil.rmtree(target / "pip", ignore_errors=True)
+                    for leftover in target.glob("pip-*.dist-info"):
+                        shutil.rmtree(leftover)
+                    for leftover in (root / "bin").glob("pip*"):
+                        leftover.unlink()
+                importlib.invalidate_caches()
+                module = importlib.import_module(PACKAGE)
+            except Exception as error:
+                raise SystemExit(f"cannot fetch {PACKAGE}: "
+                                 f"{type(error).__name__}: {error}") from None
         case "venv4":
             # Ensure `alt_venv` is downloaded.
             import os
@@ -335,107 +379,139 @@ def main() -> None:
             import subprocess
             import sysconfig
             import venv
-            root = pathlib.Path.home() / ".alt_venv"
-            if not (root / "pyvenv.cfg").exists():
-                venv.EnvBuilder(with_pip=True, symlinks=(os.name != "nt")
-                                ).create(root)
-            target = pathlib.Path(sysconfig.get_path(
-                "purelib", scheme="venv", vars={"base": str(root),
-                "platbase": str(root), "installed_base": str(root)}))
-            if not (target / PACKAGE).is_dir():
-                subprocess.run([str(root / "bin" / "python3"), "-m", "pip",
-                                "install", "--no-input",
-                                "--disable-pip-version-check", "--target",
-                                str(target), PACKAGE], check=True)
-                shutil.rmtree(target / "pip", ignore_errors=True)
-                for leftover in target.glob("pip-*.dist-info"):
-                    shutil.rmtree(leftover)
-                for leftover in (root / "bin").glob("pip*"):
-                    leftover.unlink()
-            sys.path.insert(0, str(target))
-            importlib.invalidate_caches()
-            module = importlib.import_module(PACKAGE)
+            try:
+                root = pathlib.Path.home() / ".alt_venv"
+                if not (root / "pyvenv.cfg").exists():
+                    venv.EnvBuilder(with_pip=True, symlinks=(os.name != "nt")
+                                    ).create(root)
+                target = pathlib.Path(sysconfig.get_path(
+                    "purelib", scheme="venv", vars={"base": str(root),
+                    "platbase": str(root), "installed_base": str(root)}))
+                if not (target / PACKAGE).is_dir():
+                    subprocess.run([str(root / "bin" / "python3"), "-m", "pip",
+                                    "install", "--no-input",
+                                    "--disable-pip-version-check", "--target",
+                                    str(target), PACKAGE], check=True)
+                    shutil.rmtree(target / "pip", ignore_errors=True)
+                    for leftover in target.glob("pip-*.dist-info"):
+                        shutil.rmtree(leftover)
+                    for leftover in (root / "bin").glob("pip*"):
+                        leftover.unlink()
+                sys.path.insert(0, str(target))
+                importlib.invalidate_caches()
+                module = importlib.import_module(PACKAGE)
+            except Exception as error:
+                raise SystemExit(f"cannot fetch {PACKAGE}: "
+                                 f"{type(error).__name__}: {error}") from None
         case "venv5":
             # Ensure `alt_venv` is downloaded.
             import os
             import sysconfig
             import venv
-            root = pathlib.Path.home() / ".alt_venv"
-            if not (root / "pyvenv.cfg").exists():
-                venv.EnvBuilder(with_pip=False, symlinks=(os.name != "nt")
-                                ).create(root)
-            target = pathlib.Path(sysconfig.get_path(
-                "purelib", scheme="venv", vars={"base": str(root),
-                "platbase": str(root), "installed_base": str(root)}))
-            if not (target / PACKAGE).is_dir():
-                from pip._internal.cli.main import main as pip_main
-                if pip_main(["install", "--no-input", "--target", str(target),
-                             "--disable-pip-version-check", PACKAGE]):
-                    raise RuntimeError("pip failed")
-            sys.path.insert(0, str(target))
-            importlib.invalidate_caches()
-            module = importlib.import_module(PACKAGE)
+            try:
+                root = pathlib.Path.home() / ".alt_venv"
+                if not (root / "pyvenv.cfg").exists():
+                    venv.EnvBuilder(with_pip=False, symlinks=(os.name != "nt")
+                                    ).create(root)
+                target = pathlib.Path(sysconfig.get_path(
+                    "purelib", scheme="venv", vars={"base": str(root),
+                    "platbase": str(root), "installed_base": str(root)}))
+                if not (target / PACKAGE).is_dir():
+                    from pip._internal.cli.main import main as pip_main
+                    if pip_main(["install", "--no-input", "--target",
+                                 str(target), "--disable-pip-version-check",
+                                 PACKAGE]):
+                        raise RuntimeError("pip failed")
+                sys.path.insert(0, str(target))
+                importlib.invalidate_caches()
+                module = importlib.import_module(PACKAGE)
+            except Exception as error:
+                raise SystemExit(f"cannot fetch {PACKAGE}: "
+                                 f"{type(error).__name__}: {error}") from None
         case "pip1":
             # Ensure `alt_venv` is downloaded.
-            target = pathlib.Path.home() / ".alt_venv"
-            if not (target / PACKAGE).is_dir():
-                from pip._internal.cli.main import main as pip_main
-                if pip_main(["install", "--no-input", "--target", str(target),
-                             "--disable-pip-version-check", PACKAGE]):
-                    raise RuntimeError("pip failed")
-            sys.path.insert(0, str(target))
-            importlib.invalidate_caches()
-            module = importlib.import_module(PACKAGE)
+            try:
+                target = pathlib.Path.home() / ".alt_venv"
+                if not (target / PACKAGE).is_dir():
+                    from pip._internal.cli.main import main as pip_main
+                    if pip_main(["install", "--no-input", "--target",
+                                 str(target), "--disable-pip-version-check",
+                                 PACKAGE]):
+                        raise RuntimeError("pip failed")
+                sys.path.insert(0, str(target))
+                importlib.invalidate_caches()
+                module = importlib.import_module(PACKAGE)
+            except Exception as error:
+                raise SystemExit(f"cannot fetch {PACKAGE}: "
+                                 f"{type(error).__name__}: {error}") from None
         case "pip2":
             # Ensure `alt_venv` is downloaded.
             import subprocess
-            target = pathlib.Path.home() / ".alt_venv"
-            if not (target / PACKAGE).is_dir():
-                subprocess.run([sys.executable, "-m", "pip", "install",
-                                "--no-input", "--disable-pip-version-check",
-                                "--target", str(target), PACKAGE], check=True)
-            sys.path.insert(0, str(target))
-            importlib.invalidate_caches()
-            module = importlib.import_module(PACKAGE)
+            try:
+                target = pathlib.Path.home() / ".alt_venv"
+                if not (target / PACKAGE).is_dir():
+                    subprocess.run([sys.executable, "-m", "pip", "install",
+                                    "--no-input", "--target", str(target),
+                                    "--disable-pip-version-check", PACKAGE],
+                                   check=True)
+                sys.path.insert(0, str(target))
+                importlib.invalidate_caches()
+                module = importlib.import_module(PACKAGE)
+            except Exception as error:
+                raise SystemExit(f"cannot fetch {PACKAGE}: "
+                                 f"{type(error).__name__}: {error}") from None
         case "pip3":
             # Ensure `alt_venv` is downloaded.
             import ensurepip
-            target = pathlib.Path.home() / ".alt_venv"
-            if not (target / PACKAGE).is_dir():
-                shipped = ensurepip._WHEEL_PKG_DIR  # type: ignore
-                sys.path.insert(0, str(next(
-                    pathlib.Path(shipped).glob("pip-*.whl"))))
-                from pip._internal.cli.main import main as pip_main
-                if pip_main(["install", "--no-input", "--target", str(target),
-                             "--disable-pip-version-check", PACKAGE]):
-                    raise RuntimeError("pip failed")
-            sys.path.insert(0, str(target))
-            importlib.invalidate_caches()
-            module = importlib.import_module(PACKAGE)
+            try:
+                target = pathlib.Path.home() / ".alt_venv"
+                if not (target / PACKAGE).is_dir():
+                    shipped = ensurepip._WHEEL_PKG_DIR  # type: ignore
+                    sys.path.insert(0, str(next(
+                        pathlib.Path(shipped).glob("pip-*.whl"))))
+                    from pip._internal.cli.main import main as pip_main
+                    if pip_main(["install", "--no-input", "--target",
+                                 str(target), "--disable-pip-version-check",
+                                 PACKAGE]):
+                        raise RuntimeError("pip failed")
+                sys.path.insert(0, str(target))
+                importlib.invalidate_caches()
+                module = importlib.import_module(PACKAGE)
+            except Exception as error:
+                raise SystemExit(f"cannot fetch {PACKAGE}: "
+                                 f"{type(error).__name__}: {error}") from None
         case "pip4":
             # Ensure `alt_venv` is downloaded.
-            target = pathlib.Path.home() / ".alt_venv"
-            if not (target / PACKAGE).is_dir():
-                from pip._internal.cli.main import main as pip_main
-                if pip_main(["install", "--no-input",
-                             "--no-compile", "--disable-pip-version-check",
-                             "--target", str(target), PACKAGE]):
-                    raise RuntimeError("pip failed")
-            sys.path.insert(0, str(target))
-            importlib.invalidate_caches()
-            module = importlib.import_module(PACKAGE)
+            try:
+                target = pathlib.Path.home() / ".alt_venv"
+                if not (target / PACKAGE).is_dir():
+                    from pip._internal.cli.main import main as pip_main
+                    if pip_main(["install", "--no-input",
+                                 "--no-compile", "--disable-pip-version-check",
+                                 "--target", str(target), PACKAGE]):
+                        raise RuntimeError("pip failed")
+                sys.path.insert(0, str(target))
+                importlib.invalidate_caches()
+                module = importlib.import_module(PACKAGE)
+            except Exception as error:
+                raise SystemExit(f"cannot fetch {PACKAGE}: "
+                                 f"{type(error).__name__}: {error}") from None
         case "pip5":
             # Ensure `alt_venv` is downloaded.
             import subprocess
-            target = pathlib.Path.home() / ".alt_venv"
-            if not (target / PACKAGE).is_dir():
-                subprocess.run([sys.executable, "-m", "pip", "install",
-                                "--no-input", "--no-compile",
-                                "--disable-pip-version-check", "--target",
-                                str(target), PACKAGE], check=True)
-            sys.path.insert(0, str(target))
-            importlib.invalidate_caches()
-            module = importlib.import_module(PACKAGE)
+            try:
+                target = pathlib.Path.home() / ".alt_venv"
+                if not (target / PACKAGE).is_dir():
+                    subprocess.run([sys.executable, "-m", "pip", "install",
+                                    "--no-input", "--no-compile",
+                                    "--disable-pip-version-check", "--target",
+                                    str(target), PACKAGE], check=True)
+                sys.path.insert(0, str(target))
+                importlib.invalidate_caches()
+                module = importlib.import_module(PACKAGE)
+            except Exception as error:
+                raise SystemExit(f"cannot fetch {PACKAGE}: "
+                                 f"{type(error).__name__}: {error}") from None
         case "nopip1":
             # Ensure `alt_venv` is downloaded.
             import io
@@ -443,45 +519,53 @@ def main() -> None:
             import sysconfig
             import urllib.request
             import zipfile
-            root = pathlib.Path.home() / ".alt_venv"
-            target = root
-            target.mkdir(parents=True, exist_ok=True)
-            if not (target / PACKAGE).is_dir():
-                with urllib.request.urlopen(
-                        f"{JSON_API}/{PACKAGE}/json",
-                        timeout=30) as r:
-                    metadata = json.load(r)
-                impl = "cp" if sys.implementation.name == "cpython" else "py"
-                pyver = f"{sys.version_info.major}{sys.version_info.minor}"
-                machine = sysconfig.get_platform().split("-")[-1]
-                chosen = None
-                for tag in (f"{impl}{pyver}-{impl}{pyver}-",
-                            f"{impl}{pyver}-abi3-", "py3-none-any"):
-                    for entry in metadata["urls"]:
-                        name = entry["filename"]
-                        if (name.endswith(".whl") and not entry.get("yanked")
-                                and tag in name
-                                and (name.endswith("-none-any.whl")
-                                     or (machine in name and "linux" in name
-                                         and sys.platform == "linux"))):
-                            chosen = entry
+            try:
+                root = pathlib.Path.home() / ".alt_venv"
+                target = root
+                target.mkdir(parents=True, exist_ok=True)
+                if not (target / PACKAGE).is_dir():
+                    with urllib.request.urlopen(
+                            f"{JSON_API}/{PACKAGE}/json",
+                            timeout=30) as r:
+                        metadata = json.load(r)
+                    impl = ("cp" if sys.implementation.name == "cpython"
+                            else "py")
+                    pyver = f"{sys.version_info.major}{sys.version_info.minor}"
+                    machine = sysconfig.get_platform().split("-")[-1]
+                    chosen = None
+                    for tag in (f"{impl}{pyver}-{impl}{pyver}-",
+                                f"{impl}{pyver}-abi3-", "py3-none-any"):
+                        for entry in metadata["urls"]:
+                            name = entry["filename"]
+                            if (name.endswith(".whl")
+                                    and not entry.get("yanked")
+                                    and tag in name
+                                    and (name.endswith("-none-any.whl")
+                                         or (machine in name
+                                             and "linux" in name
+                                             and sys.platform == "linux"))):
+                                chosen = entry
+                                break
+                        if chosen:
                             break
-                    if chosen:
-                        break
-                if chosen is None:
-                    raise RuntimeError("no compatible wheel found")
-                with urllib.request.urlopen(chosen["url"], timeout=60) as r:
-                    blob = r.read()
-                with zipfile.ZipFile(io.BytesIO(blob)) as archive:
-                    archive.extractall(target)
-                for data_dir in target.glob("*.data"):
-                    for sub in ("purelib", "platlib"):
-                        if (data_dir / sub).is_dir():
-                            for item in (data_dir / sub).iterdir():
-                                item.rename(target / item.name)
-            sys.path.insert(0, str(target))
-            importlib.invalidate_caches()
-            module = importlib.import_module(PACKAGE)
+                    if chosen is None:
+                        raise RuntimeError("no compatible wheel found")
+                    with urllib.request.urlopen(chosen["url"],
+                                                timeout=60) as r:
+                        blob = r.read()
+                    with zipfile.ZipFile(io.BytesIO(blob)) as archive:
+                        archive.extractall(target)
+                    for data_dir in target.glob("*.data"):
+                        for sub in ("purelib", "platlib"):
+                            if (data_dir / sub).is_dir():
+                                for item in (data_dir / sub).iterdir():
+                                    item.rename(target / item.name)
+                sys.path.insert(0, str(target))
+                importlib.invalidate_caches()
+                module = importlib.import_module(PACKAGE)
+            except Exception as error:
+                raise SystemExit(f"cannot fetch {PACKAGE}: "
+                                 f"{type(error).__name__}: {error}") from None
         case "nopip2":
             # Ensure `alt_venv` is downloaded.
             import io
@@ -491,75 +575,99 @@ def main() -> None:
             import urllib.request
             import venv
             import zipfile
-            root = pathlib.Path.home() / ".alt_venv"
-            if not (root / "pyvenv.cfg").exists():
-                venv.EnvBuilder(with_pip=False, symlinks=(os.name != "nt")
-                                ).create(root)
-            target = pathlib.Path(sysconfig.get_path(
-                "purelib", scheme="venv", vars={"base": str(root),
-                "platbase": str(root), "installed_base": str(root)}))
-            if not (target / PACKAGE).is_dir():
-                with urllib.request.urlopen(
-                        f"{JSON_API}/{PACKAGE}/json",
-                        timeout=30) as r:
-                    metadata = json.load(r)
-                impl = "cp" if sys.implementation.name == "cpython" else "py"
-                pyver = f"{sys.version_info.major}{sys.version_info.minor}"
-                machine = sysconfig.get_platform().split("-")[-1]
-                chosen = None
-                for tag in (f"{impl}{pyver}-{impl}{pyver}-",
-                            f"{impl}{pyver}-abi3-", "py3-none-any"):
-                    for entry in metadata["urls"]:
-                        name = entry["filename"]
-                        if (name.endswith(".whl") and not entry.get("yanked")
-                                and tag in name
-                                and (name.endswith("-none-any.whl")
-                                     or (machine in name and "linux" in name
-                                         and sys.platform == "linux"))):
-                            chosen = entry
+            try:
+                root = pathlib.Path.home() / ".alt_venv"
+                if not (root / "pyvenv.cfg").exists():
+                    venv.EnvBuilder(with_pip=False, symlinks=(os.name != "nt")
+                                    ).create(root)
+                target = pathlib.Path(sysconfig.get_path(
+                    "purelib", scheme="venv", vars={"base": str(root),
+                    "platbase": str(root), "installed_base": str(root)}))
+                if not (target / PACKAGE).is_dir():
+                    with urllib.request.urlopen(
+                            f"{JSON_API}/{PACKAGE}/json",
+                            timeout=30) as r:
+                        metadata = json.load(r)
+                    impl = ("cp" if sys.implementation.name == "cpython"
+                            else "py")
+                    pyver = f"{sys.version_info.major}{sys.version_info.minor}"
+                    machine = sysconfig.get_platform().split("-")[-1]
+                    chosen = None
+                    for tag in (f"{impl}{pyver}-{impl}{pyver}-",
+                                f"{impl}{pyver}-abi3-", "py3-none-any"):
+                        for entry in metadata["urls"]:
+                            name = entry["filename"]
+                            if (name.endswith(".whl")
+                                    and not entry.get("yanked")
+                                    and tag in name
+                                    and (name.endswith("-none-any.whl")
+                                         or (machine in name
+                                             and "linux" in name
+                                             and sys.platform == "linux"))):
+                                chosen = entry
+                                break
+                        if chosen:
                             break
-                    if chosen:
-                        break
-                if chosen is None:
-                    raise RuntimeError("no compatible wheel found")
-                with urllib.request.urlopen(chosen["url"], timeout=60) as r:
-                    blob = r.read()
-                with zipfile.ZipFile(io.BytesIO(blob)) as archive:
-                    archive.extractall(target)
-                for data_dir in target.glob("*.data"):
-                    for sub in ("purelib", "platlib"):
-                        if (data_dir / sub).is_dir():
-                            for item in (data_dir / sub).iterdir():
-                                item.rename(target / item.name)
-            sys.path.insert(0, str(target))
-            importlib.invalidate_caches()
-            module = importlib.import_module(PACKAGE)
+                    if chosen is None:
+                        raise RuntimeError("no compatible wheel found")
+                    with urllib.request.urlopen(chosen["url"],
+                                                timeout=60) as r:
+                        blob = r.read()
+                    with zipfile.ZipFile(io.BytesIO(blob)) as archive:
+                        archive.extractall(target)
+                    for data_dir in target.glob("*.data"):
+                        for sub in ("purelib", "platlib"):
+                            if (data_dir / sub).is_dir():
+                                for item in (data_dir / sub).iterdir():
+                                    item.rename(target / item.name)
+                sys.path.insert(0, str(target))
+                importlib.invalidate_caches()
+                module = importlib.import_module(PACKAGE)
+            except Exception as error:
+                raise SystemExit(f"cannot fetch {PACKAGE}: "
+                                 f"{type(error).__name__}: {error}") from None
         case "nopip3":
             # Ensure `alt_venv` is downloaded.
             import json
             import subprocess
             import urllib.request
-            target = pathlib.Path.home() / ".alt_venv"
-            wheel = target / "pip.whl"
-            if not (target / PACKAGE).is_dir():
-                if not wheel.is_file():
-                    with urllib.request.urlopen(f"{JSON_API}/pip/json",
-                                                timeout=30) as r:
-                        metadata = json.load(r)
-                    entry = next(e for e in metadata["urls"]
-                                 if e["packagetype"] == "bdist_wheel")
-                    target.mkdir(parents=True, exist_ok=True)
-                    with urllib.request.urlopen(entry["url"],
-                                                timeout=60) as r:
-                        wheel.with_suffix(".part").write_bytes(r.read())
-                    wheel.with_suffix(".part").replace(wheel)
-                subprocess.run([sys.executable, str(wheel / "pip"),
-                                "install", "--no-input",
-                                "--disable-pip-version-check", "--target",
-                                str(target), PACKAGE], check=True)
-            sys.path.insert(0, str(target))
-            importlib.invalidate_caches()
-            module = importlib.import_module(PACKAGE)
+            try:
+                stage = "find home"
+                target = pathlib.Path.home() / ".alt_venv"
+                wheel = target / "pip.whl"
+                if not (target / PACKAGE).is_dir():
+                    if not wheel.is_file():
+                        stage = "choose pip"
+                        with urllib.request.urlopen(f"{JSON_API}/pip/json",
+                                                    timeout=30) as r:
+                            releases = json.load(r)["releases"].values()
+                        entry = max(
+                            (e for files in releases for e in files
+                             if e["packagetype"] == "bdist_wheel"
+                             and not e["yanked"]
+                             and (floor := e["requires_python"] or "")[:4]
+                             == ">=3." and "," not in floor
+                             and int(floor.split(".")[1])
+                             <= sys.version_info[1]),
+                            key=lambda e: e["upload_time_iso_8601"])
+                        stage = "download pip"
+                        target.mkdir(parents=True, exist_ok=True)
+                        with urllib.request.urlopen(entry["url"],
+                                                    timeout=60) as r:
+                            wheel.with_suffix(".part").write_bytes(r.read())
+                        wheel.with_suffix(".part").replace(wheel)
+                    stage = f"install {PACKAGE}"
+                    subprocess.run([sys.executable, str(wheel / "pip"),
+                                    "install", "--no-input",
+                                    "--disable-pip-version-check", "--target",
+                                    str(target), PACKAGE], check=True)
+                stage = f"import {PACKAGE}"
+                sys.path.insert(0, str(target))
+                importlib.invalidate_caches()
+                module = importlib.import_module(PACKAGE)
+            except Exception as error:
+                raise SystemExit(f"cannot fetch {PACKAGE}, {stage} failed: "
+                                 f"{type(error).__name__}: {error}") from None
     # `type(sys)` is `types.ModuleType`, reached without importing
     # `types`, because `sys` is a module and is already imported.
     assert isinstance(module, type(sys)), f"{PACKAGE} gave {module!r}"
@@ -594,10 +702,8 @@ MECHANISMS = {
     "nopip3": "no venv, PyPI pip subprocess",
 }
 # Lines a case needs but does not contain: the three module level
-# imports, PACKAGE, and the three of the `try` wrapper that turns a
-# failed fetch into one line of diagnosis.  This is the difference
-# between `lines` and `paste`.
-SHARED_LINES = 6
+# imports.  This is the difference between `lines` and `paste`.
+SHARED_LINES = 3
 REPETITIONS = 3
 COLUMNS = ["case", "mechanism", "imports", "lines", "paste", "cold",
            "warm", "size"]
@@ -794,14 +900,6 @@ if __name__ == "__main__":
     if len(sys.argv) == 1:
         run_tests()
     elif sys.argv[1] in MECHANISMS:
-        # A pasted case carries this wrapper around its own body.  The
-        # fetch is the part that reaches the network, and a traceback is
-        # not an error message; see `0whwnn` and Step 6.1 of
-        # `LOGBOOK.md`.  `Exception` rather than `BaseException`, so
-        # that a control-C still reads as a control-C.
-        try:
-            main()                  # internal: one case, one interpreter
-        except Exception as error:  # noqa: BLE001 -- deliberate
-            raise SystemExit(f"cannot fetch {PACKAGE}: {error}") from None
+        main()                      # internal: one case, one interpreter
     else:
         sys.exit(f"usage: {sys.argv[0]}          (takes no arguments)")
