@@ -1123,7 +1123,7 @@ class AltVEnv:
         # retries that were buying the diagnosis are no longer needed
         # for it.  One is kept for a genuinely flaky network.  A caller
         # wanting pip's defaults back passes them in `argv`, which wins.
-        # See Step 6.8.7 in `LOGBOOK.md`.
+        # See Step 6.17.7 in `LOGBOOK.md`.
         done: subprocess.CompletedProcess[str] = subprocess.run(
             [*self.pip(), "download", "--retries", "1",
              "--no-input", "--disable-pip-version-check",

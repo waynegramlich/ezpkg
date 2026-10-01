@@ -94,7 +94,7 @@ SUMMARY: str = "Fetch Python packages that are not preinstalled."
 # would shadow this suite whenever a cache went on `sys.path` in front of
 # the project.  Spelled with an underscore so that one word serves as the
 # `pip` name and the import name at once, which is what `bootstrap.py`'s
-# single `PACKAGE` needs.  See Step 6.8.2 in `LOGBOOK.md`.
+# single `PACKAGE` needs.  See Step 6.17.2 in `LOGBOOK.md`.
 RELEASE_DISTRIBUTION: str = "alt_venv_trial"
 
 
@@ -461,7 +461,7 @@ def dev_version(version: str = VERSION) -> str:
     A minute stamped suffix gives one without anybody having to
     remember what the last attempt was called, and `.devN` sorts below
     the release it rehearses, so publishing `0.0.1` afterwards still
-    supersedes them all.  See Step 6.8.2 in `LOGBOOK.md`.
+    supersedes them all.  See Step 6.17.2 in `LOGBOOK.md`.
 
     Arguments:
     * `version` (`str`):
@@ -484,7 +484,7 @@ def release_wheel(directory: Path,
 
     The same builder the tests use, given the metadata an index wants:
     a long description, a license, an author, a project address and
-    classifiers.  Nothing here uploads anything; see Step 6.8.2 in
+    classifiers.  Nothing here uploads anything; see Step 6.17.2 in
     `LOGBOOK.md`, and uploading is Wayne's by hand in any case.
 
     The module inside is named after the distribution, so that one word
@@ -5092,7 +5092,7 @@ class ReleaseWheelTest(unittest.TestCase):
     Nothing here reaches an index.  `build` and `twine` are not
     installed on this machine, which is fitting for a project about
     packages that are not preinstalled but does mean `twine check` is
-    not the validator; `pip` accepting the wheel is.  See Step 6.8.2 in
+    not the validator; `pip` accepting the wheel is.  See Step 6.17.2 in
     `LOGBOOK.md`.
 
     Attributes:
@@ -5233,13 +5233,13 @@ class PyPITest(unittest.TestCase):
     Everything else in this suite runs against wheels this project built
     and served itself, so three things have never been exercised: real
     wheel tag soup, a real transitive closure, and TLS against the public
-    certificate authorities.  See Step 6.8 in `LOGBOOK.md`.
+    certificate authorities.  See Step 6.17 in `LOGBOOK.md`.
 
     Opt in, because this is the one class that can fail for reasons
     outside the repository -- no network, a rate limit, a yanked release
     -- and a suite that fails for those reasons teaches people to ignore
     it.  Versions are pinned for the same reason.  Nothing is uploaded
-    anywhere; see 6.8.1.
+    anywhere; see 6.17.1.
 
     Attributes:
     * `root` (`Path`):
@@ -5293,7 +5293,7 @@ class PyPITest(unittest.TestCase):
         # No `PIP_INDEX_URL`, which is the whole point: the default is
         # PyPI over TLS, validated against the system trust store.  And
         # `skip`, because a person running this from a terminal would
-        # otherwise be asked to approve it; see 6.8.6.
+        # otherwise be asked to approve it; see 6.17.6.
         environment: dict[str, str] = dict(os.environ,
                                            ALT_VENV_APPROVE="skip")
         environment.pop("PIP_INDEX_URL", None)
@@ -5331,7 +5331,7 @@ class PyPITest(unittest.TestCase):
         Two things at once, and both are the point.  `twine` is fetched
         with `install()` rather than with `pip`, which is the largest
         transitive closure this project has ever resolved -- about twenty
-        packages -- and is the dogfood Step 6.8.2 asks for.  Then that
+        packages -- and is the dogfood Step 6.17.2 asks for.  Then that
         `twine` judges our handwritten `METADATA`, which is the only
         independent check available here that an index would accept it.
         """
