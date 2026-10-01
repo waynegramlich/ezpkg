@@ -57,9 +57,11 @@ SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 # Every import below is in the standard library, and none of them comes
 # from a package a distribution can leave out.
+import ast
 import hashlib
 import importlib
 import inspect
+import io
 import json
 import os
 import re
@@ -69,6 +71,7 @@ import subprocess
 import sys
 import sysconfig
 import tempfile
+import textwrap
 import time
 import tokenize
 import tomllib
@@ -99,6 +102,23 @@ CULL_INTERVAL: float = 86400.0
 # is one download and the cost of being right is a little disk, and those
 # are not symmetrical.  See Step 6.11 in `LOGBOOK.md`.
 CULL_DAYS: float = 180.0 * 86400.0
+
+# How often the private `pip` is checked for a newer release.  Weekly, as
+# `pip` checks itself, because each check asks the index and may fetch
+# 1.8 MB, while `pip` releases come every month or two.  See issue
+# `3spinu` in `LOGBOOK.md`.
+PIP_INTERVAL: float = 7.0 * 86400.0
+
+# Every bootstrap this project has published, by `bootstrap_fingerprint`,
+# oldest first, so the last is the current one.  Publishing a changed
+# bootstrap means adding its fingerprint here; the test suite renders
+# `nopip3` as pasted and fails until the last entry matches it.  Old
+# entries stay, because they are how a stale copy is recognised.  See
+# Step 6.12 in `LOGBOOK.md`.
+BOOTSTRAPS: dict[str, str] = {
+    "02e20da610125a90d038db27f77f835dfd7731e29d9a366d85327f24e56d283f":
+        "nopip3 of 2026-10-01",
+}
 
 # The one place the version is written down.  `bootstrap.py`
 # prints it after importing, and the test suite stamps it into
@@ -341,6 +361,67 @@ def main_source() -> tuple[Path, str] | None:
         return None
 
 
+def bootstrap_fingerprint(text: str) -> str:
+    """Fingerprint a pasted bootstrap so that layout cannot change it.
+
+    Comments are dropped and then every space, tab and line break, so
+    re-indenting, re-wrapping or annotating a pasted copy leaves it the
+    same bootstrap, while changing any code makes it a different one.
+    `tokenize` finds the comments, because a `#` may sit inside a
+    string.  The tokens are joined back into text before the whitespace
+    goes, which makes the result the same under 3.11, where an f-string
+    is one token, and under 3.12, where it is several.  See Step 6.12.
+
+    Arguments:
+    * `text` (`str`):
+      The bootstrap's `try` block, as found in a program.
+
+    Returns:
+    * (`str`): A SHA-256, in hexadecimal.
+    """
+    # Comments out, then all whitespace, then the digest.
+    kept: list[str] = []
+    token: tokenize.TokenInfo
+    for token in tokenize.generate_tokens(io.StringIO(text).readline):
+        if token.type != tokenize.COMMENT:
+            kept.append(token.string)
+    return hashlib.sha256("".join("".join(kept).split()).encode()).hexdigest()
+
+
+def find_bootstrap(text: str) -> str | None:
+    """Return the pasted bootstrap's `try` block from a program's text.
+
+    The bootstrap is recognised as a `try` whose text mentions both
+    `alt_venv` and `import_module`, wherever it sits.  Only the `try`
+    is taken: the imports above it are moved to the top of a program by
+    hand, and would make a correctly pasted copy look edited.
+
+    Arguments:
+    * `text` (`str`):
+      The program's source.
+
+    Returns:
+    * (`str | None`): The block, or `None` when there is none or the
+      program does not parse.
+    """
+    # The first match wins; a program has one bootstrap.
+    try:
+        tree: ast.Module = ast.parse(text)
+    except SyntaxError:
+        return None
+    node: ast.AST
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Try):
+            # Padded and then dedented, because the segment's first line
+            # otherwise comes without its indentation and the rest with
+            # theirs, which `tokenize` rejects when the `try` is nested.
+            block: str | None = ast.get_source_segment(text, node,
+                                                       padded=True)
+            if block and "alt_venv" in block and "import_module" in block:
+                return textwrap.dedent(block)
+    return None
+
+
 class AltVEnv:
     """Fetch and import Python packages that are not preinstalled.
 
@@ -399,7 +480,11 @@ class AltVEnv:
           run and is safe to remove.
         * `pip.whl` is a private copy of `pip`, which the bootstrap
           fetched so that this machine needs no `pip` of its own.  It
-          is run straight from the wheel and never installed.
+          is run straight from the wheel and never installed.  Newer
+          releases are added beside it as `pip-<version>-...whl` about
+          once a week, and the newest is the one used.
+        * `last_cull` and `last_pip` are stamps recording when the
+          cache was last swept and when `pip` was last checked.
 
         Deleting this whole directory is safe.  The next program that
         needs one of these packages will fetch it again.
@@ -1055,24 +1140,112 @@ class AltVEnv:
         The bootstrap leaves `pip`'s own wheel in the cache as
         `pip.whl`, and a wheel is a zip that Python can run directly:
         `python pip.whl/pip` is how `pip` documents running itself
-        without being installed.  That copy is preferred whenever it is
-        there, so that a machine with no `pip` at all needs nothing
-        beyond Python and the pasted bootstrap.
+        without being installed.  A private copy is preferred whenever
+        there is one, so that a machine with no `pip` at all needs
+        nothing beyond Python and the pasted bootstrap.
 
-        Without it, which is every bootstrap except the one that ships,
-        the interpreter's own `pip` is used, as it always was.  If that
-        is missing too, `pip`'s own complaint reaches the caller through
-        `download`.
+        `refresh_pip` keeps that copy current by adding newer wheels
+        beside it under their own names, such as
+        `pip-26.3-py3-none-any.whl`, and the most recently added one
+        wins.  `pip.whl` itself is never replaced, because a `pip` that
+        is running reads itself out of its wheel as it goes, and
+        swapping the file under it would break it.
+
+        Without any private copy, which is every bootstrap except the
+        one that ships, the interpreter's own `pip` is used, as it
+        always was.  If that is missing too, `pip`'s own complaint
+        reaches the caller through `download`.
 
         Returns:
         * (`list[str]`): The interpreter followed by whatever makes it
           run `pip`, ready to have `pip` arguments appended.
         """
-        # The stash wins, because it is the one copy known to exist.
+        # The newest refreshed copy, then the bootstrap's, then the
+        # interpreter's own.
+        refreshed: list[Path] = sorted(self.root.glob("pip-*.whl"),
+                                       key=lambda one: one.stat().st_mtime)
+        if refreshed:
+            return [sys.executable, str(refreshed[-1] / "pip")]
         stashed: Path = self.root / "pip.whl"
         if stashed.is_file():
             return [sys.executable, str(stashed / "pip")]
         return [sys.executable, "-m", "pip"]
+
+    def refresh_pip(self, interval: float = PIP_INTERVAL,
+                    grace: float = CULL_GRACE) -> Path | None:
+        """Add the newest `pip` this Python can run, if it is newer.
+
+        Only a cache the bootstrap gave a private `pip` is refreshed;
+        one that uses the interpreter's own leaves that to its owner.
+        At most once per `interval`, the current private `pip` is asked
+        to download `pip`, and since `pip` passes over releases whose
+        `requires_python` the running interpreter does not meet, what
+        arrives is the newest it can run.  When that is not the copy
+        already in use, it is added beside it, and `pip` takes it from
+        then on.  Superseded refreshed copies older than `grace` are
+        removed; any younger may still be running somewhere.
+
+        Nothing here is allowed to fail the program it runs in.  A
+        missing network, a refusal from the index or a full disk all
+        leave the cache as it was, and the next attempt is a whole
+        `interval` away, because the stamp is written before trying.
+        See issue `3spinu` in `LOGBOOK.md`.
+
+        Arguments:
+        * `interval` (`float`):
+          Seconds between attempts.
+        * `grace` (`float`):
+          Seconds a superseded copy is kept, in case it is in use.
+
+        Returns:
+        * (`Path | None`): The wheel added, or `None` when nothing was.
+        """
+        # Not this cache's business, or not yet time.
+        if not ((self.root / "pip.whl").is_file()
+                or any(self.root.glob("pip-*.whl"))):
+            return None
+        stamp: Path = self.root / "last_pip"
+        try:
+            if stamp.stat().st_mtime >= time.time() - interval:
+                return None
+        except OSError:
+            pass
+        stamp.write_text("", encoding="utf-8")
+
+        # Ask the current `pip` for the newest `pip`, into scratch space.
+        current: Path = Path(self.pip()[1]).parent
+        holding: Path = Path(tempfile.mkdtemp(dir=self.paths()[0]))
+        added: Path | None = None
+        try:
+            done: subprocess.CompletedProcess[str] = subprocess.run(
+                [*self.pip(), "download", "pip", "--no-deps", "--retries",
+                 "1", "--no-input", "--disable-pip-version-check",
+                 "--only-binary", ":all:", "--dest", str(holding)],
+                capture_output=True, text=True, check=False)
+            fresh: Path | None = next(holding.glob("pip-*.whl"), None)
+            if done.returncode == 0 and fresh is not None:
+                version: str = fresh.name.split("-")[1]
+                with zipfile.ZipFile(current) as running:
+                    known: bool = any(
+                        name.startswith(f"pip-{version}.dist-info/")
+                        for name in running.namelist())
+                if not known:
+                    added = fresh.replace(self.root / fresh.name)
+        except OSError:
+            added = None
+        finally:
+            shutil.rmtree(holding, ignore_errors=True)
+
+        # Superseded refreshed copies go once nothing can be running them.
+        old: Path
+        for old in self.root.glob("pip-*.whl"):
+            try:
+                if (old != added and added is not None
+                        and old.stat().st_mtime < time.time() - grace):
+                    old.unlink()
+            except OSError:
+                continue
+        return added
 
     def download(self, requirements: Sequence[str],
                  argv: Sequence[str] = ()) -> list[Path]:
@@ -1222,6 +1395,51 @@ class AltVEnv:
     Requirement = str | tuple[str, str]
     Requirements = list[Requirement] | tuple[Requirement, ...]
 
+    def bootstrap_status(self) -> tuple[str, str]:
+        """Say whether the running program's pasted bootstrap is current.
+
+        Returns:
+        * (`tuple[str, str]`): One of `current`, `stale`, `edited` or
+          `absent`, and the name of the bootstrap found, which is empty
+          unless it is one this project published.
+        """
+        # No program, or no bootstrap in it, is simply absent.
+        found: tuple[Path, str] | None = main_source()
+        block: str | None = find_bootstrap(found[1]) if found else None
+        if block is None:
+            return "absent", ""
+        name: str | None = BOOTSTRAPS.get(bootstrap_fingerprint(block))
+        if name is None:
+            return "edited", ""
+        newest: str = list(BOOTSTRAPS.values())[-1]
+        return ("current" if name == newest else "stale"), name
+
+    def report_bootstrap(self) -> str:
+        """Describe the program's pasted bootstrap in one line.
+
+        Silent by default; `install` prints this only when
+        `ALT_VENV_BOOTSTRAP=check` asks, because the person running a
+        program cannot act on it and its author can ask.  See Step 6.12.2
+        in `LOGBOOK.md`.
+
+        Returns:
+        * (`str`): The line, for standard error.
+        """
+        # One sentence per state.
+        state: str
+        name: str
+        state, name = self.bootstrap_status()
+        newest: str = list(BOOTSTRAPS.values())[-1]
+        if state == "current":
+            return f"alt_venv: this program's bootstrap is current, {name}"
+        if state == "stale":
+            return (f"alt_venv: this program's bootstrap is stale, {name}; "
+                    f"the current one is {newest}")
+        if state == "edited":
+            return ("alt_venv: this program's bootstrap has been edited, "
+                    "or is not one alt_venv published")
+        return "alt_venv: no bootstrap found in this program"
+
     @overload
     def install(self, *, bootstrap: str = "") -> None: ...
 
@@ -1333,6 +1551,11 @@ class AltVEnv:
         """
         # Remembered for Step 6.12, which has not been written yet.
         self.bootstrap = bootstrap
+
+        # Say whether the pasted bootstrap is current, but only when the
+        # author asks; see Step 6.12.
+        if os.environ.get("ALT_VENV_BOOTSTRAP", "").lower() == "check":
+            print(self.report_bootstrap(), file=sys.stderr)
 
         # No arguments means whatever the program declared.  The
         # interpreter is checked first, because a program on the wrong
@@ -1516,9 +1739,11 @@ class AltVEnv:
         # A good moment to sweep: something is about to be fetched, so a
         # little work here is invisible beside a download, and anything
         # this program is about to create is younger than the grace
-        # period and so cannot be swept by mistake.
+        # period and so cannot be swept by mistake.  The same reasoning
+        # makes it the moment to see whether `pip` has moved on.
         if self.due():
             self.cull()
+        self.refresh_pip()
 
         # Refuse the one thing `pip` would accept and should not: a
         # leading dash reads as an option, so `install("--index-url=")`

@@ -66,6 +66,7 @@ import subprocess
 import sys
 import sysconfig
 import tempfile
+import textwrap
 import threading
 import time
 import trace
@@ -926,7 +927,8 @@ class _IndexHandler(http.server.SimpleHTTPRequestHandler):
 
         # Build the subset of the payload that the `nopip` cases read:
         # `urls` for `nopip1` and `nopip2`, and `releases` for `nopip3`,
-        # which chooses a `pip` by `requires_python` and `upload_time`.
+        # which chooses a `pip` by `requires_python` and `upload_time` and
+        # checks it against `digests`.
         # Both are taken from the wheels themselves, the floor from their
         # `METADATA` and the time from the file, in PyPI's own format, so
         # a test controls them by building the wheel it wants.
@@ -934,6 +936,8 @@ class _IndexHandler(http.server.SimpleHTTPRequestHandler):
         files: list[dict[str, Any]] = [
             {"filename": wheel.name, "yanked": False,
              "packagetype": "bdist_wheel",
+             "digests": {"sha256": hashlib.sha256(
+                 wheel.read_bytes()).hexdigest()},
              "requires_python": requires_python(wheel),
              "upload_time": datetime.datetime.fromtimestamp(
                  wheel.stat().st_mtime, datetime.UTC).strftime(
@@ -1619,6 +1623,25 @@ class AltVEnvTest(unittest.TestCase):
         self.assertNotIn("Traceback", done.stderr)
         self.assertIn(f"cannot fetch {MODULE}, choose pip failed: "
                       "<HTTPError 404", done.stderr)
+
+    @runs_cases
+    def test_the_shipping_case_refuses_a_damaged_pip(self) -> None:
+        """A `pip` wheel that fails its SHA-256 is refused, and not kept.
+
+        Without the check a truncated download became `pip.whl`, and the
+        failure surfaced one stage later as a zip error from running it,
+        which said nothing about the download.  See issue `3fpfipe`.
+        """
+        # Half of every wheel, so the digest PyPI lists cannot match.
+        if not selected(SHIPPING):
+            self.skipTest(f"{SHIPPING} is not selected")
+        self.inject(".whl", "truncate")
+        home: Path = Path(tempfile.mkdtemp(prefix="damaged-", dir=self.root))
+        done: subprocess.CompletedProcess[str] = self.run_case(SHIPPING, home)
+        self.assertNotEqual(done.returncode, 0)
+        self.assertIn("download pip failed: ValueError(", done.stderr)
+        self.assertIn("fails its SHA-256 check", done.stderr)
+        self.assertFalse((home / ".alt_venv" / "pip.whl").exists())
 
     @runs_cases
     def test_the_shipping_case_chooses_a_pip_this_python_runs(self) -> None:
@@ -2324,6 +2347,94 @@ class InstallTest(unittest.TestCase):
             check=False)
         self.assertEqual(done.returncode, 0, done.stderr[-400:])
         self.assertIn(str(cache / "pip.whl"), done.stdout)
+
+    def test_pip_prefers_the_newest_refreshed_copy(self) -> None:
+        """A refreshed `pip` beats the bootstrap's, and the newest wins."""
+        # Two refreshed copies beside the stash, the later one added last.
+        cache: Path = self.root / "refreshed"
+        venv: alt_venv.AltVEnv = alt_venv.AltVEnv(cache)
+        (cache / "pip.whl").write_bytes(pip_wheel()[1])
+        older: Path = cache / "pip-1.0-py3-none-any.whl"
+        newer: Path = cache / "pip-2.0-py3-none-any.whl"
+        older.write_bytes(b"")
+        newer.write_bytes(b"")
+        os.utime(older, (1000.0, 1000.0))
+        os.utime(newer, (2000.0, 2000.0))
+        self.assertEqual(venv.pip(), [sys.executable, str(newer / "pip")])
+
+    def test_refresh_pip_leaves_the_interpreters_pip_alone(self) -> None:
+        """Without a private `pip` there is nothing to refresh, or stamp."""
+        # Every bootstrap but the shipping one is in this position.
+        cache: Path = self.root / "no-private-pip"
+        venv: alt_venv.AltVEnv = alt_venv.AltVEnv(cache)
+        self.assertIsNone(venv.refresh_pip())
+        self.assertFalse((cache / "last_pip").exists())
+
+    def test_refresh_pip_adds_a_newer_pip(self) -> None:
+        """A newer `pip` is added beside the old, and the old makes way.
+
+        The index offers a stand-in `pip` 99.0, which the real one in the
+        cache downloads; it cannot run, but nothing here needs it to.  An
+        older refreshed copy, past its grace period, is removed, and the
+        bootstrap's own `pip.whl` is kept.  A second call inside the
+        interval does nothing.
+        """
+        # The stand-in release, alone in an index of its own.
+        source: Path = self.root / "pip-99" / "pip.py"
+        source.parent.mkdir(parents=True, exist_ok=True)
+        source.write_text('"""A stand-in."""\n')
+        stand_in: Path = build_wheel(source, "pip", "99.0", "A stand-in.",
+                                     self.root / "pip-99-dist",
+                                     floor=">=3.0")
+        index: Path = build_index([stand_in], self.root / "pip-99-index")
+        server: _IndexServer
+        url: str
+        server, url = serve_index(index)
+        self.addCleanup(server.server_close)
+        self.addCleanup(server.shutdown)
+
+        # A cache holding the bootstrap's `pip` and a superseded refresh.
+        cache: Path = self.root / "to-refresh"
+        venv: alt_venv.AltVEnv = alt_venv.AltVEnv(cache)
+        (cache / "pip.whl").write_bytes(pip_wheel()[1])
+        superseded: Path = cache / "pip-1.0-py3-none-any.whl"
+        superseded.write_bytes(pip_wheel()[1])
+        os.utime(superseded, (1000.0, 1000.0))
+        with unittest.mock.patch.dict(os.environ, {"PIP_INDEX_URL": url}):
+            added: Path | None = venv.refresh_pip()
+            again: Path | None = venv.refresh_pip()
+        wanted: Path = cache / "pip-99.0-py3-none-any.whl"
+        self.assertEqual(added, wanted)
+        self.assertIsNone(again)
+        self.assertEqual(venv.pip(), [sys.executable, str(wanted / "pip")])
+        self.assertFalse(superseded.exists())
+        self.assertTrue((cache / "pip.whl").is_file())
+        self.assertTrue((cache / "last_pip").is_file())
+
+    def test_refresh_pip_keeps_what_it_already_has(self) -> None:
+        """When the newest `pip` is the one in use, nothing is added."""
+        # This class's index offers the same `pip` the cache already holds.
+        cache: Path = self.root / "up-to-date"
+        venv: alt_venv.AltVEnv = alt_venv.AltVEnv(cache)
+        (cache / "pip.whl").write_bytes(pip_wheel()[1])
+        with unittest.mock.patch.dict(
+                os.environ, {"PIP_INDEX_URL": self.index_url}):
+            self.assertIsNone(venv.refresh_pip())
+        self.assertEqual(sorted(p.name for p in cache.glob("pip*.whl")),
+                         ["pip.whl"])
+
+    def test_refresh_pip_survives_a_dead_index(self) -> None:
+        """No network is no refresh, quietly, and no retry until next week."""
+        # A port nothing listens on stands in for a missing network.
+        cache: Path = self.root / "offline"
+        venv: alt_venv.AltVEnv = alt_venv.AltVEnv(cache)
+        (cache / "pip.whl").write_bytes(pip_wheel()[1])
+        with unittest.mock.patch.dict(
+                os.environ, {"PIP_INDEX_URL": "http://127.0.0.1:1/"}):
+            self.assertIsNone(venv.refresh_pip())
+        self.assertTrue((cache / "last_pip").is_file())
+        self.assertEqual(sorted(p.name for p in cache.glob("pip*.whl")),
+                         ["pip.whl"])
 
     @runs_cases
     def test_nothing_but_python_and_the_bootstrap(self) -> None:
@@ -4285,7 +4396,7 @@ class HarnessTest(unittest.TestCase):
         imports: int
         lines: int
         imports, lines = counts[SHIPPING]
-        self.assertEqual(imports, 3)
+        self.assertEqual(imports, 4)
         self.assertGreater(lines, 5)
 
     def test_the_recorded_table_matches_the_measurement(self) -> None:
@@ -4401,6 +4512,128 @@ class HarnessTest(unittest.TestCase):
         self.assertIn("subprocess", table)
         self.assertIn("wrap", table)
         self.assertEqual(table.count("| nopip2 |"), 1, table)
+
+
+class BootstrapCheckTest(unittest.TestCase):
+    """Recognise a pasted bootstrap, and say whether it is current.
+
+    Step 6.12.  The pasted text comes from `bootstrap.pasted`, so these
+    tests read the shipping case exactly as a person would paste it.
+
+    Attributes:
+    * `root` (`Path`):
+      A temporary directory, removed after each test.
+
+    Constructor:
+    * `BootstrapCheckTest()`, by `unittest` rather than by hand.
+    """
+
+    # Set by `setUp`.
+    root: Path
+
+    def setUp(self) -> None:
+        """Make a scratch directory."""
+        # Programs and caches for the child processes live here.
+        self.root = Path(tempfile.mkdtemp(prefix="stale-"))
+        self.addCleanup(shutil.rmtree, self.root, True)
+
+    def shipping(self) -> str:
+        """Return the shipping case's `try` block as pasted.
+
+        Returns:
+        * (`str`): The block.
+        """
+        # Found the way a running program's would be.
+        block: str | None = alt_venv.find_bootstrap(bootstrap.pasted(SHIPPING))
+        assert block is not None
+        return block
+
+    def test_the_shipping_paste_is_the_current_entry(self) -> None:
+        """Changing the bootstrap without updating the table fails here."""
+        # The last entry is the current one by definition.
+        self.assertEqual(alt_venv.bootstrap_fingerprint(self.shipping()),
+                         list(alt_venv.BOOTSTRAPS)[-1])
+
+    def test_layout_and_comments_do_not_change_the_fingerprint(self) -> None:
+        """Re-indenting, re-wrapping and commenting leave it the same."""
+        # Three cosmetic changes, then one real one.
+        block: str = self.shipping()
+        same: str = alt_venv.bootstrap_fingerprint(block)
+        indented: str = textwrap.indent(block, "    ")
+        commented: str = block.replace("try:\n", "try:  # Fetch it.\n", 1)
+        rewrapped: str = block.replace(
+            "; t = pathlib", ";\\\n        t = pathlib", 1)
+        for variant in (indented, commented, rewrapped):
+            with self.subTest(variant=variant[:40]):
+                self.assertNotEqual(variant, block)
+                self.assertEqual(alt_venv.bootstrap_fingerprint(variant),
+                                 same)
+        changed: str = block.replace("None, 30", "None, 31", 1)
+        self.assertNotEqual(alt_venv.bootstrap_fingerprint(changed), same)
+
+    def test_the_four_states(self) -> None:
+        """Current, stale, edited and absent are told apart."""
+        # The program's text is supplied directly, as `main_source` would.
+        program: str = (f"import sys\nif False:\n"
+                        f"{textwrap.indent(self.shipping(), '    ')}\n")
+        venv: alt_venv.AltVEnv = alt_venv.AltVEnv(self.root / "cache")
+        mine: str = alt_venv.bootstrap_fingerprint(self.shipping())
+        newer: dict[str, str] = {mine: "nopip3 of yesterday",
+                                 "0" * 64: "nopip3 of tomorrow"}
+        cases: list[tuple[str, dict[str, str], tuple[str, str]]] = [
+            (program, dict(alt_venv.BOOTSTRAPS),
+             ("current", list(alt_venv.BOOTSTRAPS.values())[-1])),
+            (program, newer, ("stale", "nopip3 of yesterday")),
+            (program.replace("None, 30", "None, 31"),
+             dict(alt_venv.BOOTSTRAPS), ("edited", "")),
+            ("print('no bootstrap here')\n", dict(alt_venv.BOOTSTRAPS),
+             ("absent", "")),
+        ]
+        text: str
+        table: dict[str, str]
+        wanted: tuple[str, str]
+        for text, table, wanted in cases:
+            with (self.subTest(wanted=wanted[0]),
+                  unittest.mock.patch.object(
+                      alt_venv, "main_source",
+                      return_value=(self.root / "prog.py", text)),
+                  unittest.mock.patch.object(alt_venv, "BOOTSTRAPS", table)):
+                self.assertEqual(venv.bootstrap_status(), wanted)
+                self.assertIn(wanted[0] if wanted[0] != "absent"
+                              else "no bootstrap", venv.report_bootstrap())
+
+        # No program at all, as under `python3 -c`, is absent too.
+        with unittest.mock.patch.object(alt_venv, "main_source",
+                                        return_value=None):
+            self.assertEqual(venv.bootstrap_status(), ("absent", ""))
+
+    def test_install_reports_only_when_asked(self) -> None:
+        """`ALT_VENV_BOOTSTRAP=check` prints one line; otherwise nothing."""
+        # A real program carrying the paste, which must not run it.
+        program: Path = self.root / "prog.py"
+        program.write_text(
+            "import sys\n"
+            f"sys.path.insert(0, {str(Path(__file__).resolve().parent)!r})\n"
+            "import alt_venv\n"
+            "from pathlib import Path\n"
+            "if False:\n"
+            f"{textwrap.indent(self.shipping(), '    ')}\n"
+            f"cache = Path({str(self.root / 'cache')!r})\n"
+            "alt_venv.AltVEnv(cache).install()\n")
+        environment: dict[str, str] = dict(os.environ)
+        environment.pop("ALT_VENV_BOOTSTRAP", None)
+        quiet: subprocess.CompletedProcess[str] = subprocess.run(
+            [sys.executable, str(program)], env=environment,
+            capture_output=True, text=True, check=False)
+        asked: subprocess.CompletedProcess[str] = subprocess.run(
+            [sys.executable, str(program)],
+            env=dict(environment, ALT_VENV_BOOTSTRAP="check"),
+            capture_output=True, text=True, check=False)
+        self.assertEqual((quiet.returncode, quiet.stderr), (0, ""))
+        self.assertEqual(asked.returncode, 0, asked.stderr)
+        self.assertEqual(asked.stderr.strip(),
+                         "alt_venv: this program's bootstrap is current, "
+                         f"{list(alt_venv.BOOTSTRAPS.values())[-1]}")
 
 
 class CoverageToolTest(unittest.TestCase):

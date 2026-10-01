@@ -115,7 +115,7 @@ user would type.  The real `~/.alt_venv` is never touched.
 |        | stdlib wheel  |         |       |       |        |        |        |
 | nopip2 | venv(no pip), | 7       | 54    | 57    | 1.42 s | 0.16 s | 1714   |
 |        | stdlib wheel  |         |       |       |        |        |        |
-| nopip3 | no venv, PyPI | 3       | 24    | 27    | 3.05 s | 0.14 s | 3538   |
+| nopip3 | no venv, PyPI | 4       | 27    | 30    | 3.05 s | 0.14 s | 3538   |
 |        | pip           |         |       |       |        |        |        |
 |        | subprocess    |         |       |       |        |        |        |
 +--------+---------------+---------+-------+-------+--------+--------+--------+
@@ -231,28 +231,29 @@ it as `~/.alt_venv/pip.whl`, and runs it as `python pip.whl/pip`, which
 is how pip documents running itself without being installed.  `AltVEnv`
 then uses that same copy, so nothing on the machine needs pip at all.
 It is a subprocess case, so none of pip's state reaches the program,
-and it costs 27 pasted lines against `pip2`'s 17.
+and it costs 30 pasted lines against `pip2`'s 17.
 
 It is also the one case **squeezed on purpose**, on 2026-10-01: a
 bootstrap is meant to feel like magic, and a short one is pasted with
-less hesitation.  The ugliness is kept inside the `try`.  There, names
-are single letters, short statements on one topic share a line, `/`
-goes without spaces, the downloads skip `with`, and the message uses
-`repr`.  Outside it, the imports are one to a line, in order, and
-named plainly except for `urllib.request as req`, because the person
-moves them to the top of their program, where many tools check exactly
-that.  That took it from 41 pasted lines to 27.  `ruff.toml` exempts
-this file from the one rule the squeeze breaks, `E702`.  The comment
-on the choice of pip went too, at Wayne's word, since this docstring
-explains it.  Not squeezed: pip's `--no-input` and
-`--disable-pip-version-check`, which change what pip does.  It fetches
-pip whenever `alt_venv` is missing, even if an earlier run that failed
-before installing left a `pip.whl` behind; skipping that rare download
-cost a whole level of indentation.  Paths go to `subprocess.run` as
-they are, and pip's `--target` is spelled `-t`.  What comments it has
-sit at the ends of lines, where they cost nothing.  Its lines are
-checked at the width they will have once pasted, with the URL spelled
-out; the widest is 78.
+less hesitation.  The ugliness is kept inside the `try`.  There, names are
+single letters, short statements on one topic share a line, `/` goes
+without spaces, the downloads skip `with`, and the message uses `repr`.
+Outside it, the imports are one to a line, in order, and named plainly
+except for `urllib.request as req`, because the person moves them to the
+top of their program, where many tools check exactly that.  That took it
+from 41 pasted lines to 27, and checking the SHA-256 of the pip it
+downloads, against the digest PyPI lists, then added three: `import
+hashlib` and a two line `if` that raises.  `ruff.toml` exempts this file
+from the one rule the squeeze breaks, `E702`.  The comment on the choice
+of pip went too, at Wayne's word, since this docstring explains it.  Not
+squeezed: pip's `--no-input` and `--disable-pip-version-check`, which
+change what pip does.  It fetches pip whenever `alt_venv` is missing,
+even if an earlier run that failed before installing left a `pip.whl`
+behind; skipping that rare download cost a whole level of indentation.
+Paths go to `subprocess.run` as they are, and pip's `--target` is
+spelled `-t`.  What comments it has sit at the ends of lines, where they
+cost nothing.  Its lines are checked at the width they will have once
+pasted, with the URL spelled out; the widest is 78.
 
 Of its lines, the best spent set the stage, so that a failure says
 where it happened, and choose which pip to fetch: not the newest, but
@@ -761,6 +762,7 @@ def nopip3() -> None:
       If any step fails, with one line saying what failed and why.
     """
     # Ensure `alt_venv` is downloaded.
+    import hashlib
     import json
     import subprocess
     import urllib.request as req
@@ -775,6 +777,8 @@ def nopip3() -> None:
                      and "," not in q and int(q.split(".")[1]) <= v),
                     key=lambda e: e["upload_time"])  # whose floor we meet.
             s = "download pip"; r = req.urlopen(e["url"], None, 60).read()
+            if hashlib.sha256(r).hexdigest() != e["digests"]["sha256"]:
+                raise ValueError(f"{e['filename']} fails its SHA-256 check")
             t.mkdir(parents=True, exist_ok=True); p = t/"pip.part"
             p.write_bytes(r); p.replace(w)  # The rename is atomic.
             s = f"install {PACKAGE}"; subprocess.run([
@@ -875,6 +879,38 @@ def measure_source() -> dict[str, tuple[int, int]]:
                     if isinstance(n, (ast.Import, ast.ImportFrom))),
                 last - first + 2)      # +2 picks up the comment line.
     return counts
+
+
+def pasted(label: str) -> str:
+    """Return a case exactly as a person pastes it into their program.
+
+    The function's body below its docstring, one level shallower, with
+    the two names that exist only so the harness can be steered spelled
+    out the way a pasted copy carries them: `PACKAGE` as `"alt_venv"`
+    and `JSON_API` as `https://pypi.org/pypi`.  An f-string left with
+    nothing to substitute becomes a plain string, as it would be
+    written by hand.  This is the text Step 6.12 fingerprints, and the
+    text a `README.md` can quote.
+
+    Arguments:
+    * `label` (`str`):
+      The case, such as `nopip3`.
+
+    Returns:
+    * (`str`): The pasted text, ending in a newline.
+    """
+    import ast
+    import re
+    import textwrap
+    source = pathlib.Path(__file__).read_text()
+    node = next(n for n in ast.parse(source).body
+                if isinstance(n, ast.FunctionDef) and n.name == label)
+    lines = source.splitlines()[node.body[1].lineno - 2:node.end_lineno]
+    text = textwrap.dedent("\n".join(lines)) + "\n"
+    text = text.replace("{JSON_API}", "https://pypi.org/pypi")
+    text = text.replace("{PACKAGE}", "alt_venv")
+    text = re.sub(r"\bPACKAGE\b", '"alt_venv"', text)
+    return re.sub(r'\bf"([^"{}]*)"', r'"\1"', text)
 
 
 def directory_size(path: pathlib.Path) -> int:

@@ -217,7 +217,10 @@ it.
 
 `AltVEnv` also reads `ALT_VENV_APPROVE`: unset enforces the approvals
 file beside the calling program, `write` records what arrived, and
-`skip` does neither.
+`skip` does neither.  `ALT_VENV_BOOTSTRAP=check` makes `install()`
+say on standard error whether the program's pasted bootstrap is the
+current one; `alt_venv.BOOTSTRAPS` lists the published ones, and
+`bootstrap.pasted("nopip3")` is the exact text a person pastes.
 
 ## Python style
 

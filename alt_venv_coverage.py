@@ -91,6 +91,7 @@ import time
 import trace
 import unittest
 from pathlib import Path
+from typing import Any, cast
 
 # The file `report` keeps the counts in, inside the annotation
 # directory, so that `compare` can read a run back without redoing it.
@@ -112,25 +113,84 @@ MEASURED: tuple[str, ...] = ("alt_venv.py", "bootstrap.py",
                              "alt_venv_test.py")
 
 
+class ProjectOnly:
+    """Tell `trace` to follow this project's files and nothing else.
+
+    `trace` decides what to follow with an `Ignore` object whose
+    `names` method it asks on every new frame.  The standard one is
+    given directories to skip, and caches its verdict by the module's
+    bare name -- `__init__`, `utils`, `exceptions` -- rather than by
+    its path, so whichever `__init__.py` a process meets first decides
+    for all the others.  A child that met one of this project's first
+    went on to trace every `__init__.py` in the standard library, and
+    one that met the standard library's first would have skipped this
+    project's.  Step 6.16.4 in `LOGBOOK.md` found it.
+
+    This replaces it with a positive rule, cached by path: follow a
+    file in this project's directory, or a copy of `alt_venv` that a
+    bootstrap installed, which `trace_hook/sitecustomize.py` credits to
+    the project.  Everything else -- the standard library, `pip` run in
+    process, whatever a test installs -- is left alone, which is both
+    correct and much faster.  The hook carries the same rule, since it
+    cannot import this file.
+
+    Attributes:
+    * `here` (`str`):
+      This project's directory, ending in a separator.
+    * `verdicts` (`dict[str, int]`):
+      1 for a file to skip and 0 for one to follow, by path.
+
+    Constructor:
+    * `ProjectOnly()`
+    """
+
+    # Set by the constructor; see `Attributes:` above.
+    here: str
+    verdicts: dict[str, int]
+
+    def __init__(self) -> None:
+        """Note where this project lives."""
+        # A separator on the end, so a sibling with a longer name is out.
+        self.here = str(Path(__file__).resolve().parent) + os.sep
+        self.verdicts = {}
+
+    def names(self, filename: str, modulename: str) -> int:
+        """Say whether `trace` should skip the code in `filename`.
+
+        Arguments:
+        * `filename` (`str`):
+          The file a new frame's code came from.
+        * `modulename` (`str`):
+          Its bare module name, which is unreliable and not used.
+
+        Returns:
+        * (`int`): 1 to skip it, 0 to follow it, as `trace` expects.
+        """
+        # Decide once per path, then answer from the table.
+        verdict: int | None = self.verdicts.get(filename)
+        if verdict is None:
+            wanted: bool = filename.startswith(self.here) or filename.endswith(
+                (os.sep + "alt_venv.py",
+                 os.sep + os.path.join("alt_venv", "__init__.py")))
+            verdict = self.verdicts[filename] = 0 if wanted else 1
+        return verdict
+
+
 def build_tracer() -> trace.Trace:
     """Return a tracer that counts lines in this project only.
 
-    The standard library is excluded.  Counting it would swamp the
-    summary with hundreds of modules nobody here is responsible for,
-    and would make the run far slower than the suite it measures.
+    Anything outside the project is not followed at all, which keeps
+    the summary to the files somebody here is responsible for and keeps
+    the run from being far slower than the suite it measures.  See
+    `ProjectOnly` for why `trace`'s own `ignoredirs` is not used.
 
     Returns:
     * (`trace.Trace`): A line counting tracer, not yet running.
     """
-    # Exclude the interpreter's own directories, whatever they are.
-    # `sys.prefix` is the virtual environment when there is one, and
-    # the standard library then lives under `sys.base_prefix`, so
-    # naming only the first traces the whole standard library in a
-    # venv child.  Found by Step 6.5.15.
-    return trace.Trace(count=1, trace=0,
-                       ignoredirs=[sys.prefix, sys.exec_prefix,
-                                   sys.base_prefix,
-                                   sys.base_exec_prefix])
+    # The standard `Ignore` is swapped for one that decides by path.
+    tracer: trace.Trace = trace.Trace(count=1, trace=0)
+    tracer.ignore = cast(Any, ProjectOnly())
+    return tracer
 
 
 def run_suite(marked_only: bool = False) -> bool:

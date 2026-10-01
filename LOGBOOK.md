@@ -2275,6 +2275,28 @@ expected every time the order changes, and is Claude's job.
   * 6.12.3 - What to do about a stale bootstrap -- report it, refuse to
     run, or offer to rewrite the file -- is still open, but 6.12.2 makes
     reporting the obvious default.
+  * 6.12.5 - **Built**, 2026-10-01, once the paste had stopped moving.
+    The bootstrap is found as the program's `try` block that mentions
+    `alt_venv` and `import_module`, wherever it sits; the imports above
+    it are left out, since people move them.  Its fingerprint is the
+    SHA-256 of its text with comments and every space, tab and line
+    break removed, so re-indenting, re-wrapping or annotating a copy
+    leaves it the same and changing any code does not.  `tokenize`
+    finds the comments, and joining its tokens before removing the
+    whitespace makes the fingerprint agree under 3.11 and 3.12, which
+    tokenize f-strings differently; checked under both.
+    `alt_venv.BOOTSTRAPS` lists every published bootstrap by
+    fingerprint, oldest first, and holds one entry so far, today's
+    `nopip3`.  `bootstrap.pasted` renders a case exactly as pasted, and
+    a test fails until the table's last entry matches it, so changing
+    the bootstrap without recording it cannot pass.  As 6.12.2 decided,
+    `install` is silent unless `ALT_VENV_BOOTSTRAP=check`, when it
+    prints one line: current, stale with both names, edited or
+    unrecognised, or none found.  The `bootstrap` label of 6.12.4 is
+    still read by nothing; the fingerprint made it unnecessary.  The
+    first test run found that a `try` nested inside an indented block
+    came back from `ast.get_source_segment` unevenly indented, which
+    `tokenize` rejected; it is padded and dedented now.
 
 * Step 6.13: Messages.  When should anything be said: on creating the
   directory, on each download, on a stale bootstrap?  One constraint is
@@ -2289,6 +2311,36 @@ expected every time the order changes, and is Claude's job.
   keeps the `raise` on one source line at 73 columns, where inlining it
   is 121 and wrapping it costs two, so `SHARED_LINES` would go from 7
   to 8.  Not done, because the URL depends on the repository name.
+  * 6.13.1 - **Who writes what, and where**, surveyed 2026-10-01, which
+    Wayne set as the first thing to know before deciding anything.  By
+    reading `alt_venv.py` and `nopip3`, and by running `nopip3` cold with
+    its two output streams kept apart.
+
+    | Writer | Stream | When |
+    |--------|--------|------|
+    | `nopip3`'s `pip install` | **standard output** | first run only |
+    | `nopip3`'s `pip install` | standard error | when it fails |
+    | `nopip3`'s `except` | standard error, exit 1 | any failure |
+    | `AltVEnv.announce` | standard error | every fetch |
+    | `AltVEnv.gate` | standard error | `ALT_VENV_APPROVE=write` |
+    | `AltVEnv.consent` | `/dev/tty`, not a stream | approvals and a terminal |
+    | `AltVEnv.download` | captured; text goes into the exception | always |
+    | `AltVEnv.refresh_pip` | captured and dropped | weekly |
+    | `AltVEnv`'s exceptions | the caller's to catch | failures |
+
+    The one surprise is the first row.  `pip` writes its progress --
+    `Collecting coverage`, `Downloading ...`, `Successfully installed
+    ...`, five lines -- to the program's own standard output, so the
+    first run of a program whose output is piped or parsed gets those
+    lines mixed into it.  `announce`'s own docstring says a library
+    must never do this.  `stdout=2` on that `subprocess.run` would send
+    them to standard error, and it fits inside 79 columns, so it costs
+    no line.  Recommended for 6.13; not done, because 6.13 is Wayne's
+    to decide.
+
+    The other open question for 6.13 is the last row: `install()` raises
+    on a failed fetch, so a program that does not catch it ends in a
+    traceback, where `nopip3` itself ends in one line.
 
 * Step 6.14: The shipping bootstrap.  Twelve cases were measured in Task
   2 and never narrowed to one, which left the `paste` metric priced
@@ -2531,6 +2583,33 @@ expected every time the order changes, and is Claude's job.
     line stays within 79 columns; four do now, costing nothing.
     `nopip3` is 27 pasted lines.
 
+  * 6.15.15 - **`pip`'s SHA-256 is checked**, 2026-10-01, closing
+    `3fpfipe`.  The digest PyPI lists for the file is compared with the
+    bytes before anything is written, so a damaged download fails as
+    `download pip failed: ValueError('pip-...whl fails its SHA-256
+    check')` and leaves no `pip.whl` behind to fail confusingly on every
+    later run.  Three lines: `import hashlib` and a two line `if`, which
+    made `nopip3` 30 pasted lines.  The local index serves
+    `digests` now, and a new test truncates every wheel in flight; with
+    the check taken out, that test fails.
+
+  * 6.15.16 - **The private `pip` keeps itself current**, 2026-10-01,
+    closing `3spinu`.  `AltVEnv.refresh_pip` runs from `provide`, beside
+    the cull, so only when something is about to be fetched anyway, and
+    at most weekly by a `last_pip` stamp, as `pip` checks itself.  It
+    asks the current private `pip` to download `pip`; `pip` passes over
+    releases this Python cannot run, so what arrives is the newest it
+    can.  A new version is added **beside** `pip.whl`, as
+    `pip-<version>-...whl`, never over it: a running `pip` reads itself
+    out of its wheel by offset as it goes, so replacing the file under
+    it would break it.  `pip()` takes the most recently added copy.
+    Superseded copies are removed after a day's grace; `pip.whl` is
+    kept, for the bootstrap.  Failure of any kind is silent and waits a
+    week, since the stamp is written before trying.  A cache with no
+    private `pip` is left alone.  Five tests, among them a stand-in
+    `pip` 99.0 being added and a dead index changing nothing; with the
+    version comparison disabled, the up-to-date test fails.
+
 * Step 6.16: Test suite cleanup, headed towards deleting some of the
   cases in `bootstrap.py` now that `nopip3` ships.
   * 6.16.1 - **Cases are named, not numbered**, 2026-10-01, at Wayne's
@@ -2609,6 +2688,33 @@ expected every time the order changes, and is Claude's job.
     `sys.base_prefix` among the directories to ignore.  The report reads
     only this project's files, so the answer is unaffected; the cost is
     time and the size of the counts.  Not yet looked into.
+
+    Looked into, 2026-10-01, and it was worse than a cost.  `trace`'s
+    own `Ignore` caches its verdict by a module's **bare name** --
+    `__init__`, `utils`, `exceptions` -- not its path, so whichever
+    `__init__.py` a process met first decided for every other.  Children
+    that met one of this project's first traced every `__init__.py` in
+    the standard library; and in the other direction, project files
+    were being **skipped** whenever a standard library file of the same
+    name came first.  A separate leak: `venv3` runs `pip` in its own
+    process, so 57,162 lines of `pip` were traced in one child.  Both
+    tracers, the parent's `build_tracer` and the child hook, now swap
+    `trace`'s `Ignore` for a positive rule cached by path: follow this
+    project's directory and installed copies of `alt_venv`, and nothing
+    else.  Measured on one case at a time, nothing was lost and lines of
+    `alt_venv.py` that had been skipped were gained; `venv3` went from
+    86.5 s to 71.6 s and `nopip3` from 22.6 s to 21.4 s.  A whole
+    `COMPLETE` cull still took 761 s against the morning's 739, on a
+    suite fifteen tests larger: the time is in the work the tests do,
+    not in tracing them.
+
+    That cull's **report is void**.  Claude edited `alt_venv.py` and
+    `alt_venv_test.py`, for 6.12, while it ran, so the baseline and the
+    later cases counted the same lines under different numbers, and
+    cases looked to add hundreds of lines they did not.  A nightly run
+    on a still tree is not at risk, but the cull trusts the tree to stay
+    still for a quarter of an hour; copying the project somewhere first
+    and measuring the copy would remove that trust.  Not built.
   * 6.16.5 - **The other ten cases stay but stop running**, 2026-10-01.
     Wayne: "leaving the tests around hurts nothing.  From now on just
     run nopip1-3."  `FAST_CASES` became `nopip1` to `nopip3`, and the
@@ -2969,6 +3075,73 @@ Being worked on right now, in priority order.  None at present.
 
 Not yet started, in priority order.
 
+* **The bootstrap trusts only system certificates. (2btosc)**  Case
+  13 reaches PyPI with `urllib`, which verifies against the operating
+  system's certificate store, where case 7 handed the whole fetch to
+  `pip` and its own bundled store.  Linux distributions provide one.
+  The python.org installer for macOS does not until its
+  `Install Certificates.command` has been run, so there the bootstrap
+  would fail on its first request.  Untested; nobody here has a Mac.
+
+  Various thoughts:
+  * Wayne (2026-10-01): I'm working on getting access to macOS and
+    Windows machines, so that is in progress.
+  * Claude (2026-10-01): Simulated on Linux by pointing `SSL_CERT_FILE`
+    at an empty file, and at no file, with `SSL_CERT_DIR` gone too.
+    `nopip3` stops at once with one line, exit status 1: `cannot fetch
+    alt_venv, choose pip failed: URLError(SSLCertVerificationError(1,
+    '[SSL: CERTIFICATE_VERIFY_FAILED] certificate verify failed: unable
+    to get local issuer certificate ...'))`.  That is the very text a
+    python.org macOS install prints without its certificates, and it
+    leads anyone who searches for it to `Install Certificates.command`,
+    so a hint in the paste would cost a line to say what the message
+    already says.  What a real Mac adds is whether it fails this way at
+    all.
+
+* **Windows and macOS are untried. (2wmau)**  Everything here has been
+  verified on Linux only, under CPython 3.11 and 3.12.  `nopip3` and
+  `alt_venv.py` both use `pathlib` and `sys.executable` rather than
+  spelling out paths, so nothing is known to break, but nothing has been
+  run either; `2btosc` is the one specific worry, for macOS.  Carried
+  over from `2hmmdrpe`.
+
+  Various thoughts:
+  * Wayne (2026-09-22): It would be nice to test on Windows and MacOS.
+  * Wayne (2026-09-22): I know people who have these machines and would be glad
+    to help.  Until then, the answer is currently unknown.
+  * Wayne (2026-10-01): Access to macOS and Windows machines is in
+    progress.
+
+* **Reviewer thoughts have two formats. (3rthtf)**  Task 4 propagated the
+  reviewer thought rules into `claude_notes.md`, and the two files came out
+  disagreeing about the shape.  `claude_notes.md` puts reviewer thoughts
+  inside the `{ ... }` braces it uses for annotating a closed task, listing
+  the dating, naming and ordering rules as sub-points of the annotation
+  rules.  `LOGBOOK.md` instead uses a `Various thoughts:` label followed by
+  plain bullets, describes it that way in its own `## Issues` preamble, and
+  uses it in fourteen places.  The rules themselves agree; only the syntax
+  differs.  Whichever file is wrong, the other is the specification, so one
+  of the two has to move.
+
+  Various thoughts:
+  * Claude (2026-09-25): `LOGBOOK.md` has the better of it.  Braces are for
+    annotating settled text, and a multi-reviewer thread that grows over
+    months is a discussion rather than an annotation; wrapping fourteen of
+    them in braces would also bury the reviewer names one level deeper.  But
+    `claude_notes.md` is the general write-up, in another repository and in
+    Wayne's voice, so this is a proposal rather than an edit.
+  * Wayne (2026-10-01): My thoughts on `LOGBOOK.md` have been morphing,
+    and I'm leaving it alone for now.  The key thing is that it uses
+    `{}` for closed tasks; Task 6 is still open, so braces are not
+    appropriate there yet.  Task 6 grew into a parallel development
+    strategy, and how `LOGBOOK.md` should change for that needs
+    thought.  Leave this open, since it is going to be a while.
+
+### Rejected Issues
+
+Approaches that were considered and declined, recorded so that they
+are not proposed again.
+
 * **An already-importable package is installed anyway. (2apiia)**  All
   twelve cases ask whether the package is on disk at their own target,
   never whether it is already importable.  With `coverage` present in an
@@ -2993,16 +3166,67 @@ Not yet started, in priority order.
     it stays open on its own merits rather than as `0whwnn`'s twin.  The
     fix is now cheaper than it was, since Step 6.3 has to rework the
     same guard for the versioned cache.
+  * Wayne (2026-10-01): Rejected.  I don't care if an extra download
+    occurs.
 
-* **The bootstrap trusts only system certificates. (2btosc)**  Case
-  13 reaches PyPI with `urllib`, which verifies against the operating
-  system's certificate store, where case 7 handed the whole fetch to
-  `pip` and its own bundled store.  Linux distributions provide one.
-  The python.org installer for macOS does not until its
-  `Install Certificates.command` has been run, so there the bootstrap
-  would fail on its first request.  Untested; nobody here has a Mac.
+* **Vendor the packages into the repository. (3vpir)**  Needs no
+  network, but it bloats the repository and breaks on compiled
+  extensions -- the same `.so` problem as `0nicav`.  Declined
+  2026-09-21, before Experiment 1; Experiment 1 then confirmed the
+  `.so` problem is real by installing
+  `tracer.cpython-312-x86_64-linux-gnu.so`.
 
-* **How many machines does requiring `pip` exclude? (2hmmdrpe)**  The
+### Closed Issues
+
+Resolved, most recent first, each dated.  They are purged once
+nobody wants to read them any more, after every reference to them
+is gone.
+
+* **Where should the cache directory live? (2wscdl)**
+  (CLOSED 2026-10-01)  `~/.cache/<program>/`
+  per the XDG spec, or beside the program, or the `~/.alt_venv`
+  that Experiment 1 assumed without examining?  This interacts with
+  `0nicav`: whatever the location, the name has to carry the
+  interpreter and platform.
+
+  Various thoughts:
+  * Wayne (2026-09-22): I have no idea what this issue is about.  Let's do the
+    experiment when we get the chance.
+  * Wayne (2026-10-01): Clear it belongs in `~/.alt_venv` somewhere, so
+    this can be closed.
+
+* **The stashed `pip` is never updated. (3spinu)**
+  (CLOSED 2026-10-01)  `pip.whl` is
+  fetched once and kept until `~/.alt_venv` is deleted, so a machine
+  that bootstrapped this year is still running this year's `pip` in
+  five years, with whatever it did not yet know about indexes, wheel
+  tags and security fixes.  A possible solution is for `AltVEnv` to
+  refresh it during `cull`, which already runs about once a day.
+
+  Various thoughts:
+  * Claude (2026-10-01): Fixed by Step 6.15.16, close to the solution
+    proposed but weekly rather than daily, and adding newer wheels
+    beside `pip.whl` rather than replacing it.
+
+* **A failed `pip` fetch is poorly explained. (3fpfipe)**
+  (CLOSED 2026-10-01)  If the JSON
+  API lists no wheel for `pip`, case 13's `next(...)` raises a bare
+  `StopIteration`, and the person sees `cannot fetch alt_venv: ` with
+  nothing after it.  The SHA-256 digest is in the same JSON and is
+  never checked, so a truncated download surfaces as a zip error from
+  `python pip.whl/pip` rather than as a failed fetch.
+
+  Various thoughts:
+  * Wayne (2026-10-01): We'll improve this later.
+  * Claude (2026-10-01): Half done by Step 6.15.7.  The message now
+    names the stage and the exception's type, so the empty `StopIteration`
+    case reads `... choose pip failed: ValueError: ...` instead of
+    nothing.  The unchecked SHA-256 digest remains.
+  * Claude (2026-10-01): The other half is done too, by Step 6.15.15:
+    the download is checked against its SHA-256 before it is written.
+
+* **How many machines does requiring `pip` exclude? (2hmmdrpe)**
+  (CLOSED 2026-10-01)  The
   decision to require `pip`, recorded under the preinstalled
   environment conclusions in Experiment 2, removed `pip`'s absence
   from the design space, so this no longer decides what gets built.
@@ -3033,27 +3257,13 @@ Not yet started, in priority order.
     of how many such machines exist no longer decides anything.  What
     survives is Wayne's first thought: Windows and macOS are untried.
     I would close this and carry that part into a new issue.
+  * Claude (2026-10-01): Closed with Wayne's agreement: `nopip3` ships,
+    so nothing requires `pip` and the count this issue wanted no longer
+    matters.  Its one live part, Wayne's note that Windows and macOS are
+    untried, carries on as `2wmau`.
 
-* **How should required packages be declared? (2hsrpbd)**  Every case has
-  `PACKAGE = "coverage"` written into it.  Reusing the PEP 723
-  `# /// script` block instead would make the same program work under
-  `uv run` for free, and would let one bootstrap serve a list of
-  packages rather than one.
-
-  Various thoughts:
-  * Wayne (2026-09-22): Sounds like it is worth doing.  The question is when?
-
-* **Where should the cache directory live? (2wscdl)**  `~/.cache/<program>/`
-  per the XDG spec, or beside the program, or the `~/.alt_venv`
-  that Experiment 1 assumed without examining?  This interacts with
-  `0nicav`: whatever the location, the name has to carry the
-  interpreter and platform.
-
-  Various thoughts:
-  * Wayne (2026-09-22): I have no idea what this issue is about.  Let's do the
-    experiment when we get the chance.
-
-* **The wheel tag matcher is a five-line stand-in. (2wtmifs)**  Cases
+* **The wheel tag matcher is a five-line stand-in. (2wtmifs)**
+  (CLOSED 2026-10-01)  Cases
   3 and 12 pick wheels with a substring test that cannot tell musl
   from glibc, and does not read the glibc version a manylinux tag
   encodes.  It agreed with pip for one package on one platform.  On
@@ -3110,59 +3320,13 @@ Not yet started, in priority order.
     whether a genuinely compiled wheel imports, which a pure Python
     wheel wearing a compiled name cannot show.  Wayne's call whether
     that is still a priority 2.
+  * Claude (2026-10-01): Closed with Wayne's agreement.  The matcher lives
+    only in `nopip1` and `nopip2`, which are measurement and will not
+    ship; `nopip3` leaves choosing wheels to `pip`.  The abi3 and musl
+    faults are real but can no longer reach a stranger.
 
-* **A failed `pip` fetch is poorly explained. (3fpfipe)**  If the JSON
-  API lists no wheel for `pip`, case 13's `next(...)` raises a bare
-  `StopIteration`, and the person sees `cannot fetch alt_venv: ` with
-  nothing after it.  The SHA-256 digest is in the same JSON and is
-  never checked, so a truncated download surfaces as a zip error from
-  `python pip.whl/pip` rather than as a failed fetch.
-
-  Various thoughts:
-  * Wayne (2026-10-01): We'll improve this later.
-  * Claude (2026-10-01): Half done by Step 6.15.7.  The message now
-    names the stage and the exception's type, so the empty `StopIteration`
-    case reads `... choose pip failed: ValueError: ...` instead of
-    nothing.  The unchecked SHA-256 digest remains.
-
-* **`.pth` files are installed but never executed. (3pfaibne)**  Every case
-  writes coverage's `a1_coverage.pth`, its hook for measuring
-  subprocesses, and no case runs it, because only `site.addsitedir()`
-  executes `.pth` files and every case uses `sys.path.insert`.  Any
-  package relying on a `.pth` is quietly half-installed.  Switching
-  to `site.addsitedir()` is the obvious experiment.
-
-  Various thoughts:
-  * Wayne (2026-09-22): I have no idea what this issue is about.  Let's do the
-    experiment when we get the chance.
-
-* **Reviewer thoughts have two formats. (3rthtf)**  Task 4 propagated the
-  reviewer thought rules into `claude_notes.md`, and the two files came out
-  disagreeing about the shape.  `claude_notes.md` puts reviewer thoughts
-  inside the `{ ... }` braces it uses for annotating a closed task, listing
-  the dating, naming and ordering rules as sub-points of the annotation
-  rules.  `LOGBOOK.md` instead uses a `Various thoughts:` label followed by
-  plain bullets, describes it that way in its own `## Issues` preamble, and
-  uses it in fourteen places.  The rules themselves agree; only the syntax
-  differs.  Whichever file is wrong, the other is the specification, so one
-  of the two has to move.
-
-  Various thoughts:
-  * Claude (2026-09-25): `LOGBOOK.md` has the better of it.  Braces are for
-    annotating settled text, and a multi-reviewer thread that grows over
-    months is a discussion rather than an annotation; wrapping fourteen of
-    them in braces would also bury the reviewer names one level deeper.  But
-    `claude_notes.md` is the general write-up, in another repository and in
-    Wayne's voice, so this is a proposal rather than an edit.
-
-* **The stashed `pip` is never updated. (3spinu)**  `pip.whl` is
-  fetched once and kept until `~/.alt_venv` is deleted, so a machine
-  that bootstrapped this year is still running this year's `pip` in
-  five years, with whatever it did not yet know about indexes, wheel
-  tags and security fixes.  A possible solution is for `AltVEnv` to
-  refresh it during `cull`, which already runs about once a day.
-
-* **The venv executable directory is hard-coded. (3vedih)**  Cases
+* **The venv executable directory is hard-coded. (3vedih)**
+  (CLOSED 2026-10-01)  Cases
   4 and 11 reach into `root / "bin"` at `bootstrap.py:296`, `400` and
   `407`.  On Windows a virtual environment puts its executables in
   `Scripts`, so the pip reclaim would silently delete nothing and
@@ -3172,23 +3336,37 @@ Not yet started, in priority order.
   the platform's site-packages, then hard-codes `bin`.  Nothing
   breaks on Linux, which is the whole of the current scope.
 
-### Rejected Issues
+  Various thoughts:
+  * Claude (2026-10-01): Closed with Wayne's agreement.  The hard-coded
+    `bin` is only in `venv3` and `venv4`, which will not ship.
 
-Approaches that were considered and declined, recorded so that they
-are not proposed again.
+* **`.pth` files are installed but never executed. (3pfaibne)**
+  (CLOSED 2026-10-01)  Every case
+  writes coverage's `a1_coverage.pth`, its hook for measuring
+  subprocesses, and no case runs it, because only `site.addsitedir()`
+  executes `.pth` files and every case uses `sys.path.insert`.  Any
+  package relying on a `.pth` is quietly half-installed.  Switching
+  to `site.addsitedir()` is the obvious experiment.
 
-* **Vendor the packages into the repository. (3vpir)**  Needs no
-  network, but it bloats the repository and breaks on compiled
-  extensions -- the same `.so` problem as `0nicav`.  Declined
-  2026-09-21, before Experiment 1; Experiment 1 then confirmed the
-  `.so` problem is real by installing
-  `tracer.cpython-312-x86_64-linux-gnu.so`.
+  Various thoughts:
+  * Wayne (2026-09-22): I have no idea what this issue is about.  Let's do the
+    experiment when we get the chance.
+  * Claude (2026-10-01): Closed with Wayne's agreement.  Step 6.9.2 has
+    `alt_venv.py` run `.pth` files through `site.addsitedir`, and the
+    bootstrap installs nothing but `alt_venv`, which ships none.
 
-### Closed Issues
+* **How should required packages be declared? (2hsrpbd)**
+  (CLOSED 2026-10-01)  Every case has
+  `PACKAGE = "coverage"` written into it.  Reusing the PEP 723
+  `# /// script` block instead would make the same program work under
+  `uv run` for free, and would let one bootstrap serve a list of
+  packages rather than one.
 
-Resolved, most recent first, each dated.  They are purged once
-nobody wants to read them any more, after every reference to them
-is gone.
+  Various thoughts:
+  * Wayne (2026-09-22): Sounds like it is worth doing.  The question is when?
+  * Claude (2026-10-01): Closed with Wayne's agreement.  Step 6.7 settled
+    it: a PEP 723 block, read by `install()` with no arguments, and the
+    bootstrap fetches only `alt_venv`.
 
 * **The bootstrap fetches the newest `pip` regardless of Python.
   (1bfnprp)**
