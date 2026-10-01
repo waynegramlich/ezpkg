@@ -2570,7 +2570,32 @@ expected every time the order changes, and is Claude's job.
     `2btosc`, `3fpfipe` and `3spinu`, and Windows and macOS are untried,
     which is `2hmmdrpe`.
 
-* Step 6.16: And more.  A place holder for additional steps.
+* Step 6.16: Test suite cleanup, headed towards deleting some of the
+  cases in `bootstrap.py` now that `nopip3` ships.
+  * 6.16.1 - **Cases are named, not numbered**, 2026-10-01, at Wayne's
+    suggestion.  The numbers were the order the cases were written, so
+    every addition or removal threatened to renumber something.  A name
+    now says what the case needs on the machine, with a digit counting
+    within its group: `venv` cases create a virtual environment, `pip`
+    cases run a pip already installed, and `nopip` cases need none.
+    Old to new:
+
+    | Old | New      | Old | New      | Old | New      |
+    |-----|----------|-----|----------|-----|----------|
+    | 1   | `venv1`  | 6   | `pip1`   | 11  | `venv4`  |
+    | 2   | `venv2`  | 7   | `pip2`   | 12  | `nopip2` |
+    | 3   | `nopip1` | 8   | `pip3`   | 13  | `nopip3` |
+    | 4   | `venv3`  | 9   | `pip4`   |     |          |
+    | 5   | `venv5`  | 10  | `pip5`   |     |          |
+
+    The code, the table and the tests use the names, and the
+    `bootstrap.py` docstring carries the same mapping.  Closed tasks
+    keep the old numbers, and so do the steps of this task written
+    before the change, Step 6.15 included.  `README.md` still passes
+    `bootstrap="7"` to `install`, which nothing reads yet; it becomes
+    `"nopip3"` whenever Wayne's rewrite reaches the paste.
+
+* Step 6.17: And more.  A place holder for additional steps.
 
 ### Step 6.1: Error on a failed fetch
 

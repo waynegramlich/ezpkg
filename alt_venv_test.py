@@ -133,19 +133,19 @@ CONFIRM: str = "Really never ask again? [y=>Yes/n=>No]"
 
 # Which cases the all-case tests exercise.  The default is one case, on
 # the grounds that the quick run should exercise the case that ships.
-# That is case 13, which fetches a `pip` of its own and runs it as a
+# That is `nopip3`, which fetches a `pip` of its own and runs it as a
 # subprocess, so it needs no `pip` on the machine and leaves none of
 # `pip`'s state in the program; see Step 6.15 in `LOGBOOK.md`.  The
 # other twelve run under `ALT_VENV_TEST=COMPLETE`, which is what the
 # end of a task gets.
-FAST_CASES: tuple[str, ...] = ("13",)
+FAST_CASES: tuple[str, ...] = ("nopip3",)
 
 def platform_tag() -> str:
     """Return a compatibility tag this interpreter would accept.
 
     Built from the running interpreter rather than written down, so the
     wheel it names is one `pip` will install and one the matcher in
-    cases 3 and 12 of `bootstrap.py` will recognise: that matcher looks
+    `nopip1` and `nopip2` of `bootstrap.py` will recognise: that matcher looks
     for `cp312-cp312-`, then for the machine name and `linux` in the
     same filename.
 
@@ -279,7 +279,7 @@ def build_wheel(module: Path, distribution: str, version: str,
     everywhere without a compiled component.  Another tag can be given,
     and then the wheel is pure Python wearing a compiled wheel's name.
     That is a faithful input for anything which reads wheel filenames,
-    such as the matcher in cases 3 and 12 of `bootstrap.py`, because
+    such as the matcher in `nopip1` and `nopip2` of `bootstrap.py`, because
     that code never opens the archive; it is not a substitute for a
     genuinely compiled wheel.  See Step 6.5.11 in `LOGBOOK.md`.
 
@@ -545,7 +545,7 @@ _PIP_WHEEL: tuple[str, bytes] | None = None
 def pip_wheel() -> tuple[str, bytes]:
     """Return a runnable `pip` wheel built from the one installed here.
 
-    Case 13 of `bootstrap.py` fetches `pip` itself from the JSON API,
+    `nopip3` of `bootstrap.py` fetches `pip` itself from the JSON API,
     and the suite never reaches the network, so every index has to be
     able to hand out a `pip`.  The installed `pip` package is zipped as
     it stands, with just enough `.dist-info` to be called a wheel.  It
@@ -635,7 +635,7 @@ def build_index(wheels: list[Path],
         for wheel in files:
             (directory / wheel.name).write_bytes(wheel.read_bytes())
 
-    # Publish `pip` as well, so that case 13 has one to fetch.
+    # Publish `pip` as well, so that `nopip3` has one to fetch.
     name: str
     contents: bytes
     name, contents = pip_wheel()
@@ -716,8 +716,8 @@ class _IndexHandler(http.server.SimpleHTTPRequestHandler):
     exactly what the two levels of a PEP 503 tree ask for.  Two things
     are added.  The request log is silenced, because it would
     otherwise interleave with the test output on standard error.  And
-    `/pypi/{project}/json` is answered from the tree, because cases 3
-    and 12 of `bootstrap.py` read that endpoint with `urllib` rather
+    `/pypi/{project}/json` is answered from the tree, because `nopip1`
+    and `nopip2` of `bootstrap.py` read that endpoint with `urllib` rather
     than going through `pip`.
 
     The JSON is the modern per release shape, `{"urls": [...]}` with a
@@ -822,7 +822,7 @@ class _IndexHandler(http.server.SimpleHTTPRequestHandler):
             self.send_error(404, f"no project {normalized}")
             return
 
-        # Build the subset of the payload that cases 3, 12 and 13 read.
+        # Build the subset of the payload that the `nopip` cases read.
         host: str = self.headers.get("Host", "127.0.0.1")
         payload: dict[str, Any] = {"urls": [
             {"filename": wheel.name, "yanked": False,
@@ -1066,7 +1066,7 @@ class AltVEnvTest(unittest.TestCase):
         cls.wheel = build_wheel(module, DISTRIBUTION, VERSION, SUMMARY,
                                 cls.root / "dist", floor=FLOOR)
         # A second wheel, wearing this interpreter's compiled tag and
-        # carrying a `.data/purelib` member.  Cases 3 and 12 prefer it,
+        # carrying a `.data/purelib` member.  `nopip1` and `nopip2` prefer it,
         # which is the only way to reach their platform branch and their
         # `.data` move; see Step 6.5.11 in `LOGBOOK.md`.
         cls.tagged = build_wheel(module, DISTRIBUTION, VERSION, SUMMARY,
@@ -1261,13 +1261,13 @@ class AltVEnvTest(unittest.TestCase):
         self.assertNotEqual(done.returncode, 0)
         self.assertFalse((target / f"{MODULE}.py").exists())
 
-    def test_a_truncated_wheel_fails_case_3(self) -> None:
-        """Case 3 unzips the wheel itself, so it must fail too."""
+    def test_a_truncated_wheel_fails_nopip1(self) -> None:
+        """`nopip1` unzips the wheel itself, so it must fail too."""
         # `zipfile` is what notices, since the fetch itself succeeded.
         # Step 6.1 replaced the traceback with one line, so the
         # assertion reads the message rather than the module name.
         self.inject(".whl", "truncate")
-        done: subprocess.CompletedProcess[str] = self.run_case("3")
+        done: subprocess.CompletedProcess[str] = self.run_case("nopip1")
         self.assertNotEqual(done.returncode, 0)
         self.assertIn(f"cannot fetch {MODULE}", done.stderr)
         self.assertIn("not a zip file", done.stderr)
@@ -1305,8 +1305,8 @@ class AltVEnvTest(unittest.TestCase):
     def test_a_failed_fetch_is_one_line(self) -> None:
         """A case that cannot reach the index says so, without a traceback.
 
-        This is the `0whwnn` issue.  Before Step 6.1 case 3 buried
-        `Connection refused` under 47 lines of traceback and case 6
+        This is the `0whwnn` issue.  Before Step 6.1 `nopip1` buried
+        `Connection refused` under 47 lines of traceback and `pip1`
         ended in `RuntimeError: pip failed` without ever mentioning the
         network.
         """
@@ -1327,15 +1327,15 @@ class AltVEnvTest(unittest.TestCase):
                 self.assertIn(f"cannot fetch {MODULE}", done.stderr)
 
     def test_json_api_lists_the_wheel(self) -> None:
-        """The synthesized JSON API answers in the shape case 3 reads."""
-        # Ask the way case 3 asks, by import name rather than PyPI name.
+        """The synthesized JSON API answers in the shape `nopip1` reads."""
+        # Ask the way `nopip1` asks, by import name rather than PyPI name.
         url: str = f"{self.index_url}pypi/{MODULE}/json"
         payload: dict[str, Any]
         with urllib.request.urlopen(url, timeout=30) as response:
             payload = json.load(response)
 
         # Both wheels are listed, the pure one and the tagged one, so
-        # that cases 3 and 12 have something to choose between.
+        # that `nopip1` and `nopip2` have something to choose between.
         listed: list[str] = sorted(entry["filename"]
                                    for entry in payload["urls"])
         self.assertEqual(listed, sorted([self.wheel.name, self.tagged.name]))
@@ -1377,7 +1377,7 @@ class AltVEnvTest(unittest.TestCase):
         This is the warm path, which nothing tested before.  It is
         where `0cctfd` lived: the guard every case uses asks whether
         the package is a directory, a single module install is not
-        one, and case 11 deletes the `pip` it would need for the
+        one, and `venv4` deletes the `pip` it would need for the
         second fetch.  `AltVEnv.repair_module_layout` is what
         makes this pass.
 
@@ -1409,7 +1409,7 @@ class AltVEnvTest(unittest.TestCase):
         self.assertTrue(source.is_file())
 
     def test_the_stdlib_cases_choose_the_tagged_wheel(self) -> None:
-        """Cases 3 and 12 prefer the compiled tag, and move its `.data`.
+        """`nopip1` and `nopip2` prefer the compiled tag, and move its `.data`.
 
         Both regions were dead until the index carried a wheel with this
         interpreter's tag: the matcher's platform branch short-circuits
@@ -1424,7 +1424,7 @@ class AltVEnvTest(unittest.TestCase):
         label: str
         home: Path
         done: subprocess.CompletedProcess[str]
-        for label in ("3", "12"):
+        for label in ("nopip1", "nopip2"):
             with self.subTest(case=label):
                 home = Path(tempfile.mkdtemp(prefix=f"tagged-{label}-",
                                              dir=self.root))
@@ -1438,8 +1438,8 @@ class AltVEnvTest(unittest.TestCase):
     def test_no_compatible_wheel_is_reported(self) -> None:
         """A wheel for another platform is refused, not installed.
 
-        The `raise RuntimeError("no compatible wheel found")` in cases 3
-        and 12 had never executed.  This is as close as a Linux machine
+        The `raise RuntimeError("no compatible wheel found")` in `nopip1`
+        and `nopip2` had never executed.  This is as close as a Linux machine
         can get to the failure `2wtmifs` predicts, which is a manylinux
         wheel being taken on Alpine: here the only wheel on offer is
         tagged for Windows, so nothing matches.
@@ -1457,12 +1457,12 @@ class AltVEnvTest(unittest.TestCase):
         self.addCleanup(server.shutdown)
 
         # Both cases read the JSON API, so both see the tag and give
-        # up.  Case 12 as well as case 3, because each carries its own
+        # up.  `nopip2` as well as `nopip1`, because each carries its own
         # copy of the matcher and its own `raise`.
         label: str
         home: Path
         done: subprocess.CompletedProcess[str]
-        for label in ("3", "12"):
+        for label in ("nopip1", "nopip2"):
             with self.subTest(case=label):
                 home = Path(tempfile.mkdtemp(prefix=f"wrong-{label}-",
                                              dir=self.root))
@@ -1472,11 +1472,11 @@ class AltVEnvTest(unittest.TestCase):
                 self.assertNotIn("Traceback", done.stderr)
 
     def test_json_api_cases_bootstrap_end_to_end(self) -> None:
-        """Cases 3 and 12 fetch and import through the JSON API."""
+        """`nopip1` and `nopip2` fetch and import through the JSON API."""
         # These two are the only cases that bypass pip entirely.
         label: str
         done: subprocess.CompletedProcess[str]
-        for label in ("3", "12"):
+        for label in ("nopip1", "nopip2"):
             with self.subTest(case=label):
                 done = self.run_case(label)
                 self.assertEqual(done.returncode, 0, done.stderr)
@@ -1826,7 +1826,7 @@ class TlsTest(unittest.TestCase):
 
         `SSL_CERT_FILE` is what `urllib` honours, through OpenSSL's own
         default verify paths, and `PIP_CERT` is what `pip` honours.
-        Both are environment variables, so cases 3, 12 and 13 need no
+        Both are environment variables, so the `nopip` cases need no
         `ssl` context written into them and no case gains a line.
         """
         # One trust store, two spellings, because two clients read it.
@@ -2070,7 +2070,7 @@ class InstallTest(unittest.TestCase):
 
         This is the claim `README.md` makes: Python and the pasted
         bootstrap are all that is needed.  An interpreter that has never
-        had `pip` stands in for such a machine.  Case 13 fetches `pip`'s
+        had `pip` stands in for such a machine.  `nopip3` fetches `pip`'s
         wheel, keeps it as `pip.whl`, installs this project with it, and
         `AltVEnv` then uses that same copy to fetch what the program
         declares.
@@ -2097,7 +2097,7 @@ class InstallTest(unittest.TestCase):
         # The bootstrap installs this project and leaves `pip` behind.
         home: Path = self.root / "bare-home"
         done: subprocess.CompletedProcess[str] = run_bootstrap_case(
-            "13", home, self.index_url, python=str(python))
+            "nopip3", home, self.index_url, python=str(python))
         self.assertEqual(done.returncode, 0, done.stderr[-400:])
         cache: Path = home / ".alt_venv"
         self.assertTrue((cache / "pip.whl").is_file())
@@ -4014,13 +4014,13 @@ class HarnessTest(unittest.TestCase):
 
     def test_measure_source_counts_the_shipping_case(self) -> None:
         """The counts come from parsing the file, not from a table."""
-        # Case 7 is the one `README.md` teaches; see Step 6.14.
+        # `nopip3` is the one that ships; see Step 6.15.
         counts: dict[str, tuple[int, int]] = bootstrap.measure_source()
         self.assertEqual(sorted(counts), sorted(bootstrap.MECHANISMS))
         imports: int
         lines: int
-        imports, lines = counts["7"]
-        self.assertEqual(imports, 1)
+        imports, lines = counts["nopip3"]
+        self.assertEqual(imports, 3)
         self.assertGreater(lines, 5)
 
     def test_the_recorded_table_matches_the_measurement(self) -> None:
@@ -4038,7 +4038,7 @@ class HarnessTest(unittest.TestCase):
         line: str
         for line in document.splitlines():
             fields: list[str] = [one.strip() for one in line.split("|")]
-            if len(fields) != 10 or not fields[1].isdigit():
+            if len(fields) != 10 or fields[1] not in bootstrap.MECHANISMS:
                 continue
             rows += 1
             label: str = fields[1]
@@ -4119,9 +4119,9 @@ class HarnessTest(unittest.TestCase):
         """
         # One short row and one whose description has to wrap.
         rows: list[list] = [
-            ["7", "no venv, pip subprocess", 1, 10, 16, "2.7 s", "0.1 s",
+            ["pip2", "no venv, pip subprocess", 1, 10, 16, "2.7 s", "0.1 s",
              1762],
-            ["12", ("venv(no pip), stdlib wheel and a very long tail that "
+            ["nopip2", ("venv(no pip), stdlib wheel and a very long tail that "
                     "must wrap"), 7, 51, 57, "1.4 s", "0.2 s", 1714],
         ]
         table: str = bootstrap.format_table(rows)
@@ -4135,7 +4135,7 @@ class HarnessTest(unittest.TestCase):
         self.assertIn("no venv, pip", table)
         self.assertIn("subprocess", table)
         self.assertIn("wrap", table)
-        self.assertEqual(table.count("| 12   |"), 1, table)
+        self.assertEqual(table.count("| nopip2 |"), 1, table)
 
 
 @unittest.skipUnless(os.environ.get("ALT_VENV_REPORT"),
@@ -4919,7 +4919,7 @@ class PyPITest(unittest.TestCase):
     def real_case(self, label: str, package: str) -> str:
         """Run one `bootstrap.py` case against real PyPI.
 
-        Cases 3 and 12 are the two that choose a wheel themselves, with
+        `nopip1` and `nopip2` are the two that choose a wheel themselves, with
         the five line matcher of issue `2wtmifs`, rather than leaving it
         to `pip`.  Everything else has only ever met wheels this project
         built, so this is the first real tag soup they have seen.
@@ -4958,7 +4958,7 @@ class PyPITest(unittest.TestCase):
         # Both cases that choose for themselves, both packages.
         label: str
         package: str
-        for label in ("3", "12"):
+        for label in ("nopip1", "nopip2"):
             for package in ("certifi", "coverage"):
                 with self.subTest(case=label, package=package):
                     self.assertIn(f"module {package} version",
@@ -4981,7 +4981,7 @@ class PyPITest(unittest.TestCase):
         """
         # `pip` has no difficulty with this package; we do.
         self.assertIn("module cryptography version",
-                      self.real_case("3", "cryptography"))
+                      self.real_case("nopip1", "cryptography"))
 
     def test_a_real_wheel_carries_a_pth_file(self) -> None:
         """`setuptools` ships `.pth`, which Step 6.9 is about.

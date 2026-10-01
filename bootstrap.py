@@ -18,7 +18,7 @@ the count, so `paste` below is honest.
 
 `sys.argv[1]` is internal.  It names one case, and exists only because
 the harness has to run each case in a fresh interpreter -- in process,
-case 1's pip and its already imported `coverage` would contaminate
+`venv1`'s pip and its already imported `coverage` would contaminate
 every case after it.  It is how this file invokes itself, not a way to
 use it.  A program that pastes a case in keeps one case body and has
 no `match` and no `sys.argv` at all, which is why neither
@@ -50,8 +50,8 @@ module level imports, are the whole of `SHARED_LINES`, which is 6.  The
 at `lines + 4` from before the wrapper was charged, and then dropped by
 one again when `PACKAGE` stopped being charged.
 
-`JSON_API` is the same arrangement for the same reason.  Cases 3, 12
-and 13 read PyPI's JSON API with `urllib`, which knows nothing of
+`JSON_API` is the same arrangement for the same reason.  The three
+`nopip` cases read PyPI's JSON API with `urllib`, which knows nothing of
 `PIP_INDEX_URL`, so there is no environment variable already able to
 steer them at a local server.  A pasted case carries the literal
 `https://pypi.org/pypi`; here `BOOTSTRAP_JSON_API` can replace it.
@@ -65,42 +65,55 @@ which `pathlib.Path.home()` honours -- the isolation is in the
 environment, where it belongs, and not in a line of code that no real
 user would type.  The real `~/.alt_venv` is never touched.
 
-+------+-----------------+---------+-------+-------+--------+--------+--------+
-| case | mechanism       | imports | lines | paste | cold   | warm   | size   |
-+------+-----------------+---------+-------+-------+--------+--------+--------+
-| 1    | venv(pip), pip  | 4       | 19    | 25    | 6.12 s | 0.16 s | 16981  |
-|      | in process      |         |       |       |        |        |        |
-| 2    | venv(pip), pip  | 4       | 19    | 25    | 6.68 s | 0.15 s | 16981  |
-|      | subprocess      |         |       |       |        |        |        |
-| 3    | no venv, stdlib | 5       | 45    | 51    | 1.41 s | 0.15 s | 1682   |
-|      | wheel           |         |       |       |        |        |        |
-| 4    | venv(pip), then | 5       | 25    | 31    | 6.85 s | 0.16 s | 1790   |
-|      | delete pip      |         |       |       |        |        |        |
-| 5    | venv(no pip),   | 4       | 19    | 25    | 2.65 s | 0.15 s | 1790   |
-|      | pip in proc     |         |       |       |        |        |        |
-| 6    | no venv, pip in | 1       | 10    | 16    | 2.65 s | 0.14 s | 1762   |
-|      | process         |         |       |       |        |        |        |
-| 7    | no venv, pip    | 1       | 10    | 16    | 2.73 s | 0.14 s | 1762   |
-|      | subprocess      |         |       |       |        |        |        |
-| 8    | no venv, pip    | 2       | 14    | 20    | 4.22 s | 0.15 s | 1762   |
-|      | from wheel      |         |       |       |        |        |        |
-| 9    | as 6 plus --no- | 1       | 11    | 17    | 2.62 s | 0.14 s | 1698   |
-|      | compile         |         |       |       |        |        |        |
-| 10   | as 7 plus --no- | 1       | 11    | 17    | 2.69 s | 0.14 s | 1698   |
-|      | compile         |         |       |       |        |        |        |
-| 11   | as 4 but        | 5       | 26    | 32    | 5.25 s | 0.15 s | 1790   |
-|      | subprocess      |         |       |       |        |        |        |
-| 12   | venv(no pip),   | 7       | 51    | 57    | 1.42 s | 0.16 s | 1714   |
-|      | stdlib wheel    |         |       |       |        |        |        |
-| 13   | no venv, PyPI   | 3       | 25    | 31    | 3.11 s | 0.14 s | 3538   |
-|      | pip subprocess  |         |       |       |        |        |        |
-+------+-----------------+---------+-------+-------+--------+--------+--------+
++--------+---------------+---------+-------+-------+--------+--------+--------+
+| case   | mechanism     | imports | lines | paste | cold   | warm   | size   |
++--------+---------------+---------+-------+-------+--------+--------+--------+
+| venv1  | venv(pip),    | 4       | 19    | 25    | 6.12 s | 0.16 s | 16981  |
+|        | pip in        |         |       |       |        |        |        |
+|        | process       |         |       |       |        |        |        |
+| venv2  | venv(pip),    | 4       | 19    | 25    | 6.68 s | 0.15 s | 16981  |
+|        | pip           |         |       |       |        |        |        |
+|        | subprocess    |         |       |       |        |        |        |
+| venv3  | venv(pip),    | 5       | 25    | 31    | 6.85 s | 0.16 s | 1790   |
+|        | then delete   |         |       |       |        |        |        |
+|        | pip           |         |       |       |        |        |        |
+| venv4  | as venv3 but  | 5       | 26    | 32    | 5.25 s | 0.15 s | 1790   |
+|        | subprocess    |         |       |       |        |        |        |
+| venv5  | venv(no pip), | 4       | 19    | 25    | 2.65 s | 0.15 s | 1790   |
+|        | pip in proc   |         |       |       |        |        |        |
+| pip1   | no venv, pip  | 1       | 10    | 16    | 2.65 s | 0.14 s | 1762   |
+|        | in process    |         |       |       |        |        |        |
+| pip2   | no venv, pip  | 1       | 10    | 16    | 2.73 s | 0.14 s | 1762   |
+|        | subprocess    |         |       |       |        |        |        |
+| pip3   | no venv, pip  | 2       | 14    | 20    | 4.22 s | 0.15 s | 1762   |
+|        | from wheel    |         |       |       |        |        |        |
+| pip4   | as pip1 plus  | 1       | 11    | 17    | 2.62 s | 0.14 s | 1698   |
+|        | --no-compile  |         |       |       |        |        |        |
+| pip5   | as pip2 plus  | 1       | 11    | 17    | 2.69 s | 0.14 s | 1698   |
+|        | --no-compile  |         |       |       |        |        |        |
+| nopip1 | no venv,      | 5       | 45    | 51    | 1.41 s | 0.15 s | 1682   |
+|        | stdlib wheel  |         |       |       |        |        |        |
+| nopip2 | venv(no pip), | 7       | 51    | 57    | 1.42 s | 0.16 s | 1714   |
+|        | stdlib wheel  |         |       |       |        |        |        |
+| nopip3 | no venv, PyPI | 3       | 25    | 31    | 3.11 s | 0.14 s | 3538   |
+|        | pip           |         |       |       |        |        |        |
+|        | subprocess    |         |       |       |        |        |        |
++--------+---------------+---------+-------+-------+--------+--------+--------+
 
 What the columns mean, in the order they appear above:
 
 * **case** -- the argument to pass on the command line, and the `case`
-  label in `main()`.  The numbering is the order they were written, not
-  a ranking.
+  label in `main()`.  The name says what the case needs on the machine:
+  `venv` cases create a virtual environment, `pip` cases run a pip the
+  machine already has, and `nopip` cases need no pip at all.  The digit
+  numbers a case within its group and is not a ranking, so adding or
+  removing a case renames nothing else.
+
+  Until 2026-10-01 the cases were numbered 1 to 13 in the order they
+  were written, and the closed tasks of `LOGBOOK.md` still use those
+  numbers.  Old to new: 1 `venv1`, 2 `venv2`, 3 `nopip1`, 4 `venv3`,
+  5 `venv5`, 6 `pip1`, 7 `pip2`, 8 `pip3`, 9 `pip4`, 10 `pip5`,
+  11 `venv4`, 12 `nopip2`, 13 `nopip3`.
 
 * **mechanism** -- a one-line summary, wrapped onto a second line where
   it does not fit.  `venv(pip)` means the venv was built with
@@ -145,28 +158,28 @@ What the columns mean, in the order they appear above:
   it in either direction.  Compare these against each other, not
   against `du`.  Kilobytes rather than
   megabytes because rounding to `1.7 MB` hid two real differences.
-  The 16981 of cases 1 and 2 is the venv keeping its own copy of pip,
-  ~15 MB of the total and never used again.  Among the rest: 1790
+  The 16981 of `venv1` and `venv2` is the venv keeping its own copy of
+  pip, ~15 MB of the total and never used again.  Among the rest: 1790
   carries an unused venv skeleton, 1762 adds pip's three generated
   `coverage` console scripts in `bin/`, and 1698 is `--no-compile`,
   worth only 60 KB -- 40 `.pyc` files against 44 -- because the
   bootstrap imports the package two lines later and Python compiles
-  what it imports anyway.  Case 3 is smallest at 1682 precisely
-  because it never generates the console scripts, and case 12 is
-  1714, which is case 3 plus 32 KB of empty venv.  Case 13 is case 7's
-  1762 plus the 1.8 MB `pip.whl` it keeps for `AltVEnv` to use.
+  what it imports anyway.  `nopip1` is smallest at 1682 precisely
+  because it never generates the console scripts, and `nopip2` is
+  1714, which is `nopip1` plus 32 KB of empty venv.  `nopip3` is
+  `pip2`'s 1762 plus the 1.8 MB `pip.whl` it keeps for `AltVEnv`.
 
-The clusters: cases 6 and 7 are the floor at 16 pasted lines, with 9
-and 10 one line above it, but all four need pip already present; cases
-4 and 11 manufacture a pip with `ensurepip`, use it once, then delete
-it, for a machine that has `venv` but no pip; cases 3 and 12 need
-neither, and cost 51 and 57 lines for it.  Case 13 needs neither as
-well, by fetching a pip of its own.
+The clusters: `pip1` and `pip2` are the floor at 16 pasted lines,
+with `pip4` and `pip5` one line above it, but all four need pip already
+present; `venv3` and `venv4` manufacture a pip with `ensurepip`, use it
+once, then delete it, for a machine that has `venv` but no pip;
+`nopip1` and `nopip2` need neither, and cost 51 and 57 lines for it.
+`nopip3` needs neither as well, by fetching a pip of its own.
 
-Cases 4 and 11 are the same mechanism reached two ways, and they differ
-by one line: 5 imports each, 31 and 32 pasted, 1790 KB each.
-Case 4 imports the manufactured pip; case 11 runs the venv's own
-interpreter as a child instead.  Case 11 therefore reaches the middle
+`venv3` and `venv4` are the same mechanism reached two ways, and they
+differ by one line: 5 imports each, 31 and 32 pasted, 1790 KB each.
+`venv3` imports the manufactured pip; `venv4` runs the venv's own
+interpreter as a child instead.  `venv4` therefore reaches the middle
 cluster without touching `pip._internal` at all, and costs one line for
 the privilege.
 
@@ -175,28 +188,29 @@ single in-process install, `sys.modules` grows from 99 entries to 740,
 451 of them pip's, and pip leaves three `RichPipStreamHandler` objects
 on the *root* logger.  A `log.warning("...")` in the user's program
 prints bare before the bootstrap runs and `WARNING: ...` through pip's
-handler afterwards.  Every in-process case (1, 4, 5, 6, 8, 9) does
-this; the subprocess cases (2, 7, 10, 11, 13) cannot, since that state dies
-with the child process, and cases 3 and 12 cannot because they never
+handler afterwards.  Every in-process case (`venv1`, `venv3`, `venv5`,
+`pip1`, `pip3`, `pip4`) does this; the subprocess cases (`venv2`,
+`venv4`, `pip2`, `pip5`, `nopip3`) cannot, since that state dies with
+the child process, and `nopip1` and `nopip2` cannot because they never
 load pip at all.
 
-Case 12 exists to answer a question about the instructions rather than
+`nopip2` exists to answer a question about the instructions rather than
 to be shipped.  Those asked for a venv built with `venv`, no spawning
 of `python3 -m pip install`, only `venv` and standard libraries, and
-an `importlib` import.  Case 12 is the only one of the thirteen that
-does all four, and it costs 57 pasted lines against case 3's 51.  The
+an `importlib` import.  `nopip2` is the only one of the thirteen that
+does all four, and it costs 57 pasted lines against `nopip1`'s 51.  The
 extra 6 lines and 32 KB buy a virtual environment that nothing then
 reads, which is finding 3 of the log book arriving from yet another
 direction.
 
-Case 13 is the one that ships; see Step 6.15 of `LOGBOOK.md`.  It is
-case 7 with the one thing case 7 assumes taken away.  Rather than run
+`nopip3` is the one that ships; see Step 6.15 of `LOGBOOK.md`.  It is
+`pip2` with the one thing `pip2` assumes taken away.  Rather than run
 the machine's pip, it fetches pip's own wheel from the JSON API, keeps
 it as `~/.alt_venv/pip.whl`, and runs it as `python pip.whl/pip`, which
 is how pip documents running itself without being installed.  `AltVEnv`
 then uses that same copy, so nothing on the machine needs pip at all.
 It is a subprocess case, so none of pip's state reaches the program,
-and it costs 31 pasted lines against case 7's 16.
+and it costs 31 pasted lines against `pip2`'s 16.
 
 MIT No Attribution
 
@@ -228,7 +242,7 @@ import sys
 # case carries a literal, while the harness steers this one instead.
 PACKAGE: str = os.environ.get("BOOTSTRAP_PACKAGE", "coverage")
 
-# Where cases 3, 12 and 13 look for the JSON API, steered the same way.
+# Where the `nopip` cases look for the JSON API, steered the same way.
 JSON_API: str = os.environ.get("BOOTSTRAP_JSON_API",
                                "https://pypi.org/pypi")
 
@@ -248,7 +262,7 @@ def main() -> None:
     """
     mechanism = sys.argv[1]
     match mechanism:
-        case "1":
+        case "venv1":
             # Ensure `alt_venv` is downloaded.
             import os
             import sysconfig
@@ -268,7 +282,7 @@ def main() -> None:
             sys.path.insert(0, str(target))
             importlib.invalidate_caches()
             module = importlib.import_module(PACKAGE)
-        case "2":
+        case "venv2":
             # Ensure `alt_venv` is downloaded.
             import os
             import subprocess
@@ -288,7 +302,141 @@ def main() -> None:
             sys.path.insert(0, str(target))
             importlib.invalidate_caches()
             module = importlib.import_module(PACKAGE)
-        case "3":
+        case "venv3":
+            # Ensure `alt_venv` is downloaded.
+            import os
+            import shutil
+            import sysconfig
+            import venv
+            root = pathlib.Path.home() / ".alt_venv"
+            if not (root / "pyvenv.cfg").exists():
+                venv.EnvBuilder(with_pip=True, symlinks=(os.name != "nt")
+                                ).create(root)
+            target = pathlib.Path(sysconfig.get_path(
+                "purelib", scheme="venv", vars={"base": str(root),
+                "platbase": str(root), "installed_base": str(root)}))
+            sys.path.insert(0, str(target))
+            if not (target / PACKAGE).is_dir():
+                from pip._internal.cli.main import main as pip_main
+                if pip_main(["install", "--no-input", "--target", str(target),
+                             "--disable-pip-version-check", PACKAGE]):
+                    raise RuntimeError("pip failed")
+                shutil.rmtree(target / "pip", ignore_errors=True)
+                for leftover in target.glob("pip-*.dist-info"):
+                    shutil.rmtree(leftover)
+                for leftover in (root / "bin").glob("pip*"):
+                    leftover.unlink()
+            importlib.invalidate_caches()
+            module = importlib.import_module(PACKAGE)
+        case "venv4":
+            # Ensure `alt_venv` is downloaded.
+            import os
+            import shutil
+            import subprocess
+            import sysconfig
+            import venv
+            root = pathlib.Path.home() / ".alt_venv"
+            if not (root / "pyvenv.cfg").exists():
+                venv.EnvBuilder(with_pip=True, symlinks=(os.name != "nt")
+                                ).create(root)
+            target = pathlib.Path(sysconfig.get_path(
+                "purelib", scheme="venv", vars={"base": str(root),
+                "platbase": str(root), "installed_base": str(root)}))
+            if not (target / PACKAGE).is_dir():
+                subprocess.run([str(root / "bin" / "python3"), "-m", "pip",
+                                "install", "--no-input",
+                                "--disable-pip-version-check", "--target",
+                                str(target), PACKAGE], check=True)
+                shutil.rmtree(target / "pip", ignore_errors=True)
+                for leftover in target.glob("pip-*.dist-info"):
+                    shutil.rmtree(leftover)
+                for leftover in (root / "bin").glob("pip*"):
+                    leftover.unlink()
+            sys.path.insert(0, str(target))
+            importlib.invalidate_caches()
+            module = importlib.import_module(PACKAGE)
+        case "venv5":
+            # Ensure `alt_venv` is downloaded.
+            import os
+            import sysconfig
+            import venv
+            root = pathlib.Path.home() / ".alt_venv"
+            if not (root / "pyvenv.cfg").exists():
+                venv.EnvBuilder(with_pip=False, symlinks=(os.name != "nt")
+                                ).create(root)
+            target = pathlib.Path(sysconfig.get_path(
+                "purelib", scheme="venv", vars={"base": str(root),
+                "platbase": str(root), "installed_base": str(root)}))
+            if not (target / PACKAGE).is_dir():
+                from pip._internal.cli.main import main as pip_main
+                if pip_main(["install", "--no-input", "--target", str(target),
+                             "--disable-pip-version-check", PACKAGE]):
+                    raise RuntimeError("pip failed")
+            sys.path.insert(0, str(target))
+            importlib.invalidate_caches()
+            module = importlib.import_module(PACKAGE)
+        case "pip1":
+            # Ensure `alt_venv` is downloaded.
+            target = pathlib.Path.home() / ".alt_venv"
+            if not (target / PACKAGE).is_dir():
+                from pip._internal.cli.main import main as pip_main
+                if pip_main(["install", "--no-input", "--target", str(target),
+                             "--disable-pip-version-check", PACKAGE]):
+                    raise RuntimeError("pip failed")
+            sys.path.insert(0, str(target))
+            importlib.invalidate_caches()
+            module = importlib.import_module(PACKAGE)
+        case "pip2":
+            # Ensure `alt_venv` is downloaded.
+            import subprocess
+            target = pathlib.Path.home() / ".alt_venv"
+            if not (target / PACKAGE).is_dir():
+                subprocess.run([sys.executable, "-m", "pip", "install",
+                                "--no-input", "--disable-pip-version-check",
+                                "--target", str(target), PACKAGE], check=True)
+            sys.path.insert(0, str(target))
+            importlib.invalidate_caches()
+            module = importlib.import_module(PACKAGE)
+        case "pip3":
+            # Ensure `alt_venv` is downloaded.
+            import ensurepip
+            target = pathlib.Path.home() / ".alt_venv"
+            if not (target / PACKAGE).is_dir():
+                shipped = ensurepip._WHEEL_PKG_DIR  # type: ignore
+                sys.path.insert(0, str(next(
+                    pathlib.Path(shipped).glob("pip-*.whl"))))
+                from pip._internal.cli.main import main as pip_main
+                if pip_main(["install", "--no-input", "--target", str(target),
+                             "--disable-pip-version-check", PACKAGE]):
+                    raise RuntimeError("pip failed")
+            sys.path.insert(0, str(target))
+            importlib.invalidate_caches()
+            module = importlib.import_module(PACKAGE)
+        case "pip4":
+            # Ensure `alt_venv` is downloaded.
+            target = pathlib.Path.home() / ".alt_venv"
+            if not (target / PACKAGE).is_dir():
+                from pip._internal.cli.main import main as pip_main
+                if pip_main(["install", "--no-input",
+                             "--no-compile", "--disable-pip-version-check",
+                             "--target", str(target), PACKAGE]):
+                    raise RuntimeError("pip failed")
+            sys.path.insert(0, str(target))
+            importlib.invalidate_caches()
+            module = importlib.import_module(PACKAGE)
+        case "pip5":
+            # Ensure `alt_venv` is downloaded.
+            import subprocess
+            target = pathlib.Path.home() / ".alt_venv"
+            if not (target / PACKAGE).is_dir():
+                subprocess.run([sys.executable, "-m", "pip", "install",
+                                "--no-input", "--no-compile",
+                                "--disable-pip-version-check", "--target",
+                                str(target), PACKAGE], check=True)
+            sys.path.insert(0, str(target))
+            importlib.invalidate_caches()
+            module = importlib.import_module(PACKAGE)
+        case "nopip1":
             # Ensure `alt_venv` is downloaded.
             import io
             import json
@@ -334,141 +482,7 @@ def main() -> None:
             sys.path.insert(0, str(target))
             importlib.invalidate_caches()
             module = importlib.import_module(PACKAGE)
-        case "4":
-            # Ensure `alt_venv` is downloaded.
-            import os
-            import shutil
-            import sysconfig
-            import venv
-            root = pathlib.Path.home() / ".alt_venv"
-            if not (root / "pyvenv.cfg").exists():
-                venv.EnvBuilder(with_pip=True, symlinks=(os.name != "nt")
-                                ).create(root)
-            target = pathlib.Path(sysconfig.get_path(
-                "purelib", scheme="venv", vars={"base": str(root),
-                "platbase": str(root), "installed_base": str(root)}))
-            sys.path.insert(0, str(target))
-            if not (target / PACKAGE).is_dir():
-                from pip._internal.cli.main import main as pip_main
-                if pip_main(["install", "--no-input", "--target", str(target),
-                             "--disable-pip-version-check", PACKAGE]):
-                    raise RuntimeError("pip failed")
-                shutil.rmtree(target / "pip", ignore_errors=True)
-                for leftover in target.glob("pip-*.dist-info"):
-                    shutil.rmtree(leftover)
-                for leftover in (root / "bin").glob("pip*"):
-                    leftover.unlink()
-            importlib.invalidate_caches()
-            module = importlib.import_module(PACKAGE)
-        case "5":
-            # Ensure `alt_venv` is downloaded.
-            import os
-            import sysconfig
-            import venv
-            root = pathlib.Path.home() / ".alt_venv"
-            if not (root / "pyvenv.cfg").exists():
-                venv.EnvBuilder(with_pip=False, symlinks=(os.name != "nt")
-                                ).create(root)
-            target = pathlib.Path(sysconfig.get_path(
-                "purelib", scheme="venv", vars={"base": str(root),
-                "platbase": str(root), "installed_base": str(root)}))
-            if not (target / PACKAGE).is_dir():
-                from pip._internal.cli.main import main as pip_main
-                if pip_main(["install", "--no-input", "--target", str(target),
-                             "--disable-pip-version-check", PACKAGE]):
-                    raise RuntimeError("pip failed")
-            sys.path.insert(0, str(target))
-            importlib.invalidate_caches()
-            module = importlib.import_module(PACKAGE)
-        case "6":
-            # Ensure `alt_venv` is downloaded.
-            target = pathlib.Path.home() / ".alt_venv"
-            if not (target / PACKAGE).is_dir():
-                from pip._internal.cli.main import main as pip_main
-                if pip_main(["install", "--no-input", "--target", str(target),
-                             "--disable-pip-version-check", PACKAGE]):
-                    raise RuntimeError("pip failed")
-            sys.path.insert(0, str(target))
-            importlib.invalidate_caches()
-            module = importlib.import_module(PACKAGE)
-        case "7":
-            # Ensure `alt_venv` is downloaded.
-            import subprocess
-            target = pathlib.Path.home() / ".alt_venv"
-            if not (target / PACKAGE).is_dir():
-                subprocess.run([sys.executable, "-m", "pip", "install",
-                                "--no-input", "--disable-pip-version-check",
-                                "--target", str(target), PACKAGE], check=True)
-            sys.path.insert(0, str(target))
-            importlib.invalidate_caches()
-            module = importlib.import_module(PACKAGE)
-        case "8":
-            # Ensure `alt_venv` is downloaded.
-            import ensurepip
-            target = pathlib.Path.home() / ".alt_venv"
-            if not (target / PACKAGE).is_dir():
-                shipped = ensurepip._WHEEL_PKG_DIR  # type: ignore
-                sys.path.insert(0, str(next(
-                    pathlib.Path(shipped).glob("pip-*.whl"))))
-                from pip._internal.cli.main import main as pip_main
-                if pip_main(["install", "--no-input", "--target", str(target),
-                             "--disable-pip-version-check", PACKAGE]):
-                    raise RuntimeError("pip failed")
-            sys.path.insert(0, str(target))
-            importlib.invalidate_caches()
-            module = importlib.import_module(PACKAGE)
-        case "9":
-            # Ensure `alt_venv` is downloaded.
-            target = pathlib.Path.home() / ".alt_venv"
-            if not (target / PACKAGE).is_dir():
-                from pip._internal.cli.main import main as pip_main
-                if pip_main(["install", "--no-input",
-                             "--no-compile", "--disable-pip-version-check",
-                             "--target", str(target), PACKAGE]):
-                    raise RuntimeError("pip failed")
-            sys.path.insert(0, str(target))
-            importlib.invalidate_caches()
-            module = importlib.import_module(PACKAGE)
-        case "10":
-            # Ensure `alt_venv` is downloaded.
-            import subprocess
-            target = pathlib.Path.home() / ".alt_venv"
-            if not (target / PACKAGE).is_dir():
-                subprocess.run([sys.executable, "-m", "pip", "install",
-                                "--no-input", "--no-compile",
-                                "--disable-pip-version-check", "--target",
-                                str(target), PACKAGE], check=True)
-            sys.path.insert(0, str(target))
-            importlib.invalidate_caches()
-            module = importlib.import_module(PACKAGE)
-        case "11":
-            # Ensure `alt_venv` is downloaded.
-            import os
-            import shutil
-            import subprocess
-            import sysconfig
-            import venv
-            root = pathlib.Path.home() / ".alt_venv"
-            if not (root / "pyvenv.cfg").exists():
-                venv.EnvBuilder(with_pip=True, symlinks=(os.name != "nt")
-                                ).create(root)
-            target = pathlib.Path(sysconfig.get_path(
-                "purelib", scheme="venv", vars={"base": str(root),
-                "platbase": str(root), "installed_base": str(root)}))
-            if not (target / PACKAGE).is_dir():
-                subprocess.run([str(root / "bin" / "python3"), "-m", "pip",
-                                "install", "--no-input",
-                                "--disable-pip-version-check", "--target",
-                                str(target), PACKAGE], check=True)
-                shutil.rmtree(target / "pip", ignore_errors=True)
-                for leftover in target.glob("pip-*.dist-info"):
-                    shutil.rmtree(leftover)
-                for leftover in (root / "bin").glob("pip*"):
-                    leftover.unlink()
-            sys.path.insert(0, str(target))
-            importlib.invalidate_caches()
-            module = importlib.import_module(PACKAGE)
-        case "12":
+        case "nopip2":
             # Ensure `alt_venv` is downloaded.
             import io
             import json
@@ -520,7 +534,7 @@ def main() -> None:
             sys.path.insert(0, str(target))
             importlib.invalidate_caches()
             module = importlib.import_module(PACKAGE)
-        case "13":
+        case "nopip3":
             # Ensure `alt_venv` is downloaded.
             import json
             import subprocess
@@ -565,19 +579,19 @@ def main() -> None:
 
 
 MECHANISMS = {
-    "1": "venv(pip), pip in process",
-    "2": "venv(pip), pip subprocess",
-    "3": "no venv, stdlib wheel",
-    "4": "venv(pip), then delete pip",
-    "5": "venv(no pip), pip in proc",
-    "6": "no venv, pip in process",
-    "7": "no venv, pip subprocess",
-    "8": "no venv, pip from wheel",
-    "9": "as 6 plus --no-compile",
-    "10": "as 7 plus --no-compile",
-    "11": "as 4 but subprocess",
-    "12": "venv(no pip), stdlib wheel",
-    "13": "no venv, PyPI pip subprocess",
+    "venv1": "venv(pip), pip in process",
+    "venv2": "venv(pip), pip subprocess",
+    "venv3": "venv(pip), then delete pip",
+    "venv4": "as venv3 but subprocess",
+    "venv5": "venv(no pip), pip in proc",
+    "pip1": "no venv, pip in process",
+    "pip2": "no venv, pip subprocess",
+    "pip3": "no venv, pip from wheel",
+    "pip4": "as pip1 plus --no-compile",
+    "pip5": "as pip2 plus --no-compile",
+    "nopip1": "no venv, stdlib wheel",
+    "nopip2": "venv(no pip), stdlib wheel",
+    "nopip3": "no venv, PyPI pip subprocess",
 }
 # Lines a case needs but does not contain: the three module level
 # imports, PACKAGE, and the three of the `try` wrapper that turns a
@@ -587,7 +601,7 @@ SHARED_LINES = 6
 REPETITIONS = 3
 COLUMNS = ["case", "mechanism", "imports", "lines", "paste", "cold",
            "warm", "size"]
-COLUMN_WIDTHS = [4, 0, 7, 5, 5, 6, 6, 6]    # 0 means "use what is left".
+COLUMN_WIDTHS = [6, 0, 7, 5, 5, 6, 6, 6]    # 0 means "use what is left".
 TABLE_WIDTH = 79
 
 

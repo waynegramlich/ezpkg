@@ -149,7 +149,10 @@ Five files, and it matters which is which:
 
 * `bootstrap.py` -- the thirteen pasted bootstrap cases, plus the harness
   that measures them.  Run with no arguments it prints the comparison
-  table; with a case label it runs one case, which is internal.
+  table; with a case label it runs one case, which is internal.  Cases
+  are named by what they need -- `venv1`, `pip2`, `nopip3` -- and not
+  numbered 1 to 13 any more; the module docstring maps the old numbers
+  that closed tasks in `LOGBOOK.md` still use.
 * `alt_venv.py` -- the second stage, fetched as a wheel.  `AltVEnv`
   downloads, approves, unpacks and imports.  It carries its own PEP 723
   block, which is the one place the Python floor is written down.
@@ -175,7 +178,7 @@ finishing one does not call for it.
     ALT_VENV_TEST=COMPLETE python3 alt_venv_test.py
 
 `ALT_VENV_TEST` chooses how many of the thirteen bootstrap cases the
-all-case tests exercise.  Unset or `FAST` uses one, case 13, the one
+all-case tests exercise.  Unset or `FAST` uses one, `nopip3`, the one
 that ships; `COMPLETE` uses all thirteen and takes several times
 longer.  Anything else is refused rather than quietly treated as
 `FAST`.

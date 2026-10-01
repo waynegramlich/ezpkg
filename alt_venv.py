@@ -458,7 +458,7 @@ class AltVEnv:
         installed the package by asking `(target / PACKAGE).is_dir()`.
         A distribution that installs as a single module puts
         `alt_venv.py` there rather than a directory, so the answer
-        is no on every run and the fetch is repeated forever.  Case 11
+        is no on every run and the fetch is repeated forever.  `venv4`
         does worse than waste a download: it deletes the `pip` it
         installed with, so its second run has nothing to install with
         and fails.  This is the `0cctfd` issue in `LOGBOOK.md`.
@@ -1300,7 +1300,7 @@ class AltVEnv:
           a repeated option.
         * `bootstrap` (`str`):
           Which bootstrap the calling program carries, as the pasted code
-          names itself -- `"7"` for the one `README.md` teaches.  Kept on
+          names itself -- `"nopip3"` for the one that ships.  Kept on
           the instance as `self.bootstrap` and **read by nothing yet**:
           Step 6.12 wants to notice a pasted bootstrap that has gone
           stale, and telling it which one this is costs the caller no
