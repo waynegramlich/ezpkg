@@ -2442,13 +2442,38 @@ expected every time the order changes, and is Claude's job.
     no `global`, and `SHARED_LINES` is just the three module level
     imports.  The deeper indentation pushed eighteen lines past 79
     columns, and re-wrapping them added a line to some cases, so the
-    figures moved once more: `nopip3` is 44 pasted, `pip2` 18.  `ruff`'s
+    figures moved once more: `nopip3` is 44 pasted, `pip2` 18.  A
+    comment on the selection, at Wayne's request, made `nopip3` 45.  `ruff`'s
     `BLE001` objected to every `except Exception`; the exemption went
     into `ruff.toml` rather than into a `noqa` comment that would be
     pasted along with the code.  All thirteen cases were run against
     the real PyPI afterwards, and a dead network reads `cannot fetch
     coverage, choose pip failed: URLError: <urlopen error [Errno 111]
     Connection refused>`.
+
+  * 6.15.9 - **Each case is its own function**, 2026-10-01, at Wayne's
+    suggestion, for a better view of what is pasted: `def nopip3():` and
+    so on, in place of thirteen `case` clauses of one `match` in
+    `main()`.  A body now sits one level, four spaces, deeper than it
+    will in a program, where it sat three levels deeper before.  Each
+    function's docstring is not pasted and not counted; `main()` calls
+    the function named on its command line and reads the module back
+    from `sys.modules`, since a case's last line binds `module` for the
+    program it lands in.  `ruff` took that binding for an unused
+    variable (`F841`), and its exemption joined `BLE001`'s in
+    `ruff.toml`.  No count changed.  `measure_source` and
+    `case_bodies` now read the functions rather than the `match`.
+
+  * 6.15.10 - **Reflowed to the function depth**, 2026-10-01.  Lines
+    wrapped for the old depth were rejoined wherever they now fit, by
+    explicit before and after blocks, with each function's syntax tree
+    compared before and after so that only whitespace could move.  The
+    comparison caught one real change: re-wrapping for 6.15.8 had
+    swapped `--target` and `--disable-pip-version-check` in `venv2` and
+    `pip2`, which pip does not mind but which nobody had asked for, and
+    this put back the order of revision 394.  Every case shrank:
+    `nopip3` is 41 pasted lines, `pip2` 17, `nopip1` 51.  `venv4`,
+    `pip4` and `pip5` keep calls that cannot lose a line at this depth.
 
 * Step 6.16: Test suite cleanup, headed towards deleting some of the
   cases in `bootstrap.py` now that `nopip3` ships.

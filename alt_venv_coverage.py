@@ -285,18 +285,21 @@ def merge_children(tracer: trace.Trace, counts: Path) -> int:
 
 
 def case_bodies() -> dict[str, tuple[set[int], set[int]]]:
-    """Return the lines of each `case` body in `bootstrap.py`.
+    """Return the lines of each case in `bootstrap.py`.
 
-    A case covers its own body and nothing else does, so those lines say
-    nothing about what a case adds.  `compare` sets them aside and
-    reports them separately.
+    Each case is a module level function named after it.  A case covers
+    its own body and nothing else does, so those lines say nothing about
+    what a case adds.  `compare` sets them aside and reports them
+    separately.
 
     Two sets per case, because they answer different questions.  The
-    whole range, `case` line and comments included, is what is set
-    aside.  The statements are what can execute, so they are what
-    "how much of its own body ran" is counted against: a comment never
-    runs, and the continuation lines of a statement are not counted
-    separately by `trace`.
+    whole function, `def` line, docstring and comments included, is
+    what is set aside; the `def` line runs whenever the file is merely
+    imported, which any run may do.  The statements of the body are
+    what can execute when the case does, so they are what "how much of
+    its own body ran" is counted against: a comment never runs, and the
+    continuation lines of a statement are not counted separately by
+    `trace`.
 
     Returns:
     * (`dict[str, tuple[set[int], set[int]]]`): Maps each case label
@@ -304,26 +307,21 @@ def case_bodies() -> dict[str, tuple[set[int], set[int]]]:
       statements.
     """
     # Parse rather than search, the way `measure_source` does.
+    import bootstrap
     source: Path = Path(__file__).resolve().parent / "bootstrap.py"
     tree: ast.Module = ast.parse(source.read_text(encoding="utf-8"))
     bodies: dict[str, tuple[set[int], set[int]]] = {}
-    node: ast.AST
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Match):
-            clause: ast.match_case
-            for clause in node.cases:
-                pattern: ast.pattern = clause.pattern
-                if not isinstance(pattern, ast.MatchValue):
-                    continue
-                label: object = ast.literal_eval(pattern.value)
-                last: int = (clause.body[-1].end_lineno
-                             or clause.body[-1].lineno)
-                statements: set[int] = {
-                    inner.lineno for top in clause.body
-                    for inner in ast.walk(top)
-                    if isinstance(inner, ast.stmt)}
-                bodies[str(label)] = (set(range(pattern.lineno, last + 1)),
-                                      statements)
+    node: ast.stmt
+    for node in tree.body:
+        if (isinstance(node, ast.FunctionDef)
+                and node.name in bootstrap.MECHANISMS):
+            last: int = node.end_lineno or node.lineno
+            statements: set[int] = {
+                inner.lineno for top in node.body[1:]
+                for inner in ast.walk(top)
+                if isinstance(inner, ast.stmt)}
+            bodies[node.name] = (set(range(node.lineno, last + 1)),
+                                 statements)
     return bodies
 
 
@@ -394,9 +392,9 @@ def compare(directory: Path) -> str:
         if counts.is_file():
             lines: set[tuple[str, int]] = covered(counts)
             runs[label] = lines - every_body - baseline
-            # Its own statements only: a `match` tries each earlier
-            # `case` line on the way to the one that matches, so the
-            # others' `case` lines are covered too.
+            # Its own statements only: every case's `def` line runs
+            # whenever `bootstrap.py` is imported, so the others' are
+            # covered too.
             own[label] = lines & {("bootstrap.py", number) for number
                                   in bodies.get(label, (set(), set()))[1]}
     missing: list[str] = [label for label in alt_venv_test.cases()

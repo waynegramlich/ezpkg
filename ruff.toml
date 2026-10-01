@@ -20,4 +20,9 @@ target-version = "py311"
 # diagnosis rather than a traceback, while a control-C still reads as
 # a control-C.  A `noqa` comment would be pasted along with it, into
 # code whose readers never run `ruff`, so the exception lives here.
-"bootstrap.py" = ["BLE001"]
+#
+# Each case also ends `module = importlib.import_module(...)`, binding a
+# name for the program it is pasted into.  Here every case is a function
+# of its own, so the name looks unused (`F841`) though it is not, once
+# pasted; the harness reads the module back from `sys.modules` instead.
+"bootstrap.py" = ["BLE001", "F841"]

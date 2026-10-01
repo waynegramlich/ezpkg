@@ -4474,7 +4474,7 @@ class CoverageToolTest(unittest.TestCase):
                          ["test_marked"])
 
     def test_case_bodies_cover_every_case(self) -> None:
-        """Each case's range holds its statements but not its `case`."""
+        """Each case's range holds its statements but not its `def`."""
         # One entry per case, and no two ranges overlap.
         bodies: dict[str, tuple[set[int], set[int]]] = (
             alt_venv_coverage.case_bodies())
@@ -4510,15 +4510,15 @@ class CoverageToolTest(unittest.TestCase):
         """Beyond, only, own body and the greedy order all add up.
 
         The shipping case goes first in the greedy order however little
-        it adds, and a `case` line that a `match` merely passed through
-        on the way is nobody's.
+        it adds, and a case's `def` line, which runs whenever the file is
+        imported, is nobody's.
         """
         # `nopip1` adds 12 and 13, `nopip2` only 12, and the shipping
         # case 12 and 14, all over a baseline of 10 and 11.
         bodies: dict[str, tuple[set[int], set[int]]] = (
             alt_venv_coverage.case_bodies())
         statement: int = min(bodies["nopip1"][1])
-        passed_through: int = min(bodies["nopip1"][0])
+        def_line: int = min(bodies["nopip1"][0])
         self.save(alt_venv_coverage.BASELINE,
                   [("alt_venv.py", 10), ("alt_venv.py", 11)])
         self.save("nopip1", [("alt_venv.py", 10), ("alt_venv.py", 12),
@@ -4526,7 +4526,7 @@ class CoverageToolTest(unittest.TestCase):
                              ("bootstrap.py", statement)])
         self.save("nopip2", [("alt_venv.py", 12)])
         self.save(SHIPPING, [("alt_venv.py", 12), ("alt_venv.py", 14),
-                             ("bootstrap.py", passed_through)])
+                             ("bootstrap.py", def_line)])
         text: str = alt_venv_coverage.compare(self.root)
 
         # The per-case table, the greedy order, and the line listings.
@@ -4541,7 +4541,7 @@ class CoverageToolTest(unittest.TestCase):
         self.assertIn("## Only `nopip3`", text)
         self.assertIn("alt_venv.py:14:", text)
         self.assertNotIn("## Only `nopip2`", text)
-        self.assertNotIn(f"bootstrap.py:{passed_through}:", text)
+        self.assertNotIn(f"bootstrap.py:{def_line}:", text)
 
     def test_compare_names_missing_runs(self) -> None:
         """Runs that never finished are named rather than ignored."""
