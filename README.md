@@ -1,84 +1,40 @@
 # `AltVEnv`: Alternative to Virtual Environments
 
-<!-- Claude: These are some comments you made before a `/clear`.
-Thoughts on the reorganization, briefly:
-
-1. The first fifteen lines are the sale. PyPI shows your project name and
-   summary above the description, so the page can open on the reader's
-   problem — "you have a single-file program that needs requests" — rather
-   than a heading repeating the name.
-2. Put "when not to use this" near the top. uv run is better whenever your
-   users can install uv; zipapp is better with no network; a virtual
-   environment is better for a project rather than a script. A page that
-   says so gets believed about everything else, and it costs you nothing —
-   the people it turns away were going to be unhappy anyway.
-3. Four things must survive the sell, because concealing any of them
-   converts a sale into a support burden: pip must be preinstalled, it's
-   experimental, packages are fetched and run from an index, and everything
-   is measured on Linux with CPython 3.12 only. The Windows and macOS silence
-   is the one a stranger is most likely to discover the hard way.
-4. Keep the numbered walkthrough, but in the manual half. It's unusual in
-   a way that helps somebody who has decided to commit, and it's noise to
-   somebody still deciding.
-5. The thing I'd most want in the sale is the before-and-after: what a
-   recipient has to do without this (create a virtual environment, activate
-   it, follow instructions that differ per shell and per operating system)
-   against what they do with it (run the program). That contrast is the
-   product.
-6. One caution: the page is embedded in the wheel as the long description,
-   and a test asserts it matches README.md byte for byte. So a rewrite is
-   free, but it does mean the published page and the file can never silently
-   diverge — which is the behavior you want.
--->
-
-## Introduction
-
-`AltVEnv` (i.e. Alternative to Virtual Environments) grew out the frustration
+`AltVEnv` (i.e. Alternative to Virtual Environments) grew out of the frustration
 of dealing with concurrent Python program development where each program has
-its own Python virtual environment.  When switching between from one program
-to the next, it is easy to forget to deactivate the current one activating the
-next one.  If you forget, your environment variables get "messed up".  The
-question that arose was "Is there a way to avoid virtual environments
-entirely?"
+its own Python virtual environment.  When switching from one program 
+to the next, it is easy to forget to deactivate the current one before
+activating the next one.  If you forget, you end up running one program
+against another program's packages.  The question that arose was "Is there a way to avoid virtual
+environments entirely?"  Ultimately `AltVEnv` was born as a result.
 
+<!-- Claude:
+When we get ready to upload AltVEnv to PyPI, N needs to be updated.
+-->
 `AltVEnv` provides a way to avoid virtual environments entirely.  It does
-this by requiring 12 lines of "bootstrap" code be installed near the front
+this by requiring N lines of "bootstrap" code be installed near the front
 of the Python program called the `AltVEnv` bootstrap.  The bootstrap code
 deals with everything else -- setting up program's environment variables,
 downloading packages, etc.  A further advantage is that a single file
 program can literally be E-mailed to somebody and it will just work.
 
-<!-- Claude: I think we can download `pip` with `urlopen`. -->
-Surely there has to be a catch, right?  Well there is small catch and it is
-that the Python `pip` program must already be installed and available.
-It turns out that both Windows and macOS preinstall `pip` when they instal
-Python.  For Linux, it turns out that `pip` is kept in a different package
-than the one than the main Python package.  It is easily fixed tough:
-* Ubuntu/Debian: `sudo apt install python3-pip`
-* Fedora: `sudo dnf install python3`
-
-With `AltVenv`, neither the developer nor the end-user have to deal with
-dreaded missing Python package problems.
+With `AltVenv`, neither the developer nor the end-user have to deal with the
+dreaded missing Python package problem.
 
 ## Requirements
 
 The requirements for `AltVEnv` are:
 1. Python3 version 3.11 or more is required.
-2. The `pip` ("Pip Installs Packages") program must be previously installed.
-   While Windows and macOS pre-install `pip`, Linux may need an manual install:
-   * Ubuntu/Debian: `sudo apt install python3-pip`
-   * Fedora: `sudo dnf install python3`  <!-- Claude: Is this right? -->
-   Without administrative privileges (e.g. `sudo`) `pip` cannot be installed.
-3. Required modules are simply listed in metadata at the front of the program.
-4. A small piece of bootstrap code (~10 lines) must be added to your code
-   before the Python `import` statement to imports the module.
-5. An active network connection is required for the initial run.  Afterwards
+2. Required modules are simply listed in metadata at the front of the program.
+3. A small piece of bootstrap code (~N lines) must be added to your code
+   before attempting to `import` the modules listed in step 2.
+4. An active network connection is required for the initial run.  Afterwards
    the packages are cached and a network connection is no longer needed.
 That's it!
 
 ## Alternatives
 
-This is a short list of other alternatives to explore:
+The following is a short list to explore:
 * [Python Virtual Environments](https://docs.python.org/3/library/venv.html):
   For software developers, virtual environments are actually quite reasonable.
   However asking an end users install a virtual environment prior to execution
@@ -86,10 +42,10 @@ This is a short list of other alternatives to explore:
 * [uv](https://docs.astral.sh/uv/):
   `uv` is gaining popularity as an alternative to Python Virtual Environments.
 * `[zipapp](https://docs.python.org/3/library/zipapp.html)`:
-  `zippapp` produces executable Python archives.
+  `zipapp` produces large executable Python archives that contain everything.
 * Container technology:
   [Docker](https://www.docker.com/ and [Snap](https://snapcraft.io/docs/)
-  provide alternatives to `zippapp`.
+  provide alternatives to `zipapp`.
 
 
 ## A Small Annotated Example

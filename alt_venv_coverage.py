@@ -12,6 +12,20 @@ say where the annotated `.cover` files should go.  `ALT_VENV_TEST`
 is honoured by the suite as usual, so `COMPLETE` measures every
 `bootstrap.py` case and costs several minutes.
 
+`--per-case <directory>` answers a different question: what does each
+`bootstrap.py` case add?  It makes one baseline run of the whole suite
+with `ALT_VENV_TEST=NONE`, so that no case runs, and then one run per
+case of only the tests marked `runs_cases`, with `ALT_VENV_TEST`
+naming that case.  Children are traced throughout.  Runs go two at a
+time by default (`--jobs`), since each is a busy tree of processes in
+its own right, and each writes only under `<directory>/<run>/`, so runs
+side by side cannot overwrite each other.  Then it compares them and
+writes `report.md`: what each case adds beyond the baseline, the lines
+only one case reaches, and a greedy ordering from the case that ships
+showing which cases add nothing.  `--compare <directory>` redoes just
+the comparison from the saved counts, in seconds, which is what makes
+culling cases cheap to repeat.  See Step 6.16 of `LOGBOOK.md`.
+
 Two workarounds here were each found the hard way, and both matter
 more than they look:
 
@@ -29,11 +43,11 @@ more than they look:
 
 Two blind spots remain, and neither is a defect in the tests:
 
-* **Child processes are not followed.**  `bootstrap.py` reports about
-  7% because its thirteen cases only ever run in child interpreters.
-  They are covered by `test_every_case_bootstraps` and
-  `test_every_case_bootstraps_repeatedly` instead, and the percentage
-  here measures only the module level code that an import executes.
+* **Child processes are not followed** unless `--children` is given.
+  Without it `bootstrap.py` reports about 7%, because its thirteen
+  cases only ever run in child interpreters.  With it, a copy of
+  `alt_venv.py` that a bootstrap installed is credited to the project's
+  own file when the two are identical; see `trace_hook/sitecustomize.py`.
 * **A frame whose `__file__` is false is not followed.**
   `trace.Trace.globaltrace_lt` decides what to follow by reading
   `frame.f_globals.get("__file__")`.  So the one line of
@@ -63,13 +77,37 @@ SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 """
 # SPDX-License-Identifier: MIT-0
 
+import argparse
+import ast
+import concurrent.futures
 import os
+import subprocess
 import sys
 import tempfile
 import threading
+import time
 import trace
 import unittest
 from pathlib import Path
+
+# The file `report` keeps the counts in, inside the annotation
+# directory, so that `compare` can read a run back without redoing it.
+COUNTS: str = "counts.pickle"
+
+# The run with no case selected, and the directory it writes into.
+BASELINE: str = "baseline"
+
+# How many per-case runs go at once unless `--jobs` says otherwise.  Two,
+# because each run is itself a busy tree of processes -- the suite, its
+# index servers, `pip` and the bootstrap children -- so the machine sees
+# far more than one process per run.  Wayne's guidance, 2026-10-01: two
+# or three at once, not all of them.
+JOBS: int = 2
+
+# The files whose lines `compare` attributes to cases.  This file and
+# the trace hook are the instrument, and are left out.
+MEASURED: tuple[str, ...] = ("alt_venv.py", "bootstrap.py",
+                             "alt_venv_test.py")
 
 
 def build_tracer() -> trace.Trace:
@@ -93,19 +131,60 @@ def build_tracer() -> trace.Trace:
                                    sys.base_exec_prefix])
 
 
-def run_suite() -> None:
-    """Run the whole test suite, swallowing the exit it asks for.
+def run_suite(marked_only: bool = False) -> bool:
+    """Run the test suite, swallowing the exit it asks for.
 
     `unittest.main` exits the interpreter when it is finished, which
     would take the counts with it, so the suite is run with
     `exit=False` and any `SystemExit` is absorbed as well.
+
+    Arguments:
+    * `marked_only` (`bool`):
+      Run only the tests marked `runs_cases`, which is what a per-case
+      run needs; everything else is the baseline's business.
+
+    Returns:
+    * (`bool`): Whether every test passed.  Coverage from a failing run
+      describes code that did not do its job, so the caller says so.
     """
     # Import inside the traced call, so imports are counted too.
     import alt_venv_test
+    if marked_only:
+        loaded: unittest.TestSuite = (
+            unittest.defaultTestLoader.loadTestsFromModule(alt_venv_test))
+        kept: unittest.TestSuite = unittest.TestSuite(
+            test for test in flatten(loaded)
+            if getattr(getattr(test, test._testMethodName, None),
+                       "runs_cases", False))
+        return unittest.TextTestRunner().run(kept).wasSuccessful()
     try:
-        unittest.main(module=alt_venv_test, exit=False, argv=[__file__])
+        program: unittest.TestProgram = unittest.main(
+            module=alt_venv_test, exit=False, argv=[__file__])
     except SystemExit:
-        pass
+        return False
+    return program.result.wasSuccessful()
+
+
+def flatten(suite: unittest.TestSuite) -> list[unittest.TestCase]:
+    """Return the individual tests inside a possibly nested suite.
+
+    Arguments:
+    * `suite` (`unittest.TestSuite`):
+      What the loader produced, which nests a suite per class.
+
+    Returns:
+    * (`list[unittest.TestCase]`): The tests, in loader order, which
+      keeps each class's tests together so its fixtures run once.
+    """
+    # A suite holds tests and further suites, to any depth.
+    tests: list[unittest.TestCase] = []
+    item: unittest.TestCase | unittest.TestSuite
+    for item in suite:
+        if isinstance(item, unittest.TestSuite):
+            tests += flatten(item)
+        else:
+            tests.append(item)
+    return tests
 
 
 def report(tracer: trace.Trace, coverdir: Path) -> None:
@@ -115,8 +194,8 @@ def report(tracer: trace.Trace, coverdir: Path) -> None:
     * `tracer` (`trace.Trace`):
       The tracer that has finished running.
     * `coverdir` (`Path`):
-      Where the annotated `.cover` files go.  Created if it does not
-      exist.
+      Where the annotated `.cover` files go, and the saved counts.
+      Created if it does not exist.
     """
     # Drop counts naming files that have since been deleted; see the
     # module docstring.  A test's own teardown is the usual culprit.
@@ -127,8 +206,11 @@ def report(tracer: trace.Trace, coverdir: Path) -> None:
                       if Path(key[0]).is_file()
                       and Path(key[0]).resolve() != here}
 
-    # Annotate, summarize, and say where the annotations landed.
+    # Annotate, summarize, and say where the annotations landed.  The
+    # counts are kept as well, as `COUNTS`, which is what `compare`
+    # reads; `trace` writes them itself when given an `outfile`.
     coverdir.mkdir(parents=True, exist_ok=True)
+    results.outfile = str(coverdir / COUNTS)
     results.write_results(show_missing=True, summary=True,
                           coverdir=str(coverdir))
     print(f"\nannotated sources in {coverdir}", file=sys.stderr)
@@ -187,36 +269,346 @@ def merge_children(tracer: trace.Trace, counts: Path) -> int:
     return found
 
 
-def main() -> None:
-    """Measure the suite and report on it.
+def case_bodies() -> dict[str, tuple[set[int], set[int]]]:
+    """Return the lines of each `case` body in `bootstrap.py`.
 
-    Arguments come in any order.  A directory names where the annotated
-    files go; without one a temporary directory is made and its path
-    printed, so nothing lands in the project tree.  `--children` also
-    traces child processes, which is the only way to see
-    `bootstrap.py` at all and costs several minutes.
+    A case covers its own body and nothing else does, so those lines say
+    nothing about what a case adds.  `compare` sets them aside and
+    reports them separately.
+
+    Two sets per case, because they answer different questions.  The
+    whole range, `case` line and comments included, is what is set
+    aside.  The statements are what can execute, so they are what
+    "how much of its own body ran" is counted against: a comment never
+    runs, and the continuation lines of a statement are not counted
+    separately by `trace`.
+
+    Returns:
+    * (`dict[str, tuple[set[int], set[int]]]`): Maps each case label
+      to its whole range of lines and to the first lines of its
+      statements.
     """
-    # Sort the arguments into the flag and the directory.
-    wanted: list[str] = [word for word in sys.argv[1:] if word != "--children"]
-    children: bool = "--children" in sys.argv[1:]
-    coverdir: Path = (Path(wanted[0]) if wanted
+    # Parse rather than search, the way `measure_source` does.
+    source: Path = Path(__file__).resolve().parent / "bootstrap.py"
+    tree: ast.Module = ast.parse(source.read_text(encoding="utf-8"))
+    bodies: dict[str, tuple[set[int], set[int]]] = {}
+    node: ast.AST
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Match):
+            clause: ast.match_case
+            for clause in node.cases:
+                pattern: ast.pattern = clause.pattern
+                if not isinstance(pattern, ast.MatchValue):
+                    continue
+                label: object = ast.literal_eval(pattern.value)
+                last: int = (clause.body[-1].end_lineno
+                             or clause.body[-1].lineno)
+                statements: set[int] = {
+                    inner.lineno for top in clause.body
+                    for inner in ast.walk(top)
+                    if isinstance(inner, ast.stmt)}
+                bodies[str(label)] = (set(range(pattern.lineno, last + 1)),
+                                      statements)
+    return bodies
+
+
+def covered(counts: Path) -> set[tuple[str, int]]:
+    """Return the lines of the `MEASURED` files that a run executed.
+
+    Arguments:
+    * `counts` (`Path`):
+      A `COUNTS` file written by `report`.
+
+    Returns:
+    * (`set[tuple[str, int]]`): Each executed line, as the file's bare
+      name and its line number.
+    """
+    # Only this project's own files, named the way the report names them.
+    here: Path = Path(__file__).resolve().parent
+    results: trace.CoverageResults = trace.CoverageResults(
+        infile=str(counts))
+    lines: set[tuple[str, int]] = set()
+    filename: str
+    number: int
+    hits: int
+    for (filename, number), hits in results.counts.items():
+        path: Path = Path(filename).resolve()
+        if hits and path.parent == here and path.name in MEASURED:
+            lines.add((path.name, number))
+    return lines
+
+
+def compare(directory: Path) -> str:
+    """Say what each case adds to coverage, from runs already made.
+
+    The baseline run covers everything the suite reaches without any
+    case, and a case run covers what its tests reach with that case.
+    Only lines beyond the baseline can belong to a case, and of those,
+    what tells cases apart is the lines only one of them reaches: the
+    coverage lost by deleting that case alone.  Deleting several at
+    once can lose more, since two cases may share a line nobody else
+    reaches, so a greedy ordering is given as well: start from the
+    baseline and the case that ships, then keep adding whichever case
+    contributes most.  Cases that contribute nothing by the end of that
+    ordering are the candidates for deletion, as far as coverage can
+    tell.
+
+    Arguments:
+    * `directory` (`Path`):
+      Holds one subdirectory per case and one named `BASELINE`, each
+      with a `COUNTS` file.
+
+    Returns:
+    * (`str`): The report, in Markdown.
+    """
+    # Load every run that finished, setting each case's own body aside.
+    import alt_venv_test
+    import bootstrap
+    bodies: dict[str, tuple[set[int], set[int]]] = case_bodies()
+    every_body: set[tuple[str, int]] = {
+        ("bootstrap.py", number)
+        for whole, _ in bodies.values() for number in whole}
+    base: Path = directory / BASELINE / COUNTS
+    baseline: set[tuple[str, int]] = (covered(base) - every_body
+                                      if base.is_file() else set())
+    runs: dict[str, set[tuple[str, int]]] = {}
+    own: dict[str, set[tuple[str, int]]] = {}
+    label: str
+    for label in bootstrap.MECHANISMS:
+        counts: Path = directory / label / COUNTS
+        if counts.is_file():
+            lines: set[tuple[str, int]] = covered(counts)
+            runs[label] = lines - every_body - baseline
+            # Its own statements only: a `match` tries each earlier
+            # `case` line on the way to the one that matches, so the
+            # others' `case` lines are covered too.
+            own[label] = lines & {("bootstrap.py", number) for number
+                                  in bodies.get(label, (set(), set()))[1]}
+    missing: list[str] = [label for label in bootstrap.MECHANISMS
+                          if label not in runs]
+    if not base.is_file():
+        missing.insert(0, BASELINE)
+
+    # What only one case reaches.
+    out: list[str] = [f"# Coverage by case, from `{directory}`", ""]
+    if missing:
+        out += [f"No counts for: {', '.join(missing)}.", ""]
+    out += [(f"The baseline covers {len(baseline)} lines outside the "
+             "case bodies.  Below, `beyond` is what a case adds to the "
+             "baseline and `only` is what no other case adds.  Lines in "
+             "`alt_venv.py` are the ones that matter most: the test file "
+             "covers itself."), "",
+            ("| case | own body | beyond | of which `alt_venv.py` | only "
+             "| of which `alt_venv.py` |"),
+            "|------|----------|--------|-----|------|-----|"]
+    unique: dict[str, set[tuple[str, int]]] = {}
+
+    def product(lines: set[tuple[str, int]]) -> int:
+        """Count the lines of `lines` that are in `alt_venv.py`.
+
+        Arguments:
+        * `lines` (`set[tuple[str, int]]`):
+          Lines as `covered` names them.
+
+        Returns:
+        * (`int`): How many are in the product rather than its tests.
+        """
+        # The product is the one file that ships.
+        return sum(1 for name, _ in lines if name == "alt_venv.py")
+
+    for label, lines in runs.items():
+        others: set[tuple[str, int]] = set().union(
+            *(runs[other] for other in runs if other != label))
+        unique[label] = lines - others
+        out.append(f"| {label} | {len(own[label])} of "
+                   f"{len(bodies.get(label, (set(), set()))[1])} | "
+                   f"{len(lines)} | "
+                   f"{product(lines)} | {len(unique[label])} | "
+                   f"{product(unique[label])} |")
+
+    # The greedy ordering, starting from what ships.
+    out += ["", "## Greedy ordering", "",
+            "| step | case | lines added | total |",
+            "|------|------|-------------|-------|",
+            f"| 0 | {BASELINE} | {len(baseline)} | {len(baseline)} |"]
+    total: set[tuple[str, int]] = set(baseline)
+    remaining: list[str] = list(runs)
+    step: int = 0
+    while remaining:
+        shipping: list[str] = [label for label in remaining
+                               if label in alt_venv_test.FAST_CASES]
+        best: str = (shipping[0] if shipping else max(
+            remaining, key=lambda one: len(runs[one] - total)))
+        added: int = len(runs[best] - total)
+        total |= runs[best]
+        step += 1
+        out.append(f"| {step} | {best} | {added} | {len(total)} |")
+        remaining.remove(best)
+
+    # The lines themselves, so a decision can be read off the source.
+    here: Path = Path(__file__).resolve().parent
+    sources: dict[str, list[str]] = {
+        name: (here / name).read_text(encoding="utf-8").splitlines()
+        for name in MEASURED}
+    for label, lines in unique.items():
+        if lines:
+            out += ["", f"## Only `{label}`", "", "```"]
+            name: str
+            number: int
+            for name, number in sorted(lines):
+                out.append(f"{name}:{number}: "
+                           f"{sources[name][number - 1].strip()}")
+            out.append("```")
+    return "\n".join(out) + "\n"
+
+
+def measure_one(name: str, selection: str, marked_only: bool,
+                directory: Path) -> tuple[str, int, float]:
+    """Measure the suite in a child process, writing under `name`.
+
+    A child of its own per run, rather than a loop in this process,
+    because `trace` keeps one set of counts per process and the suite's
+    module level state is only fresh once.  Everything the run writes
+    lands under its own directory, so runs side by side never share a
+    file: the annotations, `COUNTS`, the child counts and the log.
+
+    Arguments:
+    * `name` (`str`):
+      The run's name, which is its directory under `directory`: a case
+      label, or `BASELINE`.
+    * `selection` (`str`):
+      What `ALT_VENV_TEST` is set to for the run.
+    * `marked_only` (`bool`):
+      Whether to run only the tests marked `runs_cases`.
+    * `directory` (`Path`):
+      The parent directory.
+
+    Returns:
+    * (`tuple[str, int, float]`): The name, the exit status, and the
+      wall clock seconds taken.
+    """
+    # A fresh directory, then the measurement with children.
+    target: Path = directory / name
+    target.mkdir(parents=True, exist_ok=True)
+    environment: dict[str, str] = dict(os.environ, ALT_VENV_TEST=selection)
+    command: list[str] = [sys.executable, str(Path(__file__).resolve()),
+                          "--children", str(target)]
+    if marked_only:
+        command.append("--marked-only")
+    start: float = time.perf_counter()
+    with open(target / "log.txt", "w", encoding="utf-8") as log:
+        done: subprocess.CompletedProcess[bytes] = subprocess.run(
+            command, env=environment, stdout=log,
+            stderr=subprocess.STDOUT, check=False)
+    return name, done.returncode, time.perf_counter() - start
+
+
+def measure_cases(directory: Path, jobs: int) -> bool:
+    """Measure a baseline, then every case separately, `jobs` at a time.
+
+    The baseline is the whole suite with no case selected, and is the
+    one long run.  Each case then runs only the tests that run cases,
+    since everything else would only repeat the baseline.  The baseline
+    is submitted first, so that it overlaps the cases rather than
+    following them.
+
+    Arguments:
+    * `directory` (`Path`):
+      Where each case's run goes, one subdirectory per case.
+    * `jobs` (`int`):
+      How many runs go at once.
+
+    Returns:
+    * (`bool`): Whether every run passed its tests.
+    """
+    # Each run is a process of its own, so threads only wait on them.
+    import bootstrap
+    passed: bool = True
+    with concurrent.futures.ThreadPoolExecutor(max_workers=jobs) as pool:
+        pending: list[concurrent.futures.Future[tuple[str, int, float]]] = [
+            pool.submit(measure_one, BASELINE, "NONE", False, directory)]
+        pending += [pool.submit(measure_one, label, label, True, directory)
+                    for label in bootstrap.MECHANISMS]
+        future: concurrent.futures.Future[tuple[str, int, float]]
+        for future in concurrent.futures.as_completed(pending):
+            label: str
+            status: int
+            seconds: float
+            label, status, seconds = future.result()
+            verdict: str = "ok" if status == 0 else f"FAILED ({status})"
+            print(f"{label:>7}: {verdict:<12} {seconds:6.0f} s",
+                  file=sys.stderr)
+            passed = passed and status == 0
+    return passed
+
+
+def main() -> int:
+    """Measure the suite and report on it, in one of three ways.
+
+    * With a directory, or none, measure the suite once.  Without one a
+      temporary directory is made and its path printed, so nothing
+      lands in the project tree.  `--children` also traces child
+      processes, which is the only way to see `bootstrap.py` at all and
+      costs several minutes.
+    * With `--per-case`, measure once per `bootstrap.py` case, children
+      included, `--jobs` at a time, and then compare the runs.
+    * With `--compare`, only compare runs that `--per-case` already
+      made, which costs seconds.
+
+    Returns:
+    * (`int`): The exit status: 0 when every test passed.
+    """
+    # The arguments, in whatever order they came.
+    parser: argparse.ArgumentParser = argparse.ArgumentParser(
+        description="Measure test suite coverage with `trace`.")
+    parser.add_argument("directory", nargs="?",
+                        help="where the annotated files and counts go")
+    parser.add_argument("--children", action="store_true",
+                        help="trace child processes as well")
+    parser.add_argument("--per-case", action="store_true",
+                        help="measure once per bootstrap case, then compare")
+    parser.add_argument("--compare", action="store_true",
+                        help="compare per-case runs already made")
+    parser.add_argument("--marked-only", action="store_true",
+                        help="internal: only tests marked runs_cases")
+    parser.add_argument("--jobs", type=int, default=JOBS,
+                        help=f"per-case runs at once (default: {JOBS})")
+    arguments: argparse.Namespace = parser.parse_args()
+    if (arguments.per_case or arguments.compare) and not arguments.directory:
+        parser.error("--per-case and --compare need a directory")
+    coverdir: Path = (Path(arguments.directory) if arguments.directory
                       else Path(tempfile.mkdtemp(prefix="cover-")))
 
     # This directory has to be importable for the suite to be found.
     sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+    # The per-case modes measure in children and read the results back.
+    if arguments.per_case or arguments.compare:
+        passed: bool = True
+        if arguments.per_case:
+            passed = measure_cases(coverdir, arguments.jobs)
+        text: str = compare(coverdir)
+        (coverdir / "report.md").write_text(text, encoding="utf-8")
+        print(text)
+        print(f"report in {coverdir / 'report.md'}", file=sys.stderr)
+        return 0 if passed else 1
+
+    # Otherwise one measurement of the whole suite, here.
     counts: Path = coverdir / "child-counts"
-    if children:
+    if arguments.children:
         trace_children(counts)
 
     # Instrument the worker threads as well as this one, then run.
     tracer: trace.Trace = build_tracer()
     threading.settrace(tracer.globaltrace)
-    tracer.runfunc(run_suite)
-    folded: int = merge_children(tracer, counts) if children else 0
-    if children:
+    passed = bool(tracer.runfunc(run_suite, arguments.marked_only))
+    folded: int = (merge_children(tracer, counts) if arguments.children
+                   else 0)
+    if arguments.children:
         print(f"folded in {folded} child processes", file=sys.stderr)
     report(tracer, coverdir)
+    return 0 if passed else 1
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

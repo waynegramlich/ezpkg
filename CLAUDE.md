@@ -192,6 +192,21 @@ thoroughly it is exercised.  With `--children` and `COMPLETE` the whole
 measurement takes about twenty minutes, which is why it is off unless
 asked for.
 
+The **cull run** measures what each `bootstrap.py` case adds to
+coverage, so that cases can be deleted on evidence; see Step 6.16 of
+`LOGBOOK.md`.  Wayne starts it himself at bedtime, because the machine
+is a laptop and cron cannot run while it sleeps:
+
+    mkdir -p ~/alt_venv_cull && cd ~/public_html/projects/alt_venv && \
+      nohup ./alt_venv_coverage.py --per-case \
+      ~/alt_venv_cull/$(date +%F) > ~/alt_venv_cull/$(date +%F).log 2>&1 &
+
+The answer is `~/alt_venv_cull/<date>/report.md`.  Re-reading saved runs
+costs seconds: `./alt_venv_coverage.py --compare <that directory>`.  A
+test that runs a bootstrap case must carry `@runs_cases`, or the cull
+credits its coverage to no case; `test_case_runners_are_marked` enforces
+it.
+
 `AltVEnv` also reads `ALT_VENV_APPROVE`: unset enforces the approvals
 file beside the calling program, `write` records what arrived, and
 `skip` does neither.

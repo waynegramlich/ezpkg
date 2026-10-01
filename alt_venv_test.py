@@ -52,6 +52,7 @@ import hashlib
 import html
 import http.server
 import importlib
+import inspect
 import io
 import json
 import os
@@ -70,10 +71,10 @@ import unittest.mock
 import urllib.error
 import urllib.request
 import zipfile
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path, PurePath
 from types import ModuleType
-from typing import IO, Any, cast
+from typing import IO, Any, TypeVar, cast
 
 import alt_venv
 import bootstrap
@@ -175,24 +176,91 @@ def cases() -> tuple[str, ...]:
 
     `ALT_VENV_TEST` chooses.  Unset or `FAST`, which is the usual
     way to run, gives `FAST_CASES`.  `COMPLETE` gives every case
-    `bootstrap.py` defines, which is thorough and slow.
+    `bootstrap.py` defines, which is thorough and slow.  Anything else
+    is read as case names separated by commas, such as `venv3` or
+    `pip1,pip2`, which is how `alt_venv_coverage.py --per-case` runs
+    the suite once per case.  Names are case sensitive, as the
+    `case` labels in `bootstrap.py` are.  `NONE` gives no cases at
+    all, which is that tool's baseline: everything the suite covers
+    without running a single bootstrap.
 
     Returns:
     * (`tuple[str, ...]`): The labels, in `bootstrap.py` order.
 
     Raises:
     * `ValueError`:
-      If `ALT_VENV_TEST` holds something else, because a typo that
-      silently ran the fast tests would be worse than a refusal.
+      If `ALT_VENV_TEST` names something that is neither a choice nor
+      a case, because a typo that silently ran the fast tests would be
+      worse than a refusal.
     """
-    # An unrecognised value is a mistake rather than a default.
-    choice: str = os.environ.get("ALT_VENV_TEST", "FAST").upper()
-    if choice not in ("FAST", "COMPLETE"):
-        raise ValueError(
-            f"ALT_VENV_TEST is {choice!r}; use FAST or COMPLETE")
-    if choice == "COMPLETE":
+    # The two choices first, then a list of names.
+    choice: str = os.environ.get("ALT_VENV_TEST", "FAST")
+    if choice.upper() == "FAST":
+        return FAST_CASES
+    if choice.upper() == "COMPLETE":
         return tuple(bootstrap.MECHANISMS)
-    return FAST_CASES
+    if choice.upper() == "NONE":
+        return ()
+    named: set[str] = {name.strip() for name in choice.split(",")}
+    unknown: list[str] = sorted(named - set(bootstrap.MECHANISMS))
+    if unknown:
+        raise ValueError(
+            f"ALT_VENV_TEST is {choice!r}; use FAST, COMPLETE, NONE or "
+            f"case names from bootstrap.py, and {', '.join(unknown)} is "
+            f"none of them")
+    return tuple(label for label in bootstrap.MECHANISMS if label in named)
+
+
+def selected(*labels: str) -> tuple[str, ...]:
+    """Return which of `labels` a test that names its cases may run.
+
+    Most tests that run a case take theirs from `cases`.  A few cannot,
+    because they exist for one particular case: the matcher belongs to
+    `nopip1` and `nopip2`, and the no-`pip` test to `nopip3`.  Under
+    `FAST` and `COMPLETE` they run regardless, as they always have.
+    When `ALT_VENV_TEST` names cases, they run only for those, so that
+    a per-case coverage run measures that case and not these as well.
+
+    Arguments:
+    * `labels` (`str`):
+      The cases the test is written for.
+
+    Returns:
+    * (`tuple[str, ...]`): Those of `labels` to run, possibly none.
+    """
+    # Named cases narrow the set; the two choices leave it alone.
+    choice: str = os.environ.get("ALT_VENV_TEST", "FAST")
+    if choice.upper() in ("FAST", "COMPLETE"):
+        return labels
+    chosen: tuple[str, ...] = cases()
+    return tuple(label for label in labels if label in chosen)
+
+
+# Anything a decorator can be applied to and hand back unchanged.
+Marked = TypeVar("Marked", bound=Callable[..., Any])
+
+
+def runs_cases(test: Marked) -> Marked:
+    """Mark a test that runs `bootstrap.py` cases.
+
+    `alt_venv_coverage.py --per-case` measures the suite once with no
+    cases, as a baseline, and then only the marked tests once per case,
+    which is what makes measuring thirteen cases take minutes rather
+    than hours.  An unmarked test that runs a case would be missing
+    from every per-case run, so its coverage would be credited to no
+    case at all.  `test_case_runners_are_marked` checks the marking
+    against the source.
+
+    Arguments:
+    * `test` (`Marked`):
+      The test method.
+
+    Returns:
+    * (`Marked`): The same method, carrying `runs_cases`.
+    """
+    # An attribute rather than a registry, so it travels with the method.
+    test.__dict__["runs_cases"] = True
+    return test
 
 
 def run_bootstrap_case(label: str, home: Path, index_url: str,
@@ -1261,12 +1329,15 @@ class AltVEnvTest(unittest.TestCase):
         self.assertNotEqual(done.returncode, 0)
         self.assertFalse((target / f"{MODULE}.py").exists())
 
+    @runs_cases
     def test_a_truncated_wheel_fails_nopip1(self) -> None:
         """`nopip1` unzips the wheel itself, so it must fail too."""
         # `zipfile` is what notices, since the fetch itself succeeded.
         # Step 6.1 replaced the traceback with one line, so the
         # assertion reads the message rather than the module name.
         self.inject(".whl", "truncate")
+        if not selected("nopip1"):
+            self.skipTest("nopip1 is not selected")
         done: subprocess.CompletedProcess[str] = self.run_case("nopip1")
         self.assertNotEqual(done.returncode, 0)
         self.assertIn(f"cannot fetch {MODULE}", done.stderr)
@@ -1302,6 +1373,7 @@ class AltVEnvTest(unittest.TestCase):
         self.assertNotEqual(done.returncode, 0)
         self.assertFalse((target / f"{MODULE}.py").exists())
 
+    @runs_cases
     def test_a_failed_fetch_is_one_line(self) -> None:
         """A case that cannot reach the index says so, without a traceback.
 
@@ -1353,6 +1425,7 @@ class AltVEnvTest(unittest.TestCase):
         error = caught.exception
         self.assertEqual(error.code, 404)
 
+    @runs_cases
     def test_every_case_bootstraps(self) -> None:
         """Every `bootstrap.py` case fetches and imports from our server.
 
@@ -1371,6 +1444,7 @@ class AltVEnvTest(unittest.TestCase):
                 self.assertIn(alt_venv.__version__, done.stdout)
                 self.assertIn(".alt_venv", done.stdout)
 
+    @runs_cases
     def test_every_case_bootstraps_repeatedly(self) -> None:
         """Three runs in one cache all succeed.
 
@@ -1408,6 +1482,7 @@ class AltVEnvTest(unittest.TestCase):
         alt_venv.AltVEnv(self.root / "elsewhere")
         self.assertTrue(source.is_file())
 
+    @runs_cases
     def test_the_stdlib_cases_choose_the_tagged_wheel(self) -> None:
         """`nopip1` and `nopip2` prefer the compiled tag, and move its `.data`.
 
@@ -1424,7 +1499,10 @@ class AltVEnvTest(unittest.TestCase):
         label: str
         home: Path
         done: subprocess.CompletedProcess[str]
-        for label in ("nopip1", "nopip2"):
+        wanted: tuple[str, ...] = selected("nopip1", "nopip2")
+        if not wanted:
+            self.skipTest("neither nopip1 nor nopip2 is selected")
+        for label in wanted:
             with self.subTest(case=label):
                 home = Path(tempfile.mkdtemp(prefix=f"tagged-{label}-",
                                              dir=self.root))
@@ -1435,6 +1513,7 @@ class AltVEnvTest(unittest.TestCase):
                 self.assertEqual(len(moved), 1, done.stdout)
                 self.assertNotIn(".data", str(moved[0]))
 
+    @runs_cases
     def test_no_compatible_wheel_is_reported(self) -> None:
         """A wheel for another platform is refused, not installed.
 
@@ -1462,7 +1541,10 @@ class AltVEnvTest(unittest.TestCase):
         label: str
         home: Path
         done: subprocess.CompletedProcess[str]
-        for label in ("nopip1", "nopip2"):
+        wanted: tuple[str, ...] = selected("nopip1", "nopip2")
+        if not wanted:
+            self.skipTest("neither nopip1 nor nopip2 is selected")
+        for label in wanted:
             with self.subTest(case=label):
                 home = Path(tempfile.mkdtemp(prefix=f"wrong-{label}-",
                                              dir=self.root))
@@ -1471,12 +1553,16 @@ class AltVEnvTest(unittest.TestCase):
                 self.assertIn("no compatible wheel found", done.stderr)
                 self.assertNotIn("Traceback", done.stderr)
 
+    @runs_cases
     def test_json_api_cases_bootstrap_end_to_end(self) -> None:
         """`nopip1` and `nopip2` fetch and import through the JSON API."""
         # These two are the only cases that bypass pip entirely.
         label: str
         done: subprocess.CompletedProcess[str]
-        for label in ("nopip1", "nopip2"):
+        wanted: tuple[str, ...] = selected("nopip1", "nopip2")
+        if not wanted:
+            self.skipTest("neither nopip1 nor nopip2 is selected")
+        for label in wanted:
             with self.subTest(case=label):
                 done = self.run_case(label)
                 self.assertEqual(done.returncode, 0, done.stderr)
@@ -1596,6 +1682,65 @@ class AltVEnvTest(unittest.TestCase):
         with unittest.mock.patch.dict(
                 os.environ, {"ALT_VENV_TEST": "COMPLETE"}):
             self.assertEqual(cases(), tuple(bootstrap.MECHANISMS))
+
+    def test_cases_accepts_case_names(self) -> None:
+        """Names select those cases, in `bootstrap.py` order."""
+        # Out of order and padded, and still read the way it was meant.
+        with unittest.mock.patch.dict(
+                os.environ, {"ALT_VENV_TEST": "pip2, venv1"}):
+            self.assertEqual(cases(), ("venv1", "pip2"))
+            self.assertEqual(selected("nopip1", "pip2"), ("pip2",))
+            self.assertEqual(selected("nopip1"), ())
+
+        # The two choices leave a test's own cases alone.
+        with unittest.mock.patch.dict(os.environ, {"ALT_VENV_TEST": "FAST"}):
+            self.assertEqual(selected("nopip1", "nopip2"),
+                             ("nopip1", "nopip2"))
+
+        # `NONE` is the baseline, and selects nothing anywhere.
+        with unittest.mock.patch.dict(os.environ, {"ALT_VENV_TEST": "none"}):
+            self.assertEqual(cases(), ())
+            self.assertEqual(selected("nopip1", "nopip2"), ())
+
+        # A name that is not a case is refused like any other typo.
+        with (unittest.mock.patch.dict(
+                  os.environ, {"ALT_VENV_TEST": "pip2,venv9"}),
+              self.assertRaises(ValueError) as caught):
+            cases()
+        self.assertIn("venv9", str(caught.exception))
+
+    def test_case_runners_are_marked(self) -> None:
+        """A test runs a bootstrap case exactly when it is `runs_cases`.
+
+        Per-case coverage runs only the marked tests for each case, so a
+        test that runs a case without the mark would have its coverage
+        credited to no case, and a decision to delete a case would rest
+        on numbers that are quietly wrong.  Reading the source is crude,
+        and that is the point: the three helpers are the only ways a test
+        reaches a case, so naming one of them is what has to be marked.
+        """
+        # Spelled in pieces, so that this test does not match itself.
+        calls: list[str] = [f"{name}(" for name in
+                            ("run_case", "run_bootstrap_case", "real_case")]
+        found: int = 0
+        holder: object
+        for holder in list(vars(sys.modules[__name__]).values()):
+            if not (isinstance(holder, type)
+                    and issubclass(holder, unittest.TestCase)):
+                continue
+            name: str
+            for name in dir(holder):
+                if not name.startswith("test_"):
+                    continue
+                method: Callable[..., Any] = getattr(holder, name)
+                runs: bool = any(call in inspect.getsource(method)
+                                 for call in calls)
+                with self.subTest(test=f"{holder.__name__}.{name}"):
+                    self.assertEqual(
+                        runs, getattr(method, "runs_cases", False),
+                        "runs a case" if runs else "marked but runs none")
+                found += runs
+        self.assertGreater(found, 0)
 
     def test_make_certificate_without_openssl(self) -> None:
         """A machine with no `openssl` gets `None`, not an exception.
@@ -1801,6 +1946,7 @@ class TlsTest(unittest.TestCase):
                         self.index_url)
         self.assertEqual(self.server.scheme, "https")
 
+    @runs_cases
     def test_an_untrusted_certificate_is_refused(self) -> None:
         """No case accepts a certificate it cannot verify."""
         # Nothing tells the child about the certificate, so every case
@@ -1821,6 +1967,7 @@ class TlsTest(unittest.TestCase):
                 output = (done.stderr + done.stdout).lower()
                 self.assertIn("certificate", output, output[-400:])
 
+    @runs_cases
     def test_a_trusted_certificate_is_accepted(self) -> None:
         """Every case succeeds once the certificate is trusted.
 
@@ -2065,6 +2212,7 @@ class InstallTest(unittest.TestCase):
         self.assertEqual(done.returncode, 0, done.stderr[-400:])
         self.assertIn(str(cache / "pip.whl"), done.stdout)
 
+    @runs_cases
     def test_nothing_but_python_and_the_bootstrap(self) -> None:
         """A machine with no `pip` runs a declaring program anyway.
 
@@ -2075,6 +2223,10 @@ class InstallTest(unittest.TestCase):
         `AltVEnv` then uses that same copy to fetch what the program
         declares.
         """
+        # Only when `nopip3` is wanted; see `selected`.
+        if not selected("nopip3"):
+            self.skipTest("nopip3 is not selected")
+
         # The zipped `pip` only runs alone if its libraries are inside.
         import pip._vendor
         if getattr(pip._vendor, "DEBUNDLED", False):
@@ -4948,6 +5100,7 @@ class PyPITest(unittest.TestCase):
             capture_output=True, text=True, check=False)
         return (done.stdout + done.stderr).strip().splitlines()[-1]
 
+    @runs_cases
     def test_the_matcher_handles_real_wheels(self) -> None:
         """A pure wheel and a platform wheel both arrive, from PyPI.
 
@@ -4958,13 +5111,17 @@ class PyPITest(unittest.TestCase):
         # Both cases that choose for themselves, both packages.
         label: str
         package: str
-        for label in ("nopip1", "nopip2"):
+        wanted: tuple[str, ...] = selected("nopip1", "nopip2")
+        if not wanted:
+            self.skipTest("neither nopip1 nor nopip2 is selected")
+        for label in wanted:
             for package in ("certifi", "coverage"):
                 with self.subTest(case=label, package=package):
                     self.assertIn(f"module {package} version",
                                   self.real_case(label, package))
 
     @unittest.expectedFailure
+    @runs_cases
     def test_the_matcher_handles_abi3_wheels(self) -> None:
         """A stable ABI wheel is missed, which is issue `2wtmifs`.
 
@@ -4980,6 +5137,8 @@ class PyPITest(unittest.TestCase):
         reports an unexpected success rather than staying quiet.
         """
         # `pip` has no difficulty with this package; we do.
+        if not selected("nopip1"):
+            self.skipTest("nopip1 is not selected")
         self.assertIn("module cryptography version",
                       self.real_case("nopip1", "cryptography"))
 

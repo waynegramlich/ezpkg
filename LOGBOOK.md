@@ -2595,6 +2595,60 @@ expected every time the order changes, and is Claude's job.
     `bootstrap="7"` to `install`, which nothing reads yet; it becomes
     `"nopip3"` whenever Wayne's rewrite reaches the paste.
 
+  * 6.16.2 - **The cull run**, built 2026-10-01, so that cases are
+    deleted on evidence rather than by taste.  Wayne's framing: the test
+    suite is the product, culling will recur, and one run a night while
+    he sleeps is affordable.  The parts:
+
+    * `ALT_VENV_TEST` also takes case names, `pip2` or `pip1,pip2`, and
+      `NONE`, which selects no case at all.
+    * `selected` gates the few tests written for particular cases, the
+      matcher tests for `nopip1` and `nopip2` and the no-`pip` test for
+      `nopip3`, so that a run for one case does not quietly include them.
+    * `@runs_cases` marks every test that runs a case, and
+      `test_case_runners_are_marked` checks the marks against the
+      source; deleting a mark was tried and the guard failed, as meant.
+    * `alt_venv_coverage.py --per-case <dir>` makes one baseline run of
+      the whole suite with `NONE`, then runs only the marked tests once
+      per case, two runs at a time, children traced throughout, each run
+      writing only under `<dir>/<run>/`.  `--compare <dir>` redoes the
+      report from the saved counts in seconds.
+    * The trace hook credits a copy of `alt_venv.py` that a bootstrap
+      installed to the project's own file, when the two are identical,
+      since the copy is deleted with its test.  Checked: the counts land
+      on the project path.
+
+    Measured: the whole suite traced for one case took 11 min 23 s, and
+    only the marked tests 55 s, so the first design would have cost
+    about 75 minutes a night.  The real cull took 12 min 19 s, of which
+    the baseline is 717 s and the thirteen cases overlap it.  Wayne
+    starts it at bedtime; the command is in `CLAUDE.md`.
+  * 6.16.3 - **First cull, 2026-10-01**, in
+    `~/alt_venv_cull/2026-10-01/report.md`.  Every case runs every one
+    of its own statements.  Beyond the baseline:
+
+    * No case adds a single line of `alt_venv.py`.  The baseline alone
+      covers everything the product does.
+    * All ten `venv` and `pip` cases add the same 63 lines of the test
+      file, the shared every-case tests, and nothing of their own.
+    * `nopip1` adds 4 lines nobody else does, the truncated-wheel test.
+      `nopip2` adds nothing that `nopip1` does not.
+    * `nopip3` adds 32 lines nobody else does, all of them the no-`pip`
+      test.
+    * Greedy, from the baseline: `nopip3` then `nopip1`, and the other
+      eleven add nothing.
+
+    So on coverage alone, eleven of the thirteen cases could go.  What
+    coverage cannot see is their other job: the table in `bootstrap.py`
+    prices each mechanism, and that record is what Steps 6.14 and 6.15
+    were decided on.  Whether that record needs to stay runnable, or can
+    live on as a table in the log, is Wayne's call.
+  * 6.16.4 - A child's counts include standard library lines, such as
+    `/usr/lib/python3.12/zipfile`, although the trace hook names
+    `sys.base_prefix` among the directories to ignore.  The report reads
+    only this project's files, so the answer is unaffected; the cost is
+    time and the size of the counts.  Not yet looked into.
+
 * Step 6.17: And more.  A place holder for additional steps.
 
 ### Step 6.1: Error on a failed fetch
