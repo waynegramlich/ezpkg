@@ -85,28 +85,46 @@ by-chunk explanation follows.
 08: # ///
 09: """Report yesterday's weather."""
 10:
-<!-- Claude: Replace this bootstrap with the actual one and renumber. -->
-11: # Imports needed for the AltVEnv bootstrap try block.
+11: # The AltVEnv bootstrap, from here through the `raise`.  Never edit it!
 12: import importlib
 13: import pathlib
-14: import subprocess
-15: import sys
-16:
-17: # Never edit the AltVEnv bootstrap try block immediately below!
-18: try:
-19:     target = pathlib.Path.home() / ".alt_venv"
-20:     if not (target / "alt_venv").is_dir():
-21:         subprocess.run([sys.executable, "-m", "pip", "install",
-22:                         "--no-input", "--disable-pip-version-check",
-23:                         "--target", str(target), "alt_venv"], check=True)
-24:     sys.path.insert(0, str(target))
-25:     importlib.invalidate_caches()
-26:     importlib.import_module("alt_venv").AltVEnv().install(bootstrap="TBD")
-27: except Exception as error:  # noqa: BLE001
-28:     raise SystemExit(f"cannot fetch alt_venv: {error}") from None
-29:
-33:
-34: print(requests.__name__, dateutil.parser.__name__)
+14: import sys
+15: # Ensure `alt_venv` is downloaded.
+16: import hashlib
+17: import json
+18: import subprocess
+19: import urllib.request as req
+20:
+21: try:  # Never edit the `alt_venv` bootstrap try block below!
+22:     s = "find home"; t = pathlib.Path.home()/".alt_venv"; w = t/"pip.whl"
+23:     if not (t/"alt_venv").is_dir():  # Not installed yet.
+24:         s = "choose pip"; v = sys.version_info[1]
+25:         d = json.load(req.urlopen("https://pypi.org/pypi/pip/json", None, 30))
+26:         e = max((e for f in d["releases"].values() for e in f  # Newest pip
+27:                  if e["url"][-4:] == ".whl" and not e["yanked"]
+28:                  and (q := e["requires_python"] or "")[:4] == ">=3."
+29:                  and "," not in q and int(q.split(".")[1]) <= v),
+30:                 key=lambda e: e["upload_time"])  # whose floor we meet.
+31:         s = "download pip"; r = req.urlopen(e["url"], None, 60).read()
+32:         if hashlib.sha256(r).hexdigest() != e["digests"]["sha256"]:
+33:             raise ValueError(f"{e['filename']} fails its SHA-256 check")
+34:         t.mkdir(parents=True, exist_ok=True); p = t/"pip.part"
+35:         p.write_bytes(r); p.replace(w)  # The rename is atomic.
+36:         s = "install alt_venv"; subprocess.run([
+37:             sys.executable, w/"pip", "install", "--no-input", "-t", t,
+38:             "--disable-pip-version-check", "alt_venv"], check=True)
+39:     s = "import alt_venv"; sys.path.insert(0, str(t))
+40:     importlib.invalidate_caches(); importlib.import_module("alt_venv")
+41: except Exception as x:
+42:     raise SystemExit(f"cannot fetch alt_venv, {s} failed: {x!r}")
+43:
+44: # Fetch the packages listed in the metadata, then import them.
+45: import alt_venv  # type: ignore[import-not-found]
+46: alt_venv.AltVEnv().install()
+47: import requests  # type: ignore[import-not-found]
+48: import dateutil.parser  # type: ignore[import-not-found]
+49:
+50: print(requests.__name__, dateutil.parser.__name__)
 ```
 <!-- Claude: Make the codes snippets below exactly match the one above. -->
 The discussion of the code example above is broken into small pieces below.
@@ -167,13 +185,13 @@ and is the entire reason why `AltVEnv` lets `pip` handle the job.
 
 ### Bootstrap
 
-The `AltVEnv` bootstrap spans lines `17-28` and should **NEVER** be
+The `AltVEnv` bootstrap spans lines `11-42` and should **NEVER** be
 hand-edited.  Rather than trying to read the deliberately dense code, a
 broad summary of what it does is listed below:
    1. It creates the `~/.alt_venv` directory, if not already created.
    2. It downloads the `pip` package, if not previously downloaded.
    3. It downloads the `alt_venv` package, if not previously downloaded.
-After the `alt_venv` package is present, it does the following:
+Line `46` then calls `install()`, which does the following:
    4. It finishes organizing the `~/.alt_venv/` sub-directories, if needed.
    5. It runs `pip` with the `dependencies=[...]` and `pip` downloads any
       further packages that have not already been downloaded.
@@ -220,24 +238,28 @@ carries on.  This avoids annoying hangs with no way to unhang them.
 
 ### Imports and Program
 
-Lines `30-34` show the `import` statements for the downloaded packages and a
+Lines `44-50` fetch and import the downloaded packages and run a
 single-line program:
 ```
-30: # Example imports fetched via AltVEnv.
-31: import requests  # type: ignore[import-not-found]
-32: import dateutil.parser  # type: ignore[import-not-found]
-33:
-34: print(requests.__name__, dateutil.parser.__name__)
+44: # Fetch the packages listed in the metadata, then import them.
+45: import alt_venv  # type: ignore[import-not-found]
+46: alt_venv.AltVEnv().install()
+47: import requests  # type: ignore[import-not-found]
+48: import dateutil.parser  # type: ignore[import-not-found]
+49:
+50: print(requests.__name__, dateutil.parser.__name__)
 ```
 sss:
-* `31-32`:
+* `45-46`:
+  These fetch the packages, as described under Bootstrap above.
+* `47-48`:
   Each of the packages listed in the `dependencies=[...]` section of the
   metadata is imported with an `import` statement *after* the bootstrap.
   The Python type checker is called `mypy`, and it likes all of the `import`
   statements to be at the front of the program before any other kind of Python
   statement.  The comment `# type: ignore[import-not-found]` tells `mypy`
   not to complain about importing packages it does not know about.
-* `34`:
+* `50`:
   This is where the program starts.
 
 <!-- Claude:
