@@ -1,44 +1,58 @@
+<!-- Claude:
+Before uploading AltVEnv to PyPI, all TBD's needs to be fixed. -->
+<!-- Claude:
+`README.md` is a short advertisement, followed by an instruction manual. -->
+
 # `AltVEnv`: Alternative to Virtual Environments
 
+<!-- Claude:
+This is the "hook" -- a succinct problem declaration, a solution declaration,
+and an appeal to keep reading for more details. -->
 `AltVEnv` (i.e. Alternative to Virtual Environments) grew out of the frustration
 of dealing with concurrent Python program development where each program has
-its own Python virtual environment.  When switching from one program 
-to the next, it is easy to forget to deactivate the current one before
-activating the next one.  If you forget, you end up running one program against
-another program's packages.  The question that arose was "Is there a way to
-avoid Python virtual environments entirely?"  Ultimately `AltVEnv` grew out of
-this investigation and answer turned out to be "absolutely yes!!!".
+needs its own Python virtual environment.  When switching development from one
+program to the next, it is easy to forget to deactivate the current virtual
+environment before activating the next one.  If you forget, you end up running
+one program against another program's packages and confusion can ensue.
+The question that arose was "Is there a better way that avoids Python virtual
+environments entirely?"  Ultimately `AltVEnv` grew out of this investigation
+and the answer turned out to be "Absolutely yes!!!"
 
-<!-- Claude:
-When we get ready to upload AltVEnv to PyPI, TBD needs to be updated.
--->
-`AltVEnv` provides a way to avoid virtual environments entirely.  It does
-this by requiring N lines of "bootstrap" code be installed near the front
-of the Python program called the `AltVEnv` bootstrap.  The bootstrap code
-deals with everything else -- setting up program's environment variables,
-downloading packages, etc.  A further advantage is that a single file
-program can literally be E-mailed to somebody and it will just work.
+<!-- Claude: When the bootstrap is finalized, `N` needs to be updated. -->
+Using `AltVEnv` avoids Python virtual environments entirely.  It does this
+by inserting a modest piece of "bootstrap" code near the front of your Python
+program.  The bootstrap deals with everything else -- setting up program's
+environment variables, downloading correct packages, etc.  A further advantage
+is that a single file Python program can literally be E-mailed to somebody and
+it will just work!
+
+<!-- Claude: This the "problem solved" statement (i.e. "buy it now!".) -->
 With `AltVEnv`, neither the developer nor the end-user have to deal with the
 dreaded missing Python package problem.
 
 ## Requirements
 
-The requirements for `AltVEnv` are:
-1. Python3 version 3.11 or more is required.
-2. Required packages are simply listed in metadata at the front of the program.
-3. A small modest  of bootstrap code (~N lines) must be added to your code
-   before attempting to `import` the packages listed in step 2.
+<!-- Claude: The `(~N lines)` needs updating prior to PyPI deployment. -->
+<!-- Claude: The goal is to keep the itemized list short. -->
+The `AltVEnv` requirements are:
+1. Python3 3.11 or greater is required.
+2. Python standard metadata is embedded as hash comments at front of the
+   program that lists the required packages.
+3. A modest chunk of bootstrap code (~N lines) is added to your code
+   prior to the `import` statements for the previously listed packages.
 4. An active network connection is required for the initial run.  Afterwards
-   the packages are cached and a network connection is no longer needed.
+   the packages are locally cached and a network connection is no longer needed.
 That's it!
-
-<!-- Claude:
-I give you have my full permission to rewrite this.  Remember, the text to a
-maximum of one hyper link and 3 lines total.
 
 ## Alternatives
 
-The following is a short list to explore:
+<!-- Claude:
+I give you have full permission to rewrite this section of the document.
+I want to focus solutions that encapsulate everything into one files
+(there are many).  Prioritize solutions that do not need installation
+of other software, then list alternatives (`uv`, `docker`, `snap`, etc.) -->
+
+A short list of alternatives to explore follows:
 * [Python Virtual Environments](https://docs.python.org/3/library/venv.html):
   For software developers, virtual environments are actually quite reasonable.
   However asking an end users install a virtual environment prior to execution
@@ -52,26 +66,25 @@ The following is a short list to explore:
   provide alternatives to `zipapp`.
 -->
 
-
 ## A Small Annotated Example
 
 <!--
 Claude: Remind me to replace `bootstrap="TBD"` before we upload to PyPI. -->
-Here is a complete simple program where each line preceded by a line number for
-expository purposes.  
-
+Below is a complete example program where each line preceded by a two digit
+line number for expository purposes.  After skimming it, a detailed chunk
+by chunk explanation follows.
 ```
 01: #!/usr/bin/env python3
 02: # /// script
-03: # requires-python = ">=3.11"  # Needs Python 3.11 or greater
-04: # dependencies = [            # These are fed verbatim into `pip`
-05: #   "requests<3",             # Needs `requests` package before version 3
-06: #   "python-dateutil>=2.8",   # Needs `python-dateutil` 2.8 or greater
+03: # requires-python = ">=3.11"  # Needs Python 3.11 or greater.
+04: # dependencies = [            # These are fed verbatim into `pip`.
+05: #   "requests<3",             # Needs `requests` package prior to version 3.
+06: #   "python-dateutil>=2.8",   # Needs `python-dateutil` 2.8 or greater.
 07: # ]
 08: # ///
 09: """Report yesterday's weather."""
 10:
-<!-- Claude: Replace this bootstrap with the actual one. -->
+<!-- Claude: Replace this bootstrap with the actual one and renumber. -->
 11: # Imports needed for the AltVEnv bootstrap try block.
 12: import importlib
 13: import pathlib
@@ -87,24 +100,19 @@ expository purposes.
 23:                         "--target", str(target), "alt_venv"], check=True)
 24:     sys.path.insert(0, str(target))
 25:     importlib.invalidate_caches()
-26:     importlib.import_module("alt_venv").AltVEnv().install(bootstrap="7")
+26:     importlib.import_module("alt_venv").AltVEnv().install(bootstrap="TBD")
 27: except Exception as error:  # noqa: BLE001
 28:     raise SystemExit(f"cannot fetch alt_venv: {error}") from None
 29:
-30: # Example imports fetched via AltVEnv.
-31: import requests  # type: ignore[import-not-found]
-32: import dateutil.parser  # type: ignore[import-not-found]
 33:
 34: print(requests.__name__, dateutil.parser.__name__)
 ```
-<!-- Claude:
-There is some magic markdown syntax that creates a paste icon.  Put it here. -->
-p-->
-<!-- Claude: Make the codes snippets below exactly match the one above. ->>
+<!-- Claude: Make the codes snippets below exactly match the one above. -->
+The discussion of the code example above is broken into small pieces below.
 
-### Meta Data
+### Metadata
 
-The meta data starts with `# /// script` on `01:` and ends on `08:` with `///`:
+The program lists required packages in standard Python metadata format.
 ```
 01: #!/usr/bin/env python3
 02: # /// script
@@ -116,14 +124,19 @@ The meta data starts with `# /// script` on `01:` and ends on `08:` with `///`:
 08: # ///
 ```
 This is pretty much all boiler plate except for line `03` and lines `05-06`:
-* `'03`:
+* `01`:
+  This is the standard Python "shebang` (Sharp(`#`) Bang(`!`)) line.
+* `02`,`08`:
+  The Standard Python metadata script start and stop lines.
+* `03`:
   The oldest Python version your program will run on.  Currently, `AltVEnv`
   requires Python 3.11 or greater.
-* ``05-04``:
-  The comma terminated strings are fed verbatim into `pip`.  The last string
-  must also end with a comma.
+* `05-06`:
+  The comma terminated strings are fed verbatim into `pip`.
+* `06`:
+   The last string must also end with a comma.
 
-Below is a really terse example set of `pip` version directives:
+Below is a really terse introduction to `pip` version directive syntax:
 ```
 # dependencies = [
 #   "request",                     any version at all
@@ -136,11 +149,6 @@ Below is a really terse example set of `pip` version directives:
 # ]
 ```
 
-`pip` resolves the whole list at once rather than one package at a time, so
-it can notice that when two of your dependencies disagree about a third.
-This is exactly the sort of thing that is very hard to get right by hand
-and the entirely the reason `AltVEnv` foists the problem onto `pip`.
-
 `pip` also supports conditional dependencies are supported with a
 semicolon (`;`) followed by a condition.  Some examples follow:
 ```
@@ -151,12 +159,16 @@ semicolon (`;`) followed by a condition.  Some examples follow:
 # ]
 ```
 
+`pip` resolves the whole list at once rather than one package at a time, so
+it can notice that when two of your dependencies disagree about a third.
+This is exactly the sort of thing that is very hard to get right by hand
+and the entirely the reason why `AltVEnv` lets `pip` handle the job.
+
 ### Bootstrap
 
-The bootstrap is "magic" that makes everything work and is on lines `17`-`28`.
-If you want, you can skip this section, since bootstrap should not be edited.
-
-In general, the `AltEnv` bootstrap does the following:
+The `AltVenv` bootstrap spans lines `17-28` and should **NEVER** be hand
+edited.  Rather than try to read the deliberately dense, a broad summary
+of what is listed below:
    1. It creates the `~/.alt_venv` directory, if not already created.
    2. It downloads the `pip` package, if not previously downloaded.
    3. It downloads `alt_env` package, if not previously downloaded,
@@ -166,15 +178,15 @@ After the `alt_env` package is present, it does the following:
       further package that has not already been downloaded.
    6. It deletes stale packages that have not used in a while.
    7. It asks if you if it is OK to use any newly downloaded packages.
-      See the next section immediately below for more details.
+      The section immediately below discusses the Download prompt.
 
 ### Download Prompt
 
-When people run the `pip` program manually, they know they supposedly known
-that downloading a package onto their computer.  However, the `AltVEnv`
-bootstrap indirectly calls `pip`, so the user may not actually know that
-some files might be downloaded.  It is rude not to inform the user at least
-once that some downloading is going on under the covers.
+When people run the `pip` program manually, they know they supposedly already
+known that they are downloading a package onto their computer.  However, the
+`AltVEnv` bootstrap indirectly calls `pip`, so the user may not actually know
+that some packages might be downloaded.  It is considered rude not to inform
+the user at least once that some downloading is going on under the covers.
 
 The first time `AltEnv` decides to download some Python packages (and you
 are using the command line interface) it will prompt you with the following
@@ -191,26 +203,24 @@ Go ahead? [y=>Yes, n=>No, a=>Always, ?=>Explanation]:
   point and nothing from the packages has run.
 * `?`: lists what would be installed, one line each, and asks again.
   Asking for detail is never counted against you.
-* `a`: stops the question ever being asked again on this machine.  It is
+* `a`: disables repeatably asking question again on this machine.  It is
   the only answer that outlasts the run, so it is the only one that asks
   you to confirm:
-  ```
-  Really never ask again? [y=>Yes/n=>No]:
-  ```
-  Answering `n` returns you to the first question with the install still on
-  offer.  Answering `y` suppresses the question until the entire `.alt_venv`
-  directory is manually deleted.  (Remember deleting the `.alt_venv` directory
-  is **ALWAYS** a safe thing to do.
+  * `Really never ask again? [y=>Yes/n=>No]:`
+     Answering `n` returns you to the first question with the install still on
+     offer.  Answering `y` suppresses the question until the entire `.alt_venv`
+     directory is manually deleted.  (Remember deleting the `.alt_venv`
+     directory is **ALWAYS** a safe thing to do.)
 
 If a program has no terminal access, it is not asked.  Thus, anything started
 by `cron`, a build system, a service manager, or by double clicking an icon
-has nobody to put a question to, so it just says what it downloaded and
+has nobody to put a question to, so it just prints out what it downloaded and
 carries on.  This avoids annoying hangs with no way to unhang them.
 
-### Imports
+### Imports and Program
 
-For each of the packages listed in the `dependencies=[...]` section of the
-meta data, you can now execute an `import` statement as shown below:
+Lines `30-34` show the download package `import` statements and a single
+line program:
 ```
 30: # Example imports fetched via AltVEnv.
 31: import requests  # type: ignore[import-not-found]
@@ -218,11 +228,16 @@ meta data, you can now execute an `import` statement as shown below:
 33:
 34: print(requests.__name__, dateutil.parser.__name__)
 ```
-In general, the Python type checker is called `mypy` and it likes to look
-for static errors in a python file.  It will complain about `31` and `32`
-because it does not like any code before an `import` statement.  The comment:
-* `# type: ignore[import-not-found]`
-means `mypy` will not to generate an import statement error for the line.
+sss:
+* `31-32`:
+  For each of the packages listed in the `dependencies=[...]` section of the
+  meta data, are imported with an `import` statement *after* the bootstrap.
+  The Python type checker is called `mypy` and it likes all of the `import`
+  statements to be at the program front before any other kind of Python
+  statement.  The comment `# type: ignore[import-not-found]` tells `mypy`
+  not to complain about the importing packages it does not know about.
+* `34`:
+  This is where the program starts.
 
 <!-- Claude:
 I am deliberately not explaining the organization of the `~/.alt_venv/`
@@ -257,12 +272,6 @@ executed.  To delete the directory:
 
 ## Miscellaneous
 
-
-* Removing old files**:
- `AltVEnv` also keeps track of how recently a package has been used.  When
-  they have not been used in a while they get deleted.  Again, there is no
-  harm in doing this since, the packages can easily be fetched over the network.
-
 * **Old packages are cleared out on their own.**:
   A package that no program has needed for about six months is removed, for the
   same reason: it is worth less than the space it occupies, and getting it back
@@ -270,10 +279,9 @@ executed.  To delete the directory:
   installed two years ago and used this morning stays.  Anything left behind
   by a program that was interrupted mid-download is also cleared out.
 
-  The sweep happens at most once a day, when a program is about to fetch
-  something anyway, so you will never notice it.
+  The sweep is very fast only happens at most once a day.
 
-* **Programs share the directory safely with no double storage.**:
+* **No packages are duplicated.**:
   When multiple programs with `AltVEnv` want the same package, the second
   one recognizes that the identical package is already there and uses it.
   That holds even if both programs start at the same moment.
@@ -302,5 +310,4 @@ if you do the following:
 * Paste the `AltVEnv` bootstrap into your code right before you do the
   `import` statements for you package dependencies after the bootstrap.
 After that, your program will just download your packages automatically with
-no need to create, activate, deactivate or eventually remove a Python Virtual
-Environment.
+any need to deal with a Python Virtual Environment.
