@@ -32,12 +32,14 @@ Save this program as `quick_start.py`, and run it with
 
 ```python
 #!/usr/bin/env python3
+# Part 1: The packages this program needs.
 # /// script
 # requires-python = ">=3.11"
 # dependencies = ["cowsay"]
 # ///
 """Try `AltVEnv`: fetch the `cowsay` package on first use, then run."""
 
+# Part 2: The standard library imports that the bootstrap uses.
 import hashlib
 import importlib
 import json
@@ -46,7 +48,8 @@ import subprocess
 import sys
 import urllib.request as req
 
-try:  # Never edit the `alt_venv` bootstrap try block below!
+# Part 3: The bootstrap.  Copy it exactly, and never edit it.
+try:
     s = "find home"; t = pathlib.Path.home()/".alt_venv"; w = t/"pip.whl"
     if not (t/"alt_venv").is_dir():  # Not installed yet.
         s = "choose pip"; v = sys.version_info[1]
@@ -69,11 +72,13 @@ try:  # Never edit the `alt_venv` bootstrap try block below!
 except Exception as x:
     raise SystemExit(f"cannot fetch alt_venv, {s} failed: {x!r}")
 
+# Part 4: Fetch the packages listed in Part 1, then import them.
 import alt_venv  # type: ignore[import-not-found]
 
 alt_venv.AltVEnv().install()
 import cowsay  # type: ignore[import-not-found]
 
+# Part 5: The program itself.
 cowsay.cow("AltVEnv works!")
 print(f"cowsay {cowsay.__version__} was loaded from {cowsay.__file__}")
 ```
@@ -110,38 +115,98 @@ first time a program needs a package.
 
 ### Using It in Your Own Program
 
-1. List the packages your program needs in a Python standard metadata
-   block at the top of the program:
-   ```
-   # /// script
-   # requires-python = ">=3.11"  # Python 3.11 or greater.
-   # dependencies = [            # Required packages, versions optional.
-   #   "requests<3",             # The `requests` package before 3.0.
-   # ]
-   # ///
-   ```
-   The end-of-line `# ...` comments are optional.
-2. Add the standard library imports that the bootstrap needs, in
-   alphabetical order among your own.  If your program already imports
-   some of them, keep just one copy of each:
-   ```
-   import hashlib
-   import importlib
-   import json
-   import pathlib
-   import subprocess
-   import sys
-   import urllib.request as req
-   ```
-3. Copy the `try` block from `quick_start.py` above, exactly as it is,
-   after your imports and before importing any of the packages listed in
-   step 1.
-4. Call `install()`, then import your packages as usual:
-   ```
-   import alt_venv  # type: ignore[import-not-found]
-   alt_venv.AltVEnv().install()
-   import requests  # type: ignore[import-not-found]
-   ```
+`quick_start.py` is also a template.  Open it in your editor and read along:
+after the first run there is a copy in `~/.alt_venv/quick_start.py`, or use
+the one above.  It has five parts, each starting with a `# Part` comment,
+and every program that uses `AltVEnv` has the same five.  Parts 2, 3 and 4
+are copied as they are; Parts 1 and 5 are yours.
+
+#### Part 1: The packages this program needs
+
+This is a standard [inline script metadata](
+https://packaging.python.org/en/latest/specifications/inline-script-metadata/)
+block, the same one that tools such as `uv` and `pipx` read.  It holds two
+settings:
+
+* `requires-python` is the oldest Python the program will run on.  If the
+  program is started on an older one, `AltVEnv` stops with a message saying
+  so, rather than letting it fail somewhere obscure.  `AltVEnv` itself needs
+  3.11 or later.
+* `dependencies` lists the packages the program needs, one string each.
+  Changing this list is usually the only change a program needs.
+
+Each string is handed to `pip` exactly as written, so it can say which
+versions are acceptable:
+
+```
+# dependencies = [
+#   "requests",                    any version at all
+#   "requests<3",                  anything before 3
+#   "requests>=2.28,<3",           a range
+#   "requests~=2.32.0",            2.32.anything, but not 2.33
+#   "requests!=2.31.0",            any version except this one
+#   "requests===2.32.3",           that version and no other
+#   "requests[socks]",             with an optional extra
+#   "pywin32; sys_platform == 'win32'",  only on Windows
+# ]
+```
+
+A comma after the last string is allowed but not required.  The full syntax
+is in the [dependency specifiers](
+https://packaging.python.org/en/latest/specifications/dependency-specifiers/)
+specification.  `pip` resolves the whole list at once, so it notices when
+two packages disagree about a third, which is very hard to get right by
+hand.
+
+#### Part 2: The standard library imports that the bootstrap uses
+
+Seven imports, all from the standard library, so there is nothing to
+install.  Put them among your own imports, in alphabetical order, and if
+your program already imports some of them, keep one copy of each.
+
+#### Part 3: The bootstrap
+
+Copy it exactly, and never edit it.  Re-indenting it or changing its
+comments does no harm, but changing its code makes it a different
+bootstrap.  To see whether a program carries the current one, run it with
+`ALT_VENV_BOOTSTRAP=check` set, and it says so on standard error.
+
+The first time any program runs it on a machine, it does three things:
+
+1. It asks PyPI for the newest `pip` that this Python can run.
+2. It downloads that `pip`, checks its SHA-256 against the one PyPI
+   publishes, and keeps it as `~/.alt_venv/pip.whl`.  The machine's own
+   `pip`, if it has one, is never used or changed.
+3. It runs that `pip` to install `alt_venv` into `~/.alt_venv`.
+
+On every run, the first included, it puts `~/.alt_venv` on Python's import
+path and imports `alt_venv`.  Once `alt_venv` is there, the three steps
+above are skipped and no network is needed.  If anything goes wrong, the
+program stops with one line saying which step failed and why.
+
+#### Part 4: Fetch the packages listed in Part 1, then import them
+
+`install()`, called with no arguments, reads Part 1 of the program that is
+running.  It checks `requires-python`, then fetches whatever in
+`dependencies` is not already in `~/.alt_venv`, asks once before installing
+it, and puts each package on Python's import path.  A list it has fetched
+before is answered from `~/.alt_venv` without running `pip` at all.
+
+While it is there, it also does some housekeeping.  At most once a day it
+clears out packages that no program has used for about six months, and
+about once a week it looks for a newer `pip`.  Looking for `pip` never makes
+the program fail; without a network, it simply tries again a week later.
+
+Your own `import` statements come after `install()`, because that is what
+makes the packages importable.  Import each package by its module name,
+which is not always the name in Part 1: `python-dateutil` is imported as
+`dateutil`.  The `# type: ignore[import-not-found]` comments are only for
+`mypy`, which cannot see packages that live in `~/.alt_venv`; leave them
+out if you do not use it.
+
+#### Part 5: The program itself
+
+Everything from here down is yours.
 
 ## Requirements
 
@@ -180,139 +245,7 @@ A short list of alternatives to explore follows:
   provide alternatives to `zipapp`.
 -->
 
-## A Small Annotated Example
-
-<!--
-Claude: Remind me to replace `bootstrap="TBD"` before we upload to PyPI. -->
-Below is a complete example program where each line is preceded by a two-digit
-line number for expository purposes.  After skimming it, a detailed chunk-
-by-chunk explanation follows.
-```
-01: #!/usr/bin/env python3
-02: # /// script
-03: # requires-python = ">=3.11"  # Needs Python 3.11 or greater.
-04: # dependencies = [            # These are fed verbatim into `pip`.
-05: #   "requests<3",             # Needs `requests` prior to version 3.
-06: #   "python-dateutil>=2.8",   # Needs `python-dateutil` 2.8 or greater.
-07: # ]
-08: # ///
-09: """Report yesterday's weather."""
-10:
-11: # The AltVEnv bootstrap, from here through the `raise`.  Never edit it!
-12: import importlib
-13: import pathlib
-14: import sys
-15: # Ensure `alt_venv` is downloaded.
-16: import hashlib
-17: import json
-18: import subprocess
-19: import urllib.request as req
-20:
-21: try:  # Never edit the `alt_venv` bootstrap try block below!
-22:     s = "find home"; t = pathlib.Path.home()/".alt_venv"; w = t/"pip.whl"
-23:     if not (t/"alt_venv").is_dir():  # Not installed yet.
-24:         s = "choose pip"; v = sys.version_info[1]
-25:         d = json.load(req.urlopen("https://pypi.org/pypi/pip/json", None, 30))
-26:         e = max((e for f in d["releases"].values() for e in f  # Newest pip
-27:                  if e["url"][-4:] == ".whl" and not e["yanked"]
-28:                  and (q := e["requires_python"] or "")[:4] == ">=3."
-29:                  and "," not in q and int(q.split(".")[1]) <= v),
-30:                 key=lambda e: e["upload_time"])  # whose floor we meet.
-31:         s = "download pip"; r = req.urlopen(e["url"], None, 60).read()
-32:         if hashlib.sha256(r).hexdigest() != e["digests"]["sha256"]:
-33:             raise ValueError(f"{e['filename']} fails its SHA-256 check")
-34:         t.mkdir(parents=True, exist_ok=True); p = t/"pip.part"
-35:         p.write_bytes(r); p.replace(w)  # The rename is atomic.
-36:         s = "install alt_venv"; subprocess.run([
-37:             sys.executable, w/"pip", "install", "--no-input", "-t", t,
-38:             "--disable-pip-version-check", "alt_venv"], check=True)
-39:     s = "import alt_venv"; sys.path.insert(0, str(t))
-40:     importlib.invalidate_caches(); importlib.import_module("alt_venv")
-41: except Exception as x:
-42:     raise SystemExit(f"cannot fetch alt_venv, {s} failed: {x!r}")
-43:
-44: # Fetch the packages listed in the metadata, then import them.
-45: import alt_venv  # type: ignore[import-not-found]
-46: alt_venv.AltVEnv().install()
-47: import requests  # type: ignore[import-not-found]
-48: import dateutil.parser  # type: ignore[import-not-found]
-49:
-50: print(requests.__name__, dateutil.parser.__name__)
-```
-<!-- Claude: Make the codes snippets below exactly match the one above. -->
-The discussion of the code example above is broken into small pieces below.
-
-### Metadata
-
-The program lists required packages in standard Python metadata format.
-```
-01: #!/usr/bin/env python3
-02: # /// script
-03: # requires-python = ">=3.11"
-04: # dependencies = [
-05: #   "requests<3",
-06: #   "python-dateutil>=2.8",
-07: # ]
-08: # ///
-```
-This is pretty much all boilerplate except for line `03` and lines `05-06`:
-* `01`:
-  This is the standard Python "shebang" (Sharp (`#`) Bang (`!`)) line.
-* `02`,`08`:
-  The standard Python metadata script start and stop lines.
-* `03`:
-  The oldest Python version your program will run on.  Currently, `AltVEnv`
-  requires Python 3.11 or greater.
-* `05-06`:
-  The comma-terminated strings are fed verbatim into `pip`.
-* `06`:
-   The last string must also end with a comma.
-
-Below is a really terse introduction to `pip` version directive syntax:
-```
-# dependencies = [
-#   "requests",                    any version at all
-#   "requests<3",                  anything before 3
-#   "requests>=2.28,<3",           a range
-#   "requests~=2.32.0",            2.32.anything, but not 2.33
-#   "requests!=2.31.0",            any version except this one
-#   "requests===2.32.3",           that version and no other
-#   "requests[socks]",             with an optional extra
-# ]
-```
-
-`pip` also supports conditional dependencies, written with a
-semicolon (`;`) followed by a condition.  Some examples follow:
-```
-# dependencies = [
-#   "pywin32; sys_platform == 'win32'",
-#   "tomli; python_version < '3.11'",
-#   "uvloop; sys_platform != 'win32' and platform_machine == 'x86_64'",
-# ]
-```
-
-`pip` resolves the whole list at once rather than one package at a time, so
-it can notice when two of your dependencies disagree about a third.
-This is exactly the sort of thing that is very hard to get right by hand
-and is the entire reason why `AltVEnv` lets `pip` handle the job.
-
-### Bootstrap
-
-The `AltVEnv` bootstrap spans lines `11-42` and should **NEVER** be
-hand-edited.  Rather than trying to read the deliberately dense code, a
-broad summary of what it does is listed below:
-   1. It creates the `~/.alt_venv` directory, if not already created.
-   2. It downloads the `pip` package, if not previously downloaded.
-   3. It downloads the `alt_venv` package, if not previously downloaded.
-Line `46` then calls `install()`, which does the following:
-   4. It finishes organizing the `~/.alt_venv/` sub-directories, if needed.
-   5. It runs `pip` with the `dependencies=[...]` and `pip` downloads any
-      further packages that have not already been downloaded.
-   6. It deletes stale packages that have not been used in a while.
-   7. It asks you if it is OK to use any newly downloaded packages.
-      The section immediately below discusses the download prompt.
-
-### Download Prompt
+## Download Prompt
 
 When people run the `pip` program manually, they presumably already
 know that they are downloading a package onto their computer.  However, the
@@ -348,32 +281,6 @@ If a program has no terminal access, it is not asked.  Thus, anything started
 by `cron`, a build system, a service manager, or by double-clicking an icon
 has nobody to put a question to, so it just prints out what it downloaded and
 carries on.  This avoids annoying hangs with no way to unhang them.
-
-### Imports and Program
-
-Lines `44-50` fetch and import the downloaded packages and run a
-single-line program:
-```
-44: # Fetch the packages listed in the metadata, then import them.
-45: import alt_venv  # type: ignore[import-not-found]
-46: alt_venv.AltVEnv().install()
-47: import requests  # type: ignore[import-not-found]
-48: import dateutil.parser  # type: ignore[import-not-found]
-49:
-50: print(requests.__name__, dateutil.parser.__name__)
-```
-sss:
-* `45-46`:
-  These fetch the packages, as described under Bootstrap above.
-* `47-48`:
-  Each of the packages listed in the `dependencies=[...]` section of the
-  metadata is imported with an `import` statement *after* the bootstrap.
-  The Python type checker is called `mypy`, and it likes all of the `import`
-  statements to be at the front of the program before any other kind of Python
-  statement.  The comment `# type: ignore[import-not-found]` tells `mypy`
-  not to complain about importing packages it does not know about.
-* `50`:
-  This is where the program starts.
 
 <!-- Claude:
 I am deliberately not explaining the organization of the `~/.alt_venv/`

@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
+# Part 1: The packages this program needs.
 # /// script
 # requires-python = ">=3.11"
 # dependencies = ["cowsay"]
 # ///
 """Try `AltVEnv`: fetch the `cowsay` package on first use, then run."""
 
+# Part 2: The standard library imports that the bootstrap uses.
 import hashlib
 import importlib
 import json
@@ -13,7 +15,8 @@ import subprocess
 import sys
 import urllib.request as req
 
-try:  # Never edit the `alt_venv` bootstrap try block below!
+# Part 3: The bootstrap.  Copy it exactly, and never edit it.
+try:
     s = "find home"; t = pathlib.Path.home()/".alt_venv"; w = t/"pip.whl"
     if not (t/"alt_venv").is_dir():  # Not installed yet.
         s = "choose pip"; v = sys.version_info[1]
@@ -36,10 +39,12 @@ try:  # Never edit the `alt_venv` bootstrap try block below!
 except Exception as x:
     raise SystemExit(f"cannot fetch alt_venv, {s} failed: {x!r}")
 
+# Part 4: Fetch the packages listed in Part 1, then import them.
 import alt_venv  # type: ignore[import-not-found]
 
 alt_venv.AltVEnv().install()
 import cowsay  # type: ignore[import-not-found]
 
+# Part 5: The program itself.
 cowsay.cow("AltVEnv works!")
 print(f"cowsay {cowsay.__version__} was loaded from {cowsay.__file__}")

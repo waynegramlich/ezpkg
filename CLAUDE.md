@@ -148,7 +148,11 @@ that happened.
   the text.  One standing exception, from 2026-10-02: when his edits
   leave a line over 79 columns, rewrap it without asking.  The pasted
   bootstrap's longest line is the only line allowed over, because the
-  bootstrap must be copied exactly.
+  bootstrap must be copied exactly.  And from the same date: `README.md`
+  describes what the code actually does.  A change to the code that
+  alters anything the README says is not finished until the README
+  says it too, and a README claim the code does not back is a mistake
+  to fix, or to raise with Wayne if fixing it means changing the code.
 * `LOGBOOK.md` is joint, as described above.
 
 ## The code, and how to run it

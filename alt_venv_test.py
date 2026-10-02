@@ -1996,6 +1996,15 @@ class AltVEnvTest(unittest.TestCase):
         self.assertTrue(
             readme.read_text().startswith("# AltVEnv Package Cache\n"))
 
+    def test_the_quick_start_is_written(self) -> None:
+        """The cache holds the Quick Start program, ready to copy."""
+        # The constructor writes it beside the README, from the constant.
+        cache: Path = self.root / "quick_start"
+        venv: alt_venv.AltVEnv = alt_venv.AltVEnv(cache)
+        self.assertEqual(venv.quick_start, cache / "quick_start.py")
+        self.assertEqual(venv.quick_start.read_text(encoding="utf-8"),
+                         alt_venv.QUICK_START)
+
     def test_default_root_follows_home(self) -> None:
         """With no argument the cache lands under the home directory."""
         # `Path.home()` reads HOME, so a fake HOME keeps this contained.
@@ -4606,14 +4615,31 @@ class BootstrapCheckTest(unittest.TestCase):
         """`README.md` shows `quick_start.py` exactly, bootstrap current.
 
         The Quick Start asks a person to copy the program whole, so the
-        copy in `README.md` and the file beside it must not drift apart,
-        and the bootstrap in both must be the one that ships.
+        copy in `README.md`, the file beside it, and `QUICK_START`, which
+        the cache receives, must not drift apart, and the bootstrap in
+        all of them must be the one that ships.  The read-along that
+        follows the Quick Start points at the program's `# Part` comments
+        by name, so those must exist and have headings to match.
         """
         # The file is the authority, and the page must carry it verbatim.
         here: Path = Path(__file__).resolve().parent
         program: str = (here / "quick_start.py").read_text(encoding="utf-8")
         readme: str = (here / "README.md").read_text(encoding="utf-8")
         self.assertIn(f"```python\n{program}```\n", readme)
+
+        # The copy the cache receives is the same program.
+        self.assertEqual(alt_venv.QUICK_START, program)
+
+        # The parts are numbered in order, and the README's read-along
+        # has a heading for each, named up to the comment's first period.
+        landmarks: list[str] = [line[2:] for line in program.splitlines()
+                                if line.startswith("# Part ")]
+        self.assertEqual([landmark.split(":")[0] for landmark in landmarks],
+                         [f"Part {n}" for n in range(1, 6)])
+        landmark: str
+        for landmark in landmarks:
+            with self.subTest(landmark=landmark):
+                self.assertIn(f"\n#### {landmark.split('.')[0]}\n", readme)
 
         # Found the way a running program's would be.
         block: str | None = alt_venv.find_bootstrap(program)

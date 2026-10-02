@@ -120,6 +120,65 @@ BOOTSTRAPS: dict[str, str] = {
         "nopip3 of 2026-10-01",
 }
 
+# The Quick Start program from `README.md`, which the constructor writes
+# into the cache as `quick_start.py`, so that somebody who has run one
+# program can open the template in an editor and copy its parts into
+# their own.  `quick_start.py` in the repository is the authority and
+# the test suite fails until this matches it.  The two fence lines are
+# written with `\x23`, which is `#`, so that this file's own source
+# holds only one PEP 723 block: two would be refused as ambiguous.
+QUICK_START: str = '''#!/usr/bin/env python3
+# Part 1: The packages this program needs.
+\x23 /// script
+# requires-python = ">=3.11"
+# dependencies = ["cowsay"]
+\x23 ///
+"""Try `AltVEnv`: fetch the `cowsay` package on first use, then run."""
+
+# Part 2: The standard library imports that the bootstrap uses.
+import hashlib
+import importlib
+import json
+import pathlib
+import subprocess
+import sys
+import urllib.request as req
+
+# Part 3: The bootstrap.  Copy it exactly, and never edit it.
+try:
+    s = "find home"; t = pathlib.Path.home()/".alt_venv"; w = t/"pip.whl"
+    if not (t/"alt_venv").is_dir():  # Not installed yet.
+        s = "choose pip"; v = sys.version_info[1]
+        d = json.load(req.urlopen("https://pypi.org/pypi/pip/json", None, 30))
+        e = max((e for f in d["releases"].values() for e in f  # Newest pip
+                 if e["url"][-4:] == ".whl" and not e["yanked"]
+                 and (q := e["requires_python"] or "")[:4] == ">=3."
+                 and "," not in q and int(q.split(".")[1]) <= v),
+                key=lambda e: e["upload_time"])  # whose floor we meet.
+        s = "download pip"; r = req.urlopen(e["url"], None, 60).read()
+        if hashlib.sha256(r).hexdigest() != e["digests"]["sha256"]:
+            raise ValueError(f"{e['filename']} fails its SHA-256 check")
+        t.mkdir(parents=True, exist_ok=True); p = t/"pip.part"
+        p.write_bytes(r); p.replace(w)  # The rename is atomic.
+        s = "install alt_venv"; subprocess.run([
+            sys.executable, w/"pip", "install", "--no-input", "-t", t,
+            "--disable-pip-version-check", "alt_venv"], check=True)
+    s = "import alt_venv"; sys.path.insert(0, str(t))
+    importlib.invalidate_caches(); importlib.import_module("alt_venv")
+except Exception as x:
+    raise SystemExit(f"cannot fetch alt_venv, {s} failed: {x!r}")
+
+# Part 4: Fetch the packages listed in Part 1, then import them.
+import alt_venv  # type: ignore[import-not-found]
+
+alt_venv.AltVEnv().install()
+import cowsay  # type: ignore[import-not-found]
+
+# Part 5: The program itself.
+cowsay.cow("AltVEnv works!")
+print(f"cowsay {cowsay.__version__} was loaded from {cowsay.__file__}")
+'''
+
 # The one place the version is written down.  `bootstrap.py`
 # prints it after importing, and the test suite stamps it into
 # the wheel it builds.
@@ -422,6 +481,31 @@ def find_bootstrap(text: str) -> str | None:
     return None
 
 
+def refresh(path: Path, text: str) -> None:
+    """Write a file only when its contents would change.
+
+    Making an object used to write a file every time, which is a side
+    effect nobody asks a constructor for and which touches the
+    modification time of a file a person may be reading; see Step
+    6.10.5 in `LOGBOOK.md`.  A stale copy is still replaced, so a newer
+    `alt_venv` still reaches a cache that holds an older file.
+
+    Arguments:
+    * `path` (`Path`):
+      The file to write.
+    * `text` (`str`):
+      What it should hold.
+    """
+    # An unreadable file is treated as absent, and so is rewritten.
+    present: str = ""
+    try:
+        present = path.read_text(encoding="utf-8")
+    except OSError:
+        present = ""
+    if present != text:
+        path.write_text(text, encoding="utf-8")
+
+
 class AltVEnv:
     """Fetch and import Python packages that are not preinstalled.
 
@@ -434,7 +518,8 @@ class AltVEnv:
     What works today is the cache directory itself.  Constructing an
     `AltVEnv` creates the directory and drops a `README.md` into
     it, so that somebody who finds the directory and wonders what it
-    is can read the answer without leaving it.
+    is can read the answer without leaving it.  Beside it goes
+    `quick_start.py`, the template a person copies into a program.
 
     Attributes:
     * `bootstrap` (`str`):
@@ -442,6 +527,8 @@ class AltVEnv:
       empty string.  Nothing reads it yet; see Step 6.12 in `LOGBOOK.md`.
     * `readme` (`Path`):
       The `README.md` written into `root`.
+    * `quick_start` (`Path`):
+      The `quick_start.py` written into `root`, a copy of `QUICK_START`.
     * `root` (`Path`):
       The cache directory.  Created if it does not exist.
 
@@ -450,6 +537,7 @@ class AltVEnv:
     """
 
     # Set by the constructor; see `Attributes:` above.
+    quick_start: Path
     readme: Path
     root: Path
     bootstrap: str = ""
@@ -485,6 +573,11 @@ class AltVEnv:
           once a week, and the newest is the one used.
         * `last_cull` and `last_pip` are stamps recording when the
           cache was last swept and when `pip` was last checked.
+        * `quick_start.py` is a complete program that uses `AltVEnv`.
+          Copy its parts into a program of your own; the comments in
+          it say which part is which.  It is the copy that came with
+          the `alt_venv` installed here, so after a new release the
+          one in the project's `README.md` may be newer.
 
         Deleting this whole directory is safe.  The next program that
         needs one of these packages will fetch it again.
@@ -516,21 +609,13 @@ class AltVEnv:
             title = title.rstrip(".")
             body = body.split("Arguments:")[0].rstrip()
 
-        # Write it only when it would change.  Making an object used to
-        # write a file every time, which is a side effect nobody asks a
-        # constructor for and which touches the modification time of a
-        # file a person may be reading; see Step 6.10.5 in `LOGBOOK.md`.
-        # A stale copy is still replaced, so editing this docstring
-        # still reaches the cache.
+        # Both files are written only when they would change; see
+        # `refresh`.  The Quick Start program sits beside the README, so
+        # that a person can open it and copy its parts into their own.
         self.readme = self.root / "README.md"
-        wanted: str = f"# {title}\n{body}\n"
-        present: str = ""
-        try:
-            present = self.readme.read_text(encoding="utf-8")
-        except OSError:
-            present = ""
-        if present != wanted:
-            self.readme.write_text(wanted, encoding="utf-8")
+        refresh(self.readme, f"# {title}\n{body}\n")
+        self.quick_start = self.root / "quick_start.py"
+        refresh(self.quick_start, QUICK_START)
 
         # Repair a single module install, so that the bootstrap that
         # fetched this one recognises it next time.  See `0cctfd`.
