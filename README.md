@@ -25,6 +25,124 @@ A single-file Python program can literally be e-mailed to somebody and it
 will just work!  With `AltVEnv`, neither the developer nor the end user has
 to deal with the dreaded missing Python package problem.
 
+## Quick Start
+
+Save this program as `quick_start.py`, and run it with
+`python3 quick_start.py`:
+
+```python
+#!/usr/bin/env python3
+# /// script
+# requires-python = ">=3.11"
+# dependencies = ["cowsay"]
+# ///
+"""Try `AltVEnv`: fetch the `cowsay` package on first use, then run."""
+
+import hashlib
+import importlib
+import json
+import pathlib
+import subprocess
+import sys
+import urllib.request as req
+
+try:  # Never edit the `alt_venv` bootstrap try block below!
+    s = "find home"; t = pathlib.Path.home()/".alt_venv"; w = t/"pip.whl"
+    if not (t/"alt_venv").is_dir():  # Not installed yet.
+        s = "choose pip"; v = sys.version_info[1]
+        d = json.load(req.urlopen("https://pypi.org/pypi/pip/json", None, 30))
+        e = max((e for f in d["releases"].values() for e in f  # Newest pip
+                 if e["url"][-4:] == ".whl" and not e["yanked"]
+                 and (q := e["requires_python"] or "")[:4] == ">=3."
+                 and "," not in q and int(q.split(".")[1]) <= v),
+                key=lambda e: e["upload_time"])  # whose floor we meet.
+        s = "download pip"; r = req.urlopen(e["url"], None, 60).read()
+        if hashlib.sha256(r).hexdigest() != e["digests"]["sha256"]:
+            raise ValueError(f"{e['filename']} fails its SHA-256 check")
+        t.mkdir(parents=True, exist_ok=True); p = t/"pip.part"
+        p.write_bytes(r); p.replace(w)  # The rename is atomic.
+        s = "install alt_venv"; subprocess.run([
+            sys.executable, w/"pip", "install", "--no-input", "-t", t,
+            "--disable-pip-version-check", "alt_venv"], check=True)
+    s = "import alt_venv"; sys.path.insert(0, str(t))
+    importlib.invalidate_caches(); importlib.import_module("alt_venv")
+except Exception as x:
+    raise SystemExit(f"cannot fetch alt_venv, {s} failed: {x!r}")
+
+import alt_venv  # type: ignore[import-not-found]
+
+alt_venv.AltVEnv().install()
+import cowsay  # type: ignore[import-not-found]
+
+cowsay.cow("AltVEnv works!")
+print(f"cowsay {cowsay.__version__} was loaded from {cowsay.__file__}")
+```
+
+The first run fetches `alt_venv`, then the `cowsay` package that the program
+lists at the top, and asks once whether it may install `cowsay`.  Answer `y`,
+and the program runs:
+
+```
+  ______________
+| AltVEnv works! |
+  ==============
+              \
+               \
+                 ^__^
+                 (oo)\_______
+                 (__)\       )\/\
+                     ||----w |
+                     ||     ||
+cowsay 6.1 was loaded from /home/you/.alt_venv/versions/cowsay-6.1-.../...
+```
+
+Now run it a second time.  There is no question and no download, and it
+starts in a fraction of a second, because `cowsay` is already in
+`~/.alt_venv`.  That directory holds everything `AltVEnv` has fetched, and
+deleting it is always safe; the next run simply fetches again:
+
+```
+rm -rf ~/.alt_venv
+```
+
+All the machine needs is Python 3.11 or later, plus a network connection the
+first time a program needs a package.
+
+### Using It in Your Own Program
+
+1. List the packages your program needs in a Python standard metadata
+   block at the top of the program:
+   ```
+   # /// script
+   # requires-python = ">=3.11"  # Python 3.11 or greater.
+   # dependencies = [            # Required packages, versions optional.
+   #   "requests<3",             # The `requests` package before 3.0.
+   # ]
+   # ///
+   ```
+   The end-of-line `# ...` comments are optional.
+2. Add the standard library imports that the bootstrap needs, in
+   alphabetical order among your own.  If your program already imports
+   some of them, keep just one copy of each:
+   ```
+   import hashlib
+   import importlib
+   import json
+   import pathlib
+   import subprocess
+   import sys
+   import urllib.request as req
+   ```
+3. Copy the `try` block from `quick_start.py` above, exactly as it is,
+   after your imports and before importing any of the packages listed in
+   step 1.
+4. Call `install()`, then import your packages as usual:
+   ```
+   import alt_venv  # type: ignore[import-not-found]
+   alt_venv.AltVEnv().install()
+   import requests  # type: ignore[import-not-found]
+   ```
+
 ## Requirements
 
 <!-- Claude: The `(~N lines)` needs updating prior to PyPI deployment. -->

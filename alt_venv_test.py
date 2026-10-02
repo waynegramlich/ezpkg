@@ -4602,6 +4602,25 @@ class BootstrapCheckTest(unittest.TestCase):
         self.assertEqual(alt_venv.bootstrap_fingerprint(self.shipping()),
                          list(alt_venv.BOOTSTRAPS)[-1])
 
+    def test_the_quick_start_is_current(self) -> None:
+        """`README.md` shows `quick_start.py` exactly, bootstrap current.
+
+        The Quick Start asks a person to copy the program whole, so the
+        copy in `README.md` and the file beside it must not drift apart,
+        and the bootstrap in both must be the one that ships.
+        """
+        # The file is the authority, and the page must carry it verbatim.
+        here: Path = Path(__file__).resolve().parent
+        program: str = (here / "quick_start.py").read_text(encoding="utf-8")
+        readme: str = (here / "README.md").read_text(encoding="utf-8")
+        self.assertIn(f"```python\n{program}```\n", readme)
+
+        # Found the way a running program's would be.
+        block: str | None = alt_venv.find_bootstrap(program)
+        assert block is not None
+        self.assertEqual(alt_venv.bootstrap_fingerprint(block),
+                         list(alt_venv.BOOTSTRAPS)[-1])
+
     def test_layout_and_comments_do_not_change_the_fingerprint(self) -> None:
         """Re-indenting, re-wrapping and commenting leave it the same."""
         # Three cosmetic changes, then one real one.

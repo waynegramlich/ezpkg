@@ -32,3 +32,8 @@ target-version = "py311"
 # order, because the person moves them to the top of their program and
 # many tools there check exactly that.
 "bootstrap.py" = ["BLE001", "F841", "E702"]
+
+# `quick_start.py` is the whole program `README.md` asks a person to
+# copy, so it carries the shipping bootstrap's `try` and catches
+# `Exception` for the reason given above.  A `noqa` would be copied too.
+"quick_start.py" = ["BLE001"]

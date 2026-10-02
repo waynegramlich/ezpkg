@@ -145,12 +145,15 @@ that happened.
   their own.  Claude reads them and never edits them.
 * `README.md` is Wayne's, and being rewritten by him.  Suggestions go
   to him, or into an HTML comment addressed to him, rather than into
-  the text.
+  the text.  One standing exception, from 2026-10-02: when his edits
+  leave a line over 79 columns, rewrap it without asking.  The pasted
+  bootstrap's longest line is the only line allowed over, because the
+  bootstrap must be copied exactly.
 * `LOGBOOK.md` is joint, as described above.
 
 ## The code, and how to run it
 
-Five files, and it matters which is which:
+Six files, and it matters which is which:
 
 * `bootstrap.py` -- the thirteen pasted bootstrap cases, plus the harness
   that measures them.  Run with no arguments it prints the comparison
@@ -165,6 +168,11 @@ Five files, and it matters which is which:
   server it runs against.  Nothing in it reaches the network.
 * `alt_venv_coverage.py` -- coverage, using the standard library
   `trace` rather than `coverage`, so the suite needs nothing installed.
+* `quick_start.py` -- the whole program `README.md`'s Quick Start asks
+  a person to copy.  The README carries it verbatim, and
+  `test_the_quick_start_is_current` fails if the two drift or its
+  bootstrap is not the current one.  Edit the file, then paste it into
+  the README; never the other way round.
 * `trace_hook/sitecustomize.py` -- how child processes get traced.  It
   is in a directory of its own on purpose, because a `sitecustomize.py`
   in the project root would affect every interpreter started here.
