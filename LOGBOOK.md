@@ -2735,6 +2735,35 @@ expected every time the order changes, and is Claude's job.
     measuring path, which run the suite itself, and `_credit` in the
     trace hook, which only exists inside a traced child.
 
+  * 6.16.7 - **A full traced run, unattended**, 2026-10-01, while Wayne
+    wrote `README.md`: `ALT_VENV_TEST=COMPLETE ./alt_venv_coverage.py
+    --children`, 215 tests passing in 20 minutes, 343 children folded in.
+    `alt_venv.py` 98%, `bootstrap.py` 99%, `alt_venv_test.py` 95%.  No
+    test failed and no product bug turned up.  What it did turn up:
+
+    * Six lines of `alt_venv.py` no test reached: a program that does
+      not parse, in `find_bootstrap`, and the two `OSError` arms of
+      `refresh_pip`.  Three tests now reach them, checked by tracing
+      them alone.  Two more lines read as missed but are not: the
+      frozen interpreter branch, already noted, and the refusal of a
+      module whose `__file__` is not a `.py`, whose test patches the
+      very `__file__` that `trace` reads to decide what to follow.
+      `alt_venv_coverage.py`'s docstring now names both.
+    * The opt-in suites, run too.  `ReportTest`, behind
+      `ALT_VENV_REPORT`, had been broken since 6.16.1: it looked for
+      `| venv1 |` in the table, but naming the cases widened the label
+      column, so all ten shorter names are padded.  It reads the width
+      from `bootstrap.COLUMN_WIDTHS` now.  `PyPITest` passed.
+    * A new opt-in test, `test_the_shipping_path_against_pypi`: an
+      interpreter with no `pip` runs `nopip3` against the **real**
+      PyPI for `pip`, then a program declaring `requests` gets it, and
+      its four dependencies, from the real PyPI through the private
+      `pip`.  Only `alt_venv` itself comes from a local index, since
+      no index has it yet.  It passes, in about eight seconds.
+    * Writing it found that `run_bootstrap_case` raised `TypeError`
+      when `extra` repeated a variable it sets itself, such as
+      `BOOTSTRAP_JSON_API`.  `extra` now overrides.
+
 * Step 6.17: A fetch from the real PyPI, carried over from Task 5.
 
   It is the only thing that can settle Task 3's conclusion that a

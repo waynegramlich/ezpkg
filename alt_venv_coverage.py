@@ -55,8 +55,11 @@ Two blind spots remain, and neither is a defect in the tests:
   `frame.f_globals.get("__file__")`.  So the one line of
   `alt_venv.py` that runs only when `__file__` is `None`, the
   frozen interpreter branch of `repair_module_layout`, can never be
-  reported as covered.  It is reached by a test that passes; 98% for
-  that module means 100%.
+  reported as covered.  It is reached by a test that passes.  The
+  same goes for the branch that refuses a module whose `__file__` is
+  not a `.py` file: its test patches `__file__`, which is exactly what
+  `trace` reads to decide whether to follow, so it stops following
+  there.  Those two lines are the whole of the gap.
 
 MIT No Attribution
 

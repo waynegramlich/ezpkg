@@ -290,7 +290,9 @@ def run_bootstrap_case(label: str, home: Path, index_url: str,
     * `index_url` (`str`):
       The base URL of the index, ending in a slash.
     * `extra` (`dict[str, str] | None`):
-      More environment, such as the trust store the TLS tests set.
+      More environment, such as the trust store the TLS tests set.  It
+      wins over the settings above, so it can aim the JSON API at the
+      real PyPI.
     * `python` (`str`):
       The interpreter to run the case with.  The default is this one;
       the no-`pip` test passes one that has never had `pip`.
@@ -300,10 +302,13 @@ def run_bootstrap_case(label: str, home: Path, index_url: str,
     """
     # Aim it at the index, for `pip` and for the JSON API alike.
     script: Path = Path(__file__).resolve().parent / "bootstrap.py"
+    # `extra` overrides rather than collides, so a caller can aim the
+    # JSON API somewhere else; as keyword arguments, a repeat raised
+    # `TypeError`.
     environment: dict[str, str] = dict(
         os.environ, HOME=str(home), PIP_INDEX_URL=index_url,
-        BOOTSTRAP_PACKAGE=MODULE, BOOTSTRAP_JSON_API=f"{index_url}pypi",
-        **(extra or {}))
+        BOOTSTRAP_PACKAGE=MODULE, BOOTSTRAP_JSON_API=f"{index_url}pypi")
+    environment.update(extra or {})
     environment.pop("VIRTUAL_ENV", None)
     return subprocess.run(
         [python, str(script), label],
@@ -2370,16 +2375,17 @@ class InstallTest(unittest.TestCase):
         self.assertIsNone(venv.refresh_pip())
         self.assertFalse((cache / "last_pip").exists())
 
-    def test_refresh_pip_adds_a_newer_pip(self) -> None:
-        """A newer `pip` is added beside the old, and the old makes way.
+    def stand_in_pip_index(self) -> str:
+        """Serve an index whose only `pip` is a stand-in, release 99.0.
 
-        The index offers a stand-in `pip` 99.0, which the real one in the
-        cache downloads; it cannot run, but nothing here needs it to.  An
-        older refreshed copy, past its grace period, is removed, and the
-        bootstrap's own `pip.whl` is kept.  A second call inside the
-        interval does nothing.
+        The real `pip` in a cache downloads it as the newest `pip`; it
+        cannot run, but nothing that uses this needs it to.  The server
+        stops when the test ends.
+
+        Returns:
+        * (`str`): The index URL, for `PIP_INDEX_URL`.
         """
-        # The stand-in release, alone in an index of its own.
+        # One stand-in release, alone in an index of its own.
         source: Path = self.root / "pip-99" / "pip.py"
         source.parent.mkdir(parents=True, exist_ok=True)
         source.write_text('"""A stand-in."""\n')
@@ -2392,8 +2398,19 @@ class InstallTest(unittest.TestCase):
         server, url = serve_index(index)
         self.addCleanup(server.server_close)
         self.addCleanup(server.shutdown)
+        return url
 
+    def test_refresh_pip_adds_a_newer_pip(self) -> None:
+        """A newer `pip` is added beside the old, and the old makes way.
+
+        The index offers a stand-in `pip` 99.0, which the real one in the
+        cache downloads; it cannot run, but nothing here needs it to.  An
+        older refreshed copy, past its grace period, is removed, and the
+        bootstrap's own `pip.whl` is kept.  A second call inside the
+        interval does nothing.
+        """
         # A cache holding the bootstrap's `pip` and a superseded refresh.
+        url: str = self.stand_in_pip_index()
         cache: Path = self.root / "to-refresh"
         venv: alt_venv.AltVEnv = alt_venv.AltVEnv(cache)
         (cache / "pip.whl").write_bytes(pip_wheel()[1])
@@ -2435,6 +2452,37 @@ class InstallTest(unittest.TestCase):
         self.assertTrue((cache / "last_pip").is_file())
         self.assertEqual(sorted(p.name for p in cache.glob("pip*.whl")),
                          ["pip.whl"])
+
+    def test_refresh_pip_survives_a_failed_move(self) -> None:
+        """A newer `pip` that cannot be moved into place changes nothing."""
+        # A full disk, say, at the last step.
+        url: str = self.stand_in_pip_index()
+        cache: Path = self.root / "cannot-move"
+        venv: alt_venv.AltVEnv = alt_venv.AltVEnv(cache)
+        (cache / "pip.whl").write_bytes(pip_wheel()[1])
+        with (unittest.mock.patch.dict(os.environ, {"PIP_INDEX_URL": url}),
+              unittest.mock.patch.object(Path, "replace",
+                                         side_effect=OSError("disk full"))):
+            self.assertIsNone(venv.refresh_pip())
+        self.assertEqual(sorted(p.name for p in cache.glob("pip*.whl")),
+                         ["pip.whl"])
+
+    def test_refresh_pip_keeps_an_old_copy_it_cannot_remove(self) -> None:
+        """A superseded copy that will not go is left, not an error."""
+        # The new copy still arrives and is the one used.
+        url: str = self.stand_in_pip_index()
+        cache: Path = self.root / "cannot-remove"
+        venv: alt_venv.AltVEnv = alt_venv.AltVEnv(cache)
+        (cache / "pip.whl").write_bytes(pip_wheel()[1])
+        superseded: Path = cache / "pip-1.0-py3-none-any.whl"
+        superseded.write_bytes(pip_wheel()[1])
+        os.utime(superseded, (1000.0, 1000.0))
+        with (unittest.mock.patch.dict(os.environ, {"PIP_INDEX_URL": url}),
+              unittest.mock.patch.object(Path, "unlink",
+                                         side_effect=OSError("busy"))):
+            added: Path | None = venv.refresh_pip()
+        self.assertEqual(added, cache / "pip-99.0-py3-none-any.whl")
+        self.assertTrue(superseded.exists())
 
     @runs_cases
     def test_nothing_but_python_and_the_bootstrap(self) -> None:
@@ -4602,6 +4650,9 @@ class BootstrapCheckTest(unittest.TestCase):
                 self.assertIn(wanted[0] if wanted[0] != "absent"
                               else "no bootstrap", venv.report_bootstrap())
 
+        # A program that does not parse has no bootstrap to find.
+        self.assertIsNone(alt_venv.find_bootstrap("def broken(:\n"))
+
         # No program at all, as under `python3 -c`, is absent too.
         with unittest.mock.patch.object(alt_venv, "main_source",
                                         return_value=None):
@@ -4981,11 +5032,16 @@ class ReportTest(unittest.TestCase):
         self.assertEqual(done.returncode, 0, done.stderr[-2000:])
 
         # One row per case, and every line the width the table promises.
+        # The label column's width comes from `bootstrap.py` rather than
+        # being written down here: it was 4 until the cases were named,
+        # and this test went on looking for `| venv1 |` after it became
+        # 6, which only an opt-in run could notice.
+        width: int = bootstrap.COLUMN_WIDTHS[0]
         label: str
         for label in bootstrap.MECHANISMS:
             with self.subTest(case=label):
-                self.assertIn(f"| {label:<4} |", done.stdout)
-        rules: int = done.stdout.count("+------+")
+                self.assertIn(f"| {label:<{width}} |", done.stdout)
+        rules: int = done.stdout.count("+" + "-" * (width + 2) + "+")
         self.assertGreaterEqual(rules, 3, done.stdout[:400])
 
     def test_a_nonsense_argument_gets_the_usage_line(self) -> None:
@@ -5721,6 +5777,78 @@ class PyPITest(unittest.TestCase):
             [sys.executable, str(script), label], env=environment,
             capture_output=True, text=True, check=False)
         return (done.stdout + done.stderr).strip().splitlines()[-1]
+
+    @runs_cases
+    def test_the_shipping_path_against_pypi(self) -> None:
+        """No `pip`, the shipping bootstrap, then a real package, for real.
+
+        What `README.md` promises, as close as it can be run before
+        `alt-venv` is published.  An interpreter that has never had `pip`
+        runs `nopip3`, which chooses and fetches the real `pip` from the
+        real PyPI and checks its SHA-256; only `alt_venv` itself comes
+        from a local index, because no index has it yet.  A program
+        declaring `requests` then has `alt_venv` fetch it, its four
+        dependencies with it, from the real PyPI, through that private
+        `pip`, since the interpreter has no other.
+        """
+        # The bare machine, as in the no-`pip` test.
+        if not selected(SHIPPING):
+            self.skipTest(f"{SHIPPING} is not selected")
+        bare: Path = self.root / "bare"
+        made: subprocess.CompletedProcess[str] = subprocess.run(
+            [sys.executable, "-m", "venv", "--without-pip", str(bare)],
+            capture_output=True, text=True, check=False)
+        if made.returncode != 0:
+            self.skipTest(f"no venv here: {made.stderr.strip()[-200:]}")
+        python: Path = (bare / "Scripts" / "python.exe" if os.name == "nt"
+                        else bare / "bin" / "python")
+
+        # `alt_venv` from a local index, everything else from PyPI.
+        module: Path = Path(__file__).resolve().parent / f"{MODULE}.py"
+        index: Path = build_index(
+            [build_wheel(module, DISTRIBUTION, VERSION, SUMMARY,
+                         self.root / "dist", floor=FLOOR)],
+            self.root / "index")
+        server: _IndexServer
+        url: str
+        server, url = serve_index(index)
+        self.addCleanup(server.server_close)
+        self.addCleanup(server.shutdown)
+        home: Path = self.root / "home"
+        done: subprocess.CompletedProcess[str] = run_bootstrap_case(
+            SHIPPING, home, url,
+            {"BOOTSTRAP_JSON_API": "https://pypi.org/pypi"},
+            python=str(python))
+        self.assertEqual(done.returncode, 0, done.stderr[-800:])
+
+        # The `pip` kept is PyPI's, not the copy the local index serves.
+        local: str = pip_wheel()[0].split("-")[1]
+        with zipfile.ZipFile(home / ".alt_venv" / "pip.whl") as fetched:
+            self.assertNotIn(f"pip-{local}.dist-info/METADATA",
+                             fetched.namelist())
+
+        # A program that declares a real package, fetched from PyPI.
+        cache: Path = home / ".alt_venv"
+        program: Path = self.root / "prog.py"
+        program.write_text(
+            "# /// script\n"
+            f'# dependencies = ["{self.REQUESTS}"]\n'
+            "# ///\n"
+            "import sys\n"
+            f"sys.path.insert(0, {str(cache)!r})\n"
+            "import alt_venv\n"
+            "alt_venv.AltVEnv().install()\n"
+            "import requests\n"
+            "print(requests.__version__)\n")
+        environment: dict[str, str] = dict(os.environ, HOME=str(home))
+        environment.pop("PIP_INDEX_URL", None)
+        environment.pop("VIRTUAL_ENV", None)
+        ran: subprocess.CompletedProcess[str] = subprocess.run(
+            [str(python), str(program)], env=environment,
+            capture_output=True, text=True, check=False)
+        self.assertEqual(ran.returncode, 0, ran.stderr[-800:])
+        self.assertEqual(ran.stdout.strip(),
+                         self.REQUESTS.partition("==")[2])
 
     @runs_cases
     def test_the_matcher_handles_real_wheels(self) -> None:
