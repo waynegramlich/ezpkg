@@ -26,11 +26,15 @@ dreaded missing Python package problem.
 The requirements for `AltVEnv` are:
 1. Python3 version 3.11 or more is required.
 2. Required packages are simply listed in metadata at the front of the program.
-3. A small piece of bootstrap code (~N lines) must be added to your code
+3. A small modest  of bootstrap code (~N lines) must be added to your code
    before attempting to `import` the packages listed in step 2.
 4. An active network connection is required for the initial run.  Afterwards
    the packages are cached and a network connection is no longer needed.
 That's it!
+
+<!-- Claude:
+I give you have my full permission to rewrite this.  Remember, the text to a
+maximum of one hyper link and 3 lines total.
 
 ## Alternatives
 
@@ -46,6 +50,7 @@ The following is a short list to explore:
 * Container technology:
   [Docker](https://www.docker.com/ and [Snap](https://snapcraft.io/docs/)
   provide alternatives to `zipapp`.
+-->
 
 
 ## A Small Annotated Example
@@ -58,14 +63,15 @@ expository purposes.
 ```
 01: #!/usr/bin/env python3
 02: # /// script
-03: # requires-python = ">=3.11"
-04: # dependencies = [
-05: #   "requests<3",
-06: #   "python-dateutil>=2.8",
+03: # requires-python = ">=3.11"  # Needs Python 3.11 or greater
+04: # dependencies = [            # These are fed verbatim into `pip`
+05: #   "requests<3",             # Needs `requests` package before version 3
+06: #   "python-dateutil>=2.8",   # Needs `python-dateutil` 2.8 or greater
 07: # ]
 08: # ///
 09: """Report yesterday's weather."""
 10:
+<!-- Claude: Replace this bootstrap with the actual one. -->
 11: # Imports needed for the AltVEnv bootstrap try block.
 12: import importlib
 13: import pathlib
@@ -91,9 +97,14 @@ expository purposes.
 33:
 34: print(requests.__name__, dateutil.parser.__name__)
 ```
+<!-- Claude:
+There is some magic markdown syntax that creates a paste icon.  Put it here. -->
+p-->
+<!-- Claude: Make the codes snippets below exactly match the one above. ->>
 
-Now the code is broken into smaller chunks for expository purposes only.
-The first chunk is:
+### Meta Data
+
+The meta data starts with `# /// script` on `01:` and ends on `08:` with `///`:
 ```
 01: #!/usr/bin/env python3
 02: # /// script
@@ -104,16 +115,15 @@ The first chunk is:
 07: # ]
 08: # ///
 ```
-This is pretty much all boiler plate except for lines `03` and lines `05-06`:
+This is pretty much all boiler plate except for line `03` and lines `05-06`:
 * `'03`:
   The oldest Python version your program will run on.  Currently, `AltVEnv`
   requires Python 3.11 or greater.
 * ``05-04``:
-  These comma terminated strings are fed into `pip` and when it is executed.
+  The comma terminated strings are fed verbatim into `pip`.  The last string
+  must also end with a comma.
 
-It is important to understand is the syntax of the `dependencies =...`.
-The strings in `dependencies` are handed to `pip` untouched, so anything
-`pip` understands works here.  Here are some examples:
+Below is a really terse example set of `pip` version directives:
 ```
 # dependencies = [
 #   "request",                     any version at all
@@ -131,8 +141,8 @@ it can notice that when two of your dependencies disagree about a third.
 This is exactly the sort of thing that is very hard to get right by hand
 and the entirely the reason `AltVEnv` foists the problem onto `pip`.
 
-Conditional dependencies are supported with semicolon (`;`) followed by a
-condition.  Some examples follow:
+`pip` also supports conditional dependencies are supported with a
+semicolon (`;`) followed by a condition.  Some examples follow:
 ```
 # dependencies = [
 #   "pywin32; sys_platform == 'win32'",
@@ -141,68 +151,30 @@ condition.  Some examples follow:
 # ]
 ```
 
-The `AltEnv` bootstrap code is from `17`-`28` and simply leave it alone
-since it does some tricky really tricky stuff on line `26`, when the
-`AltVEnv` class is initialized:
-```
-17: # Never change the AltVEnv bootstrap `try` block immediately below!
-18: try:
-19:     target = pathlib.Path.home() / ".alt_venv"
-20:     if not (target / "alt_venv").is_dir():
-21:         subprocess.run([sys.executable, "-m", "pip", "install",
-22:                         "--no-input", "--disable-pip-version-check",
-23:                         "--target", str(target), "alt_venv"], check=True)
-24:     sys.path.insert(0, str(target))
-25:     importlib.invalidate_caches()
-26:     importlib.import_module("alt_venv").AltVEnv().install(bootstrap="7")
-27: except Exception as error:  # noqa: BLE001
-28:     raise SystemExit(f"cannot fetch alt_venv: {error}") from None
-```
+### Bootstrap
 
-Next is the imports after the bootstrap:
-```
-30: # Example imports fetched via AltVEnv.
-31: import requests  # type: ignore[import-not-found]
-32: import dateutil.parser  # type: ignore[import-not-found]
-33:
-34: print(requests.__name__, dateutil.parser.__name__)
-```
-* `31-32`:
-  While these are standard Python `import` statements, they must occur after
-  the `AltVEnv` bootstrap because.  The `# type: ignore[import-not_found]`
-  is only needed if when use the `pylint` program, since it will complain
-  about an unrecognized package name.
-* `34`:
-  This is the program body that shows that both packages have been successfully
-  imported.
+The bootstrap is "magic" that makes everything work and is on lines `17`-`28`.
+If you want, you can skip this section, since bootstrap should not be edited.
 
-## The `.alt_venv` directory:
+In general, the `AltEnv` bootstrap does the following:
+   1. It creates the `~/.alt_venv` directory, if not already created.
+   2. It downloads the `pip` package, if not previously downloaded.
+   3. It downloads `alt_env` package, if not previously downloaded,
+After the `alt_env` package is present, it does the following:
+   4. It finishes organizing the `~/.alt_venv/` sub-directories, if needed.
+   5. It runs `pip` with the `dependencies=[...]` and pip downloads any
+      further package that has not already been downloaded.
+   6. It deletes stale packages that have not used in a while.
+   7. It asks if you if it is OK to use any newly downloaded packages.
+      See the next section immediately below for more details.
 
-`AltVEnv` creates and manages directory called `.alt_venv` located
-in your home directory.  The location depends upon your operating system:
-* Windows: `C:\Users\YourName\.alt_venv`
-* Linux/macOS: `~/.alt_venv`
+### Download Prompt
 
-There is a `README.md` inside `.alt_venv/` that describes its purpose.
-In addition, there are four sub-directories:
-* `versions/`:
-  This holds one directory per package version, named after the
-  Python wheel it came from.  These are added Python's import path.
-* `wheels/`:
-  Each Python wheel is also represented as a directory
-* `requests/`:
-  This remembers what was asked for, one small file per request, so
-  that asking again costs nothing.
-* `pending/`:
-  This is a scratch space used while fetching and unpacking.
-
-The `.alt_venv` directory can be safely deleted at any time since, it can be
-recreated and repopulated the next time a program that uses `AltVEnv` is
-executed.  To delete the directory:
-* Windows: `rmdir /s /q %USERPROFILE%\.alt_venv
-* Linux/macOS: `rm -rf ~/.alt_venv`
-
-## The Security Prompt
+When people run the `pip` program manually, they know they supposedly known
+that downloading a package onto their computer.  However, the `AltVEnv`
+bootstrap indirectly calls `pip`, so the user may not actually know that
+some files might be downloaded.  It is rude not to inform the user at least
+once that some downloading is going on under the covers.
 
 The first time `AltEnv` decides to download some Python packages (and you
 are using the command line interface) it will prompt you with the following
@@ -235,48 +207,79 @@ by `cron`, a build system, a service manager, or by double clicking an icon
 has nobody to put a question to, so it just says what it downloaded and
 carries on.  This avoids annoying hangs with no way to unhang them.
 
-The primary purpose of the prompt is to remind you that one or more packages
-are to be downloaded.  There is no way for `AltVEnv` to determine any of the
-following:
-* Maliciousness:
-  There is now way to magically determine if the package has malicious intent.
-  The program maintainer decides what goes on the `dependencies = [...]`.
-* Typos:
-  There is now way to fix typos (e.g. `requests` vs. `requests`)
-* Unexpected early execution:
-  The moment it is placed on Python's import path, before your program
-  imports anything from it, by shipping a file that Python executes during
-  start up.  Widely used packages do this for legitimate reasons.  Approval
-  happens before any of that, which is why it happens before unpacking rather
-  than at import time.
+### Imports
 
-<!-- Claude: I'm not sure that much of this needs to be exposed. -->
+For each of the packages listed in the `dependencies=[...]` section of the
+meta data, you can now execute an `import` statement as shown below:
+```
+30: # Example imports fetched via AltVEnv.
+31: import requests  # type: ignore[import-not-found]
+32: import dateutil.parser  # type: ignore[import-not-found]
+33:
+34: print(requests.__name__, dateutil.parser.__name__)
+```
+In general, the Python type checker is called `mypy` and it likes to look
+for static errors in a python file.  It will complain about `31` and `32`
+because it does not like any code before an `import` statement.  The comment:
+* `# type: ignore[import-not-found]`
+means `mypy` will not to generate an import statement error for the line.
+
+<!-- Claude:
+I am deliberately not explaining the organization of the `~/.alt_venv/`
+directory.  That information belongs in `~/.alt_venv/README.md`.
+
+## The `.alt_venv` directory:
+
+`AltVEnv` creates and manages directory called `.alt_venv` located
+in your home directory.  The location depends upon your operating system:
+* Windows: `C:\Users\YourName\.alt_venv`
+* Linux/macOS: `~/.alt_venv`
+
+There is a `README.md` inside `.alt_venv/` that describes its purpose.
+In addition, there are four sub-directories:
+* `versions/`:
+  This holds one directory per package version, named after the
+  Python wheel it came from.  These are added Python's import path.
+* `wheels/`:
+  Each Python wheel is also represented as a directory
+* `requests/`:
+  This remembers what was asked for, one small file per request, so
+  that asking again costs nothing.
+* `pending/`:
+  This is a scratch space used while fetching and unpacking.
+
+The `.alt_venv` directory can be safely deleted at any time since, it can be
+recreated and repopulated the next time a program that uses `AltVEnv` is
+executed.  To delete the directory:
+* Windows: `rmdir /s /q %USERPROFILE%\.alt_venv
+* Linux/macOS: `rm -rf ~/.alt_venv`
+-->
 
 ## Miscellaneous
 
-Removing old files:
-* `AltVEnv` also keeps track of how recently a package has been used.  When
+
+* Removing old files**:
+ `AltVEnv` also keeps track of how recently a package has been used.  When
   they have not been used in a while they get deleted.  Again, there is no
   harm in doing this since, the packages can easily be fetched over the network.
 
-* 
-**Old packages are cleared out on their own.**  A package that no program
-has needed for about six months is removed, for the same reason: it is worth
-less than the space it occupies, and getting it back costs one download.
-Using a package counts as needing it, so something installed two years ago
-and used this morning stays.  Anything left behind by a program that was
-interrupted mid-download is cleared out too.
+* **Old packages are cleared out on their own.**:
+  A package that no program has needed for about six months is removed, for the
+  same reason: it is worth less than the space it occupies, and getting it back
+  costs one download. Using a package counts as needing it, so something
+  installed two years ago and used this morning stays.  Anything left behind
+  by a program that was interrupted mid-download is also cleared out.
 
-The sweep happens at most once a day, when a program is about to fetch
-something anyway, so you will never notice it.
+  The sweep happens at most once a day, when a program is about to fetch
+  something anyway, so you will never notice it.
 
-**Programs share the directory safely, and nothing is stored twice.**  When two
-programs want the same package, the second one recognizes that the identical
-package is already there and uses it.  That holds even if both programs
-start at the same moment.
+* **Programs share the directory safely with no double storage.**:
+  When multiple programs with `AltVEnv` want the same package, the second
+  one recognizes that the identical package is already there and uses it.
+  That holds even if both programs start at the same moment.
 
-
-**If you wrote the program**, the guarantee is yours to give, and it takes
+<!-- Claude: I don't understand the chunk of text below.
+* **If you wrote the program**, the guarantee is yours to give, and it takes
 one run:
 
 ```bash
@@ -288,5 +291,16 @@ code, and everybody who runs your program afterwards gets exactly the
 packages you approved or a refusal that names the mismatch.  While you are
 still deciding what your program needs, `ALT_VENV_APPROVE=skip` turns the
 checking off for your own runs.
+-->
 
-[spec]: https://packaging.python.org/en/latest/specifications/inline-script-metadata/
+## Conclusion
+
+In short, `AltVEnv` allows you to entirely avoid Python Virtual Environments
+if you do the following:
+* Provide Python standard meta data about the needed packages at the front
+  of your program.
+* Paste the `AltVEnv` bootstrap into your code right before you do the
+  `import` statements for you package dependencies after the bootstrap.
+After that, your program will just download your packages automatically with
+no need to create, activate, deactivate or eventually remove a Python Virtual
+Environment.
