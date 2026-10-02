@@ -222,6 +222,46 @@ say on standard error whether the program's pasted bootstrap is the
 current one; `alt_venv.BOOTSTRAPS` lists the published ones, and
 `bootstrap.pasted("nopip3")` is the exact text a person pastes.
 
+**Never edit a file while a measurement is running** -- a coverage run,
+a cull, or `bootstrap.py`'s report.  They take minutes, they read the
+source as they go, and an edit in the middle counts the same lines
+under two different numbers.  It happened on 2026-10-01 and voided a
+cull's report; see Step 6.16.4.  Wait for it, or make the edit first.
+
+## Where things stand
+
+Updated at the end of each session, so that a fresh one starts here.
+As of 2026-10-01:
+
+* **Next:** Wayne is rewriting `README.md`, and the next session starts
+  there.  It is his file; help when asked, and do not edit it unasked.
+  The facts it needs:
+  * The shipping bootstrap is `nopip3`: **30 pasted lines** -- its 27
+    line body plus `import importlib`, `import pathlib` and
+    `import sys`.  `bootstrap.pasted("nopip3")` prints exactly what a
+    person pastes.
+  * What a machine needs: Python 3.11 or later, and a network that
+    reaches PyPI on the first run.  No `pip`, no virtual environment,
+    no administrator rights.  Verified on Linux only, under 3.11 and
+    3.12; Windows and macOS are untried (`2wmau`, `2btosc`).
+  * Wayne wants `pip` kept out of the opening sections.
+  * `install(bootstrap=...)` is read by nothing; the fingerprint of
+    Step 6.12 made the label unnecessary, so the example can drop it.
+* **Waiting on Wayne:**
+  * Whether to add `stdout=2` to `nopip3`'s `pip` call, so that `pip`'s
+    first-run progress goes to standard error instead of the program's
+    standard output.  It costs no line.  See Step 6.13.1.
+  * Whether the cull should measure a copy of the project, so that an
+    edit during a run cannot void it.  See Step 6.16.4.
+  * Restructuring `LOGBOOK.md`: Wayne has realised tasks and steps are
+    inverted -- steps must be sequential, tasks may run in parallel --
+    and will rework it after `README.md`.  Do not restructure it
+    unasked.  Issue `3rthtf` waits on the same.
+  * Publishing to test.pypi.org, Step 6.17.  Wayne is the blocker, by
+    his own account, and it comes after `README.md`.
+* **Open issues:** `2btosc` and `2wmau`, waiting on access to macOS and
+  Windows, which Wayne is arranging; `3rthtf`, above.
+
 ## Python style
 
 Python written for this project follows `python_with_markdown.md`, in
