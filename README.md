@@ -5,30 +5,25 @@ Before uploading AltVEnv to PyPI, all TBD's needs to be fixed. -->
 
 # `AltVEnv`: Alternative to Virtual Environments
 
-<!-- Claude:
-This is the "hook" -- a succinct problem declaration, a solution declaration,
-and an appeal to keep reading for more details. -->
-`AltVEnv` (i.e., Alternative to Virtual Environments) grew out of the
-frustration of dealing with concurrent Python program development where each
-program needs its own Python virtual environment.  When switching development
-from one program to the next, it is easy to forget to deactivate the current
+`AltVEnv` (short for Alternative to Virtual Environments) grew out of the
+frustration of developing several Python programs at once, where each program
+needs its own Python virtual environment.  When switching development from
+one program to the next, it is easy to forget to deactivate the current
 virtual environment before activating the next one.  If you forget, you end up
 running one program against another program's packages, and confusion can
 ensue.  The question that arose was "Is there a better way that avoids Python
-virtual environments entirely?"  Ultimately, `AltVEnv` grew out of this
-investigation, and the answer turned out to be "Absolutely yes!!!"
+virtual environments entirely?"  The answer turned out to be "Absolutely
+yes!!!"
 
-<!-- Claude: When the bootstrap is finalized, `N` needs to be updated. -->
-Using `AltVEnv` avoids Python virtual environments entirely.  It does this
-by inserting a modest piece of "bootstrap" code near the front of your Python
-program.  The bootstrap deals with everything else -- setting up the program's
-environment variables, downloading correct packages, etc.  A further advantage
-is that a single-file Python program can literally be e-mailed to somebody and
-it will just work!
+Paste a 30-line bootstrap near the top of a Python program, and the program
+fetches the packages it needs the first time it runs.  There is no virtual
+environment to create or activate, nothing to install beforehand, and no
+administrator rights needed -- just Python 3.11 or later.  Packages are
+downloaded once and shared by every program that uses them.
 
-<!-- Claude: This the "problem solved" statement (i.e. "buy it now!".) -->
-With `AltVEnv`, neither the developer nor the end user has to deal with the
-dreaded missing Python package problem.
+A single-file Python program can literally be e-mailed to somebody and it
+will just work!  With `AltVEnv`, neither the developer nor the end user has
+to deal with the dreaded missing Python package problem.
 
 ## Requirements
 
@@ -332,5 +327,5 @@ if you do the following:
   of your program.
 * Paste the `AltVEnv` bootstrap into your code right before you do the
   `import` statements for your package dependencies.
-After that, your program will just download your packages automatically with
+After that, your program will just download your packages automatically
 without any need to deal with a Python Virtual Environment.
