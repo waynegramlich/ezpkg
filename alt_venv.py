@@ -571,6 +571,11 @@ class AltVEnv:
           once a week, and the newest is the one used.
         * `last_cull` and `last_pip` are stamps recording when the
           cache was last swept and when `pip` was last checked.
+        * `alt_venv/` and `alt_venv-<version>.dist-info/` are `AltVEnv`
+          itself, which the bootstrap installed.
+        * `FOREVER_APPROVE`, if present, means somebody answered `a` to
+          the download prompt, so nobody is asked before packages are
+          installed.  Delete it to be asked again.
         * `quick_start.py` is a complete program that uses `AltVEnv`.
           Copy its parts into a program of your own; the comments in
           it say which part is which.  It is the copy that came with
@@ -578,7 +583,10 @@ class AltVEnv:
           one in the project's `README.md` may be newer.
 
         Deleting this whole directory is safe.  The next program that
-        needs one of these packages will fetch it again.
+        needs one of these packages will fetch it again.  To delete it:
+
+        * Linux and macOS: `rm -rf ~/.alt_venv`
+        * Windows: `rmdir /s /q %USERPROFILE%\\.alt_venv`
 
         A program can say which packages it needs in a PEP 723 block at
         its top, and can carry a `.altvenv` file beside it recording

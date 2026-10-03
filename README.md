@@ -197,71 +197,55 @@ Everything from here down is yours.
 
 ## Download Prompt
 
-When people run the `pip` program manually, they presumably already
-know that they are downloading a package onto their computer.  However, the
-`AltVEnv` bootstrap indirectly calls `pip`, so the user may not actually know
-that some packages might be downloaded.  It is considered rude not to inform
-the user at least once that some downloading is going on under the covers.
+When people run `pip` by hand, they know they are downloading packages onto
+their computer.  A program that uses `AltVEnv` downloads them on its own, so
+whoever runs it may not know.  It would be rude to do that without asking,
+so `AltVEnv` asks.
 
-The first time `AltVEnv` decides to download some Python packages (and you
-are using the command line interface) it will prompt you with the following
-question:
+If you tried the Quick Start, you have already seen the download prompt.
+The very first run of `quick_start.py`, with no `~/.alt_venv` yet, begins
+like this:
 
-<!-- Claude: I changed the message, so the code need to be updated. -->
 ```
-AltVEnv wants to download 2 packages with 3 dependencies into ~/.alt_venv .
-Go ahead? [y=>Yes, n=>No, a=>Always, ?=>Explanation]:
+$ python3 quick_start.py
+# pip output starts here
+Collecting alt_venv
+  Downloading alt_venv-0.0.1-py3-none-any.whl (31 kB)
+Installing collected packages: alt_venv
+Successfully installed alt_venv-0.0.1
+# Download prompt starts here
+1 requested, 1 downloaded into /home/you/.alt_venv:
+  cowsay 6.1  asked for
+1 requested, 1 to install into /home/you/.alt_venv;
+go ahead? [y=>Yes/n=>No/a=>Always/?=>Explanation] y
 ```
-* Capital letters work as well as small ones, and a bare newline means `n`.
-* `y`: installs them and runs the program.
-* `n`: installs nothing and stops.  Nothing has been unpacked at that
-  point and nothing from the packages has run.
-* `?`: lists what would be installed, one line each, and asks again.
-  Asking for detail is never counted against you.
-* `a`: disables asking the question again on this machine.  It is
-  the only answer that outlasts the run, so it is the only one that asks
-  you to confirm:
-  * `Really never ask again? [y=>Yes/n=>No]:`
-     Answering `n` returns you to the first question with the install still on
-     offer.  Answering `y` suppresses the question until the entire `.alt_venv`
-     directory is manually deleted.  (Remember, deleting the `.alt_venv`
-     directory is **ALWAYS** a safe thing to do.)
 
-If a program has no terminal access, it is not asked.  Thus, anything started
-by `cron`, a build system, a service manager, or by double-clicking an icon
-has nobody to put a question to, so it just prints out what it downloaded and
-carries on.  This avoids annoying hangs with no way to unhang them.
+The two `#` lines are not output; they mark where each part begins.  The
+`pip` output is the bootstrap installing `alt_venv` itself.  It is left
+visible on purpose, so that you can see something being downloaded, and it
+appears only on a machine's very first run.
 
-<!-- Claude:
-I am deliberately not explaining the organization of the `~/.alt_venv/`
-directory.  That information belongs in `~/.alt_venv/README.md`.
+The download prompt comes from `AltVEnv`.  It appears whenever a program
+needs packages that are not already in `~/.alt_venv`.  It lists what was
+downloaded, then asks the question before anything is installed.  When
+`AltVEnv` runs `pip` itself, it hides `pip`'s output unless `pip` fails.
 
-## The `.alt_venv` directory:
+Each package is marked `asked for` when Part 1 of the program names it, or
+`came along` when it is only there because something else needs it.  The
+answers are:
 
-`AltVEnv` creates and manages a directory called `.alt_venv` located
-in your home directory.  The location depends upon your operating system:
-* Windows: `C:\Users\YourName\.alt_venv`
-* Linux/macOS: `~/.alt_venv`
+* `y` or `yes`: install them and run the program.
+* `n`, `no`, or just Enter: install nothing.  The program stops with
+  `alt_venv: fetch packages failed: RuntimeError('declined: ...')`.  Nothing
+  has been unpacked and nothing from the packages has run.  The downloads
+  are thrown away, so the next run asks again.
+* `?`: show where the packages came from and what each one says about
+  itself, then ask again.
+* `a` or `always`: stop asking; delete `~/.alt_venv/FOREVER_APPROVE` to be
+  asked again.
 
-There is a `README.md` inside `.alt_venv/` that describes its purpose.
-In addition, there are four sub-directories:
-* `versions/`:
-  This holds one directory per package version, named after the
-  Python wheel it came from.  These are added to Python's import path.
-* `wheels/`:
-  Each Python wheel is also represented as a directory.
-* `requests/`:
-  This remembers what was asked for, one small file per request, so
-  that asking again costs nothing.
-* `pending/`:
-  This is a scratch space used while fetching and unpacking.
-
-The `.alt_venv` directory can be safely deleted at any time, since it can be
-recreated and repopulated the next time a program that uses `AltVEnv` is
-executed.  To delete the directory:
-* Windows: `rmdir /s /q %USERPROFILE%\.alt_venv`
-* Linux/macOS: `rm -rf ~/.alt_venv`
--->
+A program with no terminal, such as one started by `cron`, is not asked; it
+lists what it downloaded and carries on.
 
 ## Miscellaneous
 
