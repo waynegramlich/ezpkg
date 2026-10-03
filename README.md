@@ -247,58 +247,87 @@ answers are:
 A program with no terminal, such as one started by `cron`, is not asked; it
 lists what it downloaded and carries on.
 
+## Author Package Management
+
+<!-- Wayne: a true freeze needs two things, and only the second exists.
+(1) Exact `==` pins in Part 1 for every package, including the ones that
+come along, so that `pip` fetches the same versions every time.  (2) The
+approvals file, so that those exact files are verified and nothing else
+is accepted.  An idea for (1): `ALT_VENV_APPROVE=write` could also print
+the `==` pins for everything it recorded, ready to paste into Part 1.
+Approvals are also an audit of what actually arrived.  Watch the
+platform catch: approvals are keyed by file name, so a compiled package
+recorded on one Python version or operating system is refused on
+another. -->
+
+Whoever runs your program cannot tell a genuine package from a tampered or
+look-alike one, but you can.  Run it once as
+`ALT_VENV_APPROVE=write python3 prog.py` to record the exact packages you got
+in `prog.altvenv`, and ship that file beside it.  Nobody is asked after that:
+anything that does not match is refused before it is installed.  A new
+release of a package is refused too, until you record it again.
+
 ## Miscellaneous
 
-* **Old packages are cleared out on their own.**
-  A package that no program has needed for about six months is removed, for the
-  same reason: it is worth less than the space it occupies, and getting it back
-  costs one download.  Using a package counts as needing it, so something
-  installed two years ago and used this morning stays.  Anything left behind
-  by a program that was interrupted mid-download is also cleared out.
-
-  The sweep is very fast and happens at most once a day.
-
-* **No packages are duplicated.**
-  When multiple programs with `AltVEnv` want the same package, the second
-  one recognizes that the identical package is already there and uses it.
-  That holds even if both programs start at the same moment.
-
-<!-- Claude: I don't understand the chunk of text below.
-* **If you wrote the program**, the guarantee is yours to give, and it takes
-one run:
-
-```bash
-ALT_VENV_APPROVE=write python3 prog.py
-```
-
-That writes `prog.altvenv` beside your program.  Commit it alongside the
-code, and everybody who runs your program afterwards gets exactly the
-packages you approved or a refusal that names the mismatch.  While you are
-still deciding what your program needs, `ALT_VENV_APPROVE=skip` turns the
-checking off for your own runs.
--->
+* **Garbage collection:** Packages no program has used for about six
+  months are removed, checked at most once a day.
+* **No duplication:** Programs that need the same package share one copy.
+* **Versions side by side:** Programs that need different versions of a
+  package each get their own.
 
 ## Alternatives
 
-<!-- Claude:
-I give you have full permission to rewrite this section of the document.
-I want to focus solutions that encapsulate everything into one files
-(there are many).  Prioritize solutions that do not need installation
-of other software, then list alternatives (`uv`, `docker`, `snap`, etc.) -->
+There are many ways to get a Python program its packages.  `AltVEnv` fills
+one niche: a program that stays a single, readable `.py` file, needs nothing
+installed beforehand, and fetches its packages on its first run.  The
+alternatives below are grouped by what the person running the program has
+to do first.
 
-A short list of alternatives to explore follows:
-* [Python Virtual Environments](https://docs.python.org/3/library/venv.html):
-  For software developers, virtual environments are actually quite reasonable.
-  However, asking end users to install a virtual environment prior to execution
-  is asking a lot.
-* [uv](https://docs.astral.sh/uv/):
-  `uv` is gaining popularity as an alternative to Python Virtual Environments.
-* [`zipapp`](https://docs.python.org/3/library/zipapp.html):
-  `zipapp` produces large executable Python archives that contain everything.
-* Container technology:
-  [Docker](https://www.docker.com/) and [Snap](https://snapcraft.io/docs/)
-  provide alternatives to `zipapp`.
--->
+### Nothing to install beyond Python
+
+* [Virtual environments](https://docs.python.org/3/library/venv.html):
+  Reasonable for developers, but asking somebody else to create and
+  activate one before running a program is asking a lot.  Some Linux
+  distributions also leave out the `venv` module until a separate package is
+  installed.
+* `pip install`: Needs `pip`, which many systems do not provide by default.
+  Many Linux distributions also refuse to let `pip` install into the
+  system's Python at all, as
+  [PEP 668](https://peps.python.org/pep-0668/) allows.
+* [`zipapp`](https://docs.python.org/3/library/zipapp.html): Bundles a
+  program and its packages into one `.pyz` file that Python runs directly.
+  It is in the standard library, but the file is no longer readable, must be
+  rebuilt to update a package, and cannot carry packages with compiled
+  parts.
+* [shiv](https://shiv.readthedocs.io/) and
+  [PEX](https://docs.pex-tool.org/): Like `zipapp`, but able to carry
+  compiled packages, at the cost of a separate file for each platform.  The
+  author installs the tool; the person running the program needs only
+  Python.
+* [PyInstaller](https://pyinstaller.org/) and
+  [Nuitka](https://nuitka.net/): Turn a program into a native executable
+  with Python inside, so the person running it needs nothing at all.  The
+  result is large, and must be built separately for each operating system.
+
+### Something to install first
+
+* [`uv`](https://docs.astral.sh/uv/): `uv run prog.py` reads the same
+  metadata block as Part 1 and runs the program with its packages, very
+  quickly.  It is the closest alternative to `AltVEnv`.
+* [`pipx`](https://pipx.pypa.io/): `pipx run prog.py` also reads that
+  block.
+* Containers, such as [Docker](https://www.docker.com/), or Linux packaging
+  such as [Snap](https://snapcraft.io/docs/): Ship the program with a whole
+  environment around it.  Thorough, but heavy, and the person running the
+  program needs the container system installed first.
+
+### Why not just use `uv`?
+
+If everyone who will run your program has `uv`, use it: it does more than
+`AltVEnv`, and does it faster.  `AltVEnv` is for the program you hand to
+somebody who has Python and nothing else, and whom you would rather not ask
+to install a tool before trying it.  Because both read the same metadata
+block, Part 1 of a program is the same either way.
 
 ## Conclusion
 
