@@ -15,7 +15,7 @@ ensue.  The question that arose was "Is there a better way that avoids Python
 virtual environments entirely?"  The answer turned out to be "Absolutely
 yes!!!"
 
-Paste a 30-line bootstrap near the top of a Python program, and the program
+Paste a 31-line bootstrap near the top of a Python program, and the program
 fetches the packages it needs the first time it runs.  There is no virtual
 environment to create or activate, nothing to install beforehand, and no
 administrator rights needed -- just Python 3.11 or later.  Packages are
@@ -68,14 +68,12 @@ try:
             sys.executable, w/"pip", "install", "--no-input", "-t", t,
             "--disable-pip-version-check", "alt_venv"], check=True)
     s = "import alt_venv"; sys.path.insert(0, str(t))
-    importlib.invalidate_caches(); importlib.import_module("alt_venv")
+    importlib.invalidate_caches(); m = importlib.import_module("alt_venv")
+    s = "fetch packages"; m.AltVEnv().install(bootstrap="nopip3")
 except Exception as x:
-    raise SystemExit(f"cannot fetch alt_venv, {s} failed: {x!r}")
+    raise SystemExit(f"alt_venv: {s} failed: {x!r}")
 
-# Part 4: Fetch the packages listed in Part 1, then import them.
-import alt_venv  # type: ignore[import-not-found]
-
-alt_venv.AltVEnv().install()
+# Part 4: Import the packages listed in Part 1.
 import cowsay  # type: ignore[import-not-found]
 
 # Part 5: The program itself.
@@ -118,8 +116,8 @@ first time a program needs a package.
 `quick_start.py` is also a template.  Open it in your editor and read along:
 after the first run there is a copy in `~/.alt_venv/quick_start.py`, or use
 the one above.  It has five parts, each starting with a `# Part` comment,
-and every program that uses `AltVEnv` has the same five.  Parts 2, 3 and 4
-are copied as they are; Parts 1 and 5 are yours.
+and every program that uses `AltVEnv` has the same five.  Parts 2 and 3 are
+copied as they are; Parts 1, 4 and 5 are yours.
 
 #### Part 1: The packages this program needs
 
@@ -171,38 +169,27 @@ comments does no harm, but changing its code makes it a different
 bootstrap.  To see whether a program carries the current one, run it with
 `ALT_VENV_BOOTSTRAP=check` set, and it says so on standard error.
 
-The first time any program runs it on a machine, it does three things:
+The first time any program runs it on a machine, it fetches `alt_venv`:
 
-1. It asks PyPI for the newest `pip` that this Python can run.
+1. It asks [PyPI](https://pypi.org/), the Python Package Index, for the
+   newest `pip` that this Python can run.
 2. It downloads that `pip`, checks its SHA-256 against the one PyPI
    publishes, and keeps it as `~/.alt_venv/pip.whl`.  The machine's own
    `pip`, if it has one, is never used or changed.
 3. It runs that `pip` to install `alt_venv` into `~/.alt_venv`.
 
-On every run, the first included, it puts `~/.alt_venv` on Python's import
-path and imports `alt_venv`.  Once `alt_venv` is there, the three steps
-above are skipped and no network is needed.  If anything goes wrong, the
-program stops with one line saying which step failed and why.
+Later runs skip the previous three steps.  Every run, the first one included,
+then just uses the downloaded `AltVEnv` package to download any further
+packages and perform housekeeping in the `~/.alt_venv/` directory.
 
-#### Part 4: Fetch the packages listed in Part 1, then import them
+#### Part 4: Import the packages listed in Part 1
 
-`install()`, called with no arguments, reads Part 1 of the program that is
-running.  It checks `requires-python`, then fetches whatever in
-`dependencies` is not already in `~/.alt_venv`, asks once before installing
-it, and puts each package on Python's import path.  A list it has fetched
-before is answered from `~/.alt_venv` without running `pip` at all.
-
-While it is there, it also does some housekeeping.  At most once a day it
-clears out packages that no program has used for about six months, and
-about once a week it looks for a newer `pip`.  Looking for `pip` never makes
-the program fail; without a network, it simply tries again a week later.
-
-Your own `import` statements come after `install()`, because that is what
-makes the packages importable.  Import each package by its module name,
-which is not always the name in Part 1: `python-dateutil` is imported as
-`dateutil`.  The `# type: ignore[import-not-found]` comments are only for
-`mypy`, which cannot see packages that live in `~/.alt_venv`; leave them
-out if you do not use it.
+Your own `import` statements come after the bootstrap, because the bootstrap
+is what makes the packages importable.  Import each package by its module
+name, which is not always the name in Part 1: `python-dateutil` is imported
+as `dateutil`.  The `# type: ignore[import-not-found]` comments are only for
+`mypy`, which cannot see packages that live in `~/.alt_venv`; leave them out
+if you do not use it.
 
 #### Part 5: The program itself
 

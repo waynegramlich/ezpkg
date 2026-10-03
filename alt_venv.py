@@ -116,8 +116,8 @@ PIP_INTERVAL: float = 7.0 * 86400.0
 # entries stay, because they are how a stale copy is recognised.  See
 # Step 6.12 in `LOGBOOK.md`.
 BOOTSTRAPS: dict[str, str] = {
-    "02e20da610125a90d038db27f77f835dfd7731e29d9a366d85327f24e56d283f":
-        "nopip3 of 2026-10-01",
+    "46336be666731d6a8999d4233d51b99a0cc327d479e57ece2f7b003290ffa466":
+        "nopip3 of 2026-10-02",
 }
 
 # The Quick Start program from `README.md`, which the constructor writes
@@ -164,14 +164,12 @@ try:
             sys.executable, w/"pip", "install", "--no-input", "-t", t,
             "--disable-pip-version-check", "alt_venv"], check=True)
     s = "import alt_venv"; sys.path.insert(0, str(t))
-    importlib.invalidate_caches(); importlib.import_module("alt_venv")
+    importlib.invalidate_caches(); m = importlib.import_module("alt_venv")
+    s = "fetch packages"; m.AltVEnv().install(bootstrap="nopip3")
 except Exception as x:
-    raise SystemExit(f"cannot fetch alt_venv, {s} failed: {x!r}")
+    raise SystemExit(f"alt_venv: {s} failed: {x!r}")
 
-# Part 4: Fetch the packages listed in Part 1, then import them.
-import alt_venv  # type: ignore[import-not-found]
-
-alt_venv.AltVEnv().install()
+# Part 4: Import the packages listed in Part 1.
 import cowsay  # type: ignore[import-not-found]
 
 # Part 5: The program itself.

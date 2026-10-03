@@ -35,14 +35,12 @@ try:
             sys.executable, w/"pip", "install", "--no-input", "-t", t,
             "--disable-pip-version-check", "alt_venv"], check=True)
     s = "import alt_venv"; sys.path.insert(0, str(t))
-    importlib.invalidate_caches(); importlib.import_module("alt_venv")
+    importlib.invalidate_caches(); m = importlib.import_module("alt_venv")
+    s = "fetch packages"; m.AltVEnv().install(bootstrap="nopip3")
 except Exception as x:
-    raise SystemExit(f"cannot fetch alt_venv, {s} failed: {x!r}")
+    raise SystemExit(f"alt_venv: {s} failed: {x!r}")
 
-# Part 4: Fetch the packages listed in Part 1, then import them.
-import alt_venv  # type: ignore[import-not-found]
-
-alt_venv.AltVEnv().install()
+# Part 4: Import the packages listed in Part 1.
 import cowsay  # type: ignore[import-not-found]
 
 # Part 5: The program itself.

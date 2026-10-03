@@ -57,14 +57,16 @@ and means the text a person copies is the text that was measured.
 
 The message names a **stage** where a case sets one.  `nopip3` sets
 its stage, `s`, before each step of its work -- `find home`, `choose
-pip`, `download pip`, `install alt_venv`, `import alt_venv`, two words
-at most -- and its `except` reports the stage that was running, then
-the exception's `repr`, which carries its type as well as its text:
-`cannot fetch alt_venv, choose pip failed: <HTTPError 404: 'Not
+pip`, `download pip`, `install alt_venv`, `import alt_venv`, `fetch
+packages`, two words at most -- and its `except` reports the stage that
+was running, then the exception's `repr`, which carries its type as
+well as its text: `alt_venv: choose pip failed: <HTTPError 404: 'Not
 Found'>`.  The type matters because some exceptions have no text at
 all: a bare `StopIteration` used to print `cannot fetch alt_venv: ` and
-nothing more.  The other cases name no stage and report the type and
-text alone.  See issue `3fpfipe`.
+nothing more.  The other cases name no stage, report the type and text
+alone, and begin `cannot fetch alt_venv`, which `nopip3` cannot say
+since its last stage fetches the program's packages.  See issue
+`3fpfipe`.
 
 The `paste` column was corrected twice on 2026-09-29: it had been left
 at `lines + 4` from before the `try` was charged, and then dropped by
@@ -115,7 +117,7 @@ user would type.  The real `~/.alt_venv` is never touched.
 |        | stdlib wheel  |         |       |       |        |        |        |
 | nopip2 | venv(no pip), | 7       | 54    | 57    | 1.42 s | 0.16 s | 1714   |
 |        | stdlib wheel  |         |       |       |        |        |        |
-| nopip3 | no venv, PyPI | 4       | 27    | 30    | 3.05 s | 0.14 s | 3538   |
+| nopip3 | no venv, PyPI | 4       | 28    | 31    | 3.05 s | 0.14 s | 3538   |
 |        | pip           |         |       |       |        |        |        |
 |        | subprocess    |         |       |       |        |        |        |
 +--------+---------------+---------+-------+-------+--------+--------+--------+
@@ -231,7 +233,7 @@ it as `~/.alt_venv/pip.whl`, and runs it as `python pip.whl/pip`, which
 is how pip documents running itself without being installed.  `AltVEnv`
 then uses that same copy, so nothing on the machine needs pip at all.
 It is a subprocess case, so none of pip's state reaches the program,
-and it costs 30 pasted lines against `pip2`'s 17.
+and it costs 31 pasted lines against `pip2`'s 17.
 
 It is also the one case **squeezed on purpose**, on 2026-10-01: a
 bootstrap is meant to feel like magic, and a short one is pasted with
@@ -243,7 +245,10 @@ except for `urllib.request as req`, because the person moves them to the
 top of their program, where many tools check exactly that.  That took it
 from 41 pasted lines to 27, and checking the SHA-256 of the pip it
 downloads, against the digest PyPI lists, then added three: `import
-hashlib` and a two line `if` that raises.  `ruff.toml` exempts this file
+hashlib` and a two line `if` that raises.  On 2026-10-02 it took one
+more, to call `AltVEnv().install()` itself, so that a program using it
+never has to name `alt_venv` at all; Wayne: "The end-user should never
+have to directly touch `AltVEnv`."  `ruff.toml` exempts this file
 from the one rule the squeeze breaks, `E702`.  The comment on the choice
 of pip went too, at Wayne's word, since this docstring explains it.  Not
 squeezed: pip's `--no-input` and `--disable-pip-version-check`, which
@@ -785,9 +790,10 @@ def nopip3() -> None:
                 sys.executable, w/"pip", "install", "--no-input", "-t", t,
                 "--disable-pip-version-check", PACKAGE], check=True)
         s = f"import {PACKAGE}"; sys.path.insert(0, str(t))
-        importlib.invalidate_caches(); importlib.import_module(PACKAGE)
+        importlib.invalidate_caches(); m = importlib.import_module(PACKAGE)
+        s = "fetch packages"; m.AltVEnv().install(bootstrap="nopip3")
     except Exception as x:
-        raise SystemExit(f"cannot fetch {PACKAGE}, {s} failed: {x!r}")
+        raise SystemExit(f"{PACKAGE}: {s} failed: {x!r}")
 
 
 def main() -> None:
@@ -812,7 +818,8 @@ def main() -> None:
     # `types`, because `sys` is a module and is already imported.
     assert isinstance(module, type(sys)), f"{PACKAGE} gave {module!r}"
 
-    # A real program constructs one next and calls `install()`, and
+    # A real program constructs one next and calls `install()` -- the
+    # shipping case does so itself, and a second call is harmless -- and
     # neither is idle here: the constructor repairs a single module
     # install so that this case's own `is_dir()` guard recognises it on
     # the following run, and `install()` walks the declared path in every

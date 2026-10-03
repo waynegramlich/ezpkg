@@ -2609,6 +2609,23 @@ expected every time the order changes, and is Claude's job.
     private `pip` is left alone.  Five tests, among them a stand-in
     `pip` 99.0 being added and a dead index changing nothing; with the
     version comparison disabled, the up-to-date test fails.
+  * 6.15.17 - **The bootstrap calls `install()` itself**, 2026-10-02,
+    31 pasted lines.  Every case had ended at importing `alt_venv`,
+    leaving `install()` to `bootstrap.py`'s epilogue, so when
+    `README.md`'s example moved to `nopip3` it grew `import alt_venv`
+    and `alt_venv.AltVEnv().install()` below the bootstrap, and Wayne
+    asked why a program should mention `alt_venv` at all.  Wayne: "The
+    end-user should never have to directly touch `AltVEnv`."  The last
+    stage is now `fetch packages`, calling
+    `AltVEnv().install(bootstrap="nopip3")`; the label is read by
+    nothing, but Wayne wants it.  Failures there -- a package that will
+    not download, or `n` at the prompt -- now end in the bootstrap's one
+    line instead of a traceback, and the message became `alt_venv:
+    <stage> failed: <repr>`, since "cannot fetch alt_venv" would be
+    wrong for them.  The other twelve cases keep their wording, and
+    `test_a_failed_fetch_is_one_line` accepts either.  The fingerprint
+    entry of 2026-10-01 was replaced rather than kept, because it was
+    never published.
 
 * Step 6.16: Test suite cleanup, headed towards deleting some of the
   cases in `bootstrap.py` now that `nopip3` ships.
@@ -2763,6 +2780,31 @@ expected every time the order changes, and is Claude's job.
     * Writing it found that `run_bootstrap_case` raised `TypeError`
       when `extra` repeated a variable it sets itself, such as
       `BOOTSTRAP_JSON_API`.  `extra` now overrides.
+
+  * 6.16.8 - **The last two missed lines were the tracer's fault**,
+    2026-10-02, on a second full traced run while Wayne took a break:
+    `ALT_VENV_TEST=COMPLETE ./alt_venv_coverage.py --children`, 220
+    tests passing in 20 minutes, 343 children folded in, then the
+    opt-in `PyPITest` and `ReportTest`, all passing (one expected
+    failure, `2wtmifs`'s abi3 test).
+
+    The two lines 6.16.7 accepted as unreachable, in
+    `repair_module_layout`, were reached all along; a probe saw
+    `__file__` arrive as `None` and as a `.txt` path.  The cause is in
+    `trace`: `globaltrace_lt` decides whether to follow a call by the
+    **calling module's** `__file__`, read from the frame's globals, but
+    keys the counts by the code's `co_filename`.  The test patches
+    `alt_venv.__file__`, so with `None` `trace` gives up on the frame,
+    and with a path outside the project `ProjectOnly` turns it away.
+    Both tracers now subclass `trace.Trace` (`ByCode` in
+    `alt_venv_coverage.py`, `_ByCode` in the hook) and ask about
+    `co_filename`, the file the counts are kept under.  Rerun:
+    `alt_venv.py` 100%, `bootstrap.py` 99%, `alt_venv_test.py` 94%.
+    What remains missed is environmental -- a non-CPython interpreter,
+    no `openssl`, an unexpected server error -- or belongs to the
+    opt-in classes and to `skipTest` lines that cannot fire under
+    `COMPLETE`.  `alt_venv_coverage.py`'s docstring no longer lists
+    the two lines as a blind spot.
 
 * Step 6.17: A fetch from the real PyPI, carried over from Task 5.
 

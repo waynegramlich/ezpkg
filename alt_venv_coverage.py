@@ -28,7 +28,7 @@ ordering from the case that ships showing which cases add nothing.
 counts, in seconds, which is what makes culling cases cheap to repeat.
 See Step 6.16 of `LOGBOOK.md`.
 
-Two workarounds here were each found the hard way, and both matter
+Three workarounds here were each found the hard way, and all matter
 more than they look:
 
 1. **Threads have to be instrumented separately.**  `trace` follows
@@ -43,23 +43,21 @@ more than they look:
    its own teardown has removed, and `write_results` raises
    `FileNotFoundError` trying to read the source to annotate it.
 
-Two blind spots remain, and neither is a defect in the tests:
+3. **What to follow is decided by the code's own file.**  `trace`
+   decides by reading `frame.f_globals.get("__file__")`, the calling
+   module's `__file__`, but keys its counts by `co_filename`.  A test
+   that patches `alt_venv.__file__` to `None` or to a file that is not
+   a `.py` made `trace` stop following there, so two lines of
+   `repair_module_layout` that a passing test reaches read as never
+   run.  `ByCode` asks about `co_filename` instead.  Step 6.16.8.
+
+One blind spot remains, and it is not a defect in the tests:
 
 * **Child processes are not followed** unless `--children` is given.
   Without it `bootstrap.py` reports about 7%, because its thirteen
   cases only ever run in child interpreters.  With it, a copy of
   `alt_venv.py` that a bootstrap installed is credited to the project's
   own file when the two are identical; see `trace_hook/sitecustomize.py`.
-* **A frame whose `__file__` is false is not followed.**
-  `trace.Trace.globaltrace_lt` decides what to follow by reading
-  `frame.f_globals.get("__file__")`.  So the one line of
-  `alt_venv.py` that runs only when `__file__` is `None`, the
-  frozen interpreter branch of `repair_module_layout`, can never be
-  reported as covered.  It is reached by a test that passes.  The
-  same goes for the branch that refuses a module whose `__file__` is
-  not a `.py` file: its test patches `__file__`, which is exactly what
-  `trace` reads to decide whether to follow, so it stops following
-  there.  Those two lines are the whole of the gap.
 
 MIT No Attribution
 
@@ -94,6 +92,7 @@ import time
 import trace
 import unittest
 from pathlib import Path
+from types import FrameType
 from typing import Any, cast
 
 # The file `report` keeps the counts in, inside the annotation
@@ -179,6 +178,45 @@ class ProjectOnly:
         return verdict
 
 
+class ByCode(trace.Trace):
+    """A `trace.Trace` that decides what to follow by the code's own file.
+
+    At each call, `trace` asks its `Ignore` about the **calling
+    module's** `__file__`, read out of the frame's globals, but it
+    records the counts under the code's own `co_filename`.  The two
+    agree until a test replaces a module's `__file__`, which
+    `test_repair_declines_what_is_not_a_module` does on purpose: with
+    `None`, `trace` stops following the call outright, and with a path
+    outside the project, `ProjectOnly` turns it away.  Lines that ran
+    then read as never run.  Deciding by `co_filename` asks about the
+    same file the counts are kept under.
+
+    Constructor:
+    * `ByCode(count=1, trace=0)`, as `trace.Trace`.
+    """
+
+    def globaltrace_lt(self, frame: FrameType, why: str, arg: Any) -> Any:
+        """Follow a new frame when its code is one of ours.
+
+        Arguments:
+        * `frame` (`FrameType`):
+          The frame being entered.
+        * `why` (`str`):
+          The event, which is only acted on when it is `call`.
+        * `arg` (`Any`):
+          The event's argument, unused.
+
+        Returns:
+        * (`Any`): The line counting function to use inside the frame,
+          or `None` to leave it alone.
+        """
+        # The code's file, which is also what the counts are keyed by.
+        if why == "call" and not self.ignore.names(
+                frame.f_code.co_filename, ""):
+            return self.localtrace
+        return None
+
+
 def build_tracer() -> trace.Trace:
     """Return a tracer that counts lines in this project only.
 
@@ -190,8 +228,9 @@ def build_tracer() -> trace.Trace:
     Returns:
     * (`trace.Trace`): A line counting tracer, not yet running.
     """
-    # The standard `Ignore` is swapped for one that decides by path.
-    tracer: trace.Trace = trace.Trace(count=1, trace=0)
+    # The standard `Ignore` is swapped for one that decides by path,
+    # and asked about the code's own file; see `ByCode`.
+    tracer: trace.Trace = ByCode(count=1, trace=0)
     tracer.ignore = cast(Any, ProjectOnly())
     return tracer
 

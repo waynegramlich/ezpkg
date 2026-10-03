@@ -248,17 +248,21 @@ As of 2026-10-01:
 * **Next:** Wayne is rewriting `README.md`, and the next session starts
   there.  It is his file; help when asked, and do not edit it unasked.
   The facts it needs:
-  * The shipping bootstrap is `nopip3`: **30 pasted lines** -- its 27
+  * The shipping bootstrap is `nopip3`: **31 pasted lines** -- its 28
     line body plus `import importlib`, `import pathlib` and
     `import sys`.  `bootstrap.pasted("nopip3")` prints exactly what a
-    person pastes.
+    person pastes.  Since 2026-10-02 it calls `AltVEnv().install()`
+    itself, because a program's author should never have to touch
+    `AltVEnv` or even name `alt_venv`.
   * What a machine needs: Python 3.11 or later, and a network that
     reaches PyPI on the first run.  No `pip`, no virtual environment,
     no administrator rights.  Verified on Linux only, under 3.11 and
     3.12; Windows and macOS are untried (`2wmau`, `2btosc`).
   * Wayne wants `pip` kept out of the opening sections.
-  * `install(bootstrap=...)` is read by nothing; the fingerprint of
-    Step 6.12 made the label unnecessary, so the example can drop it.
+  * `install(bootstrap="nopip3")` is read by nothing, since the
+    fingerprint of Step 6.12 identifies the bootstrap, but Wayne wants
+    the label in the bootstrap all the same.  There is no `package=`
+    argument; `bootstrap=` is the one he means.
 * **Waiting on Wayne:**
   * Whether to add `stdout=2` to `nopip3`'s `pip` call, so that `pip`'s
     first-run progress goes to standard error instead of the program's

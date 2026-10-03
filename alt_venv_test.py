@@ -1454,7 +1454,10 @@ class AltVEnvTest(unittest.TestCase):
                     {"PIP_RETRIES": "0", "PIP_TIMEOUT": "2"})
                 self.assertNotEqual(done.returncode, 0)
                 self.assertNotIn("Traceback", done.stderr)
-                self.assertIn(f"cannot fetch {MODULE}", done.stderr)
+                # `nopip3` names its stage, since it may fail fetching
+                # the program's packages rather than `alt_venv` itself.
+                self.assertRegex(done.stderr, rf"cannot fetch {MODULE}"
+                                 rf"|{MODULE}: [a-z_ ]+ failed: ")
 
     def test_json_api_lists_the_wheel(self) -> None:
         """The synthesized JSON API answers in the shape `nopip1` reads."""
@@ -1626,8 +1629,8 @@ class AltVEnvTest(unittest.TestCase):
         done: subprocess.CompletedProcess[str] = self.run_case(SHIPPING)
         self.assertNotEqual(done.returncode, 0)
         self.assertNotIn("Traceback", done.stderr)
-        self.assertIn(f"cannot fetch {MODULE}, choose pip failed: "
-                      "<HTTPError 404", done.stderr)
+        self.assertIn(f"{MODULE}: choose pip failed: <HTTPError 404",
+                      done.stderr)
 
     @runs_cases
     def test_the_shipping_case_refuses_a_damaged_pip(self) -> None:
