@@ -195,43 +195,6 @@ if you do not use it.
 
 Everything from here down is yours.
 
-## Requirements
-
-<!-- Claude: The `(~N lines)` needs updating prior to PyPI deployment. -->
-<!-- Claude: The goal is to keep the itemized list short. -->
-The `AltVEnv` requirements are:
-1. Python 3.11 or greater is required.
-2. Standard Python metadata, embedded as hash comments at the front of the
-   program, lists the required packages.
-3. A modest chunk of bootstrap code (~N lines) is added to your code
-   prior to the `import` statements for the previously listed packages.
-4. An active network connection is required for the initial run.  Afterwards,
-   the packages are locally cached and a network connection is no longer
-   needed.
-That's it!
-
-## Alternatives
-
-<!-- Claude:
-I give you have full permission to rewrite this section of the document.
-I want to focus solutions that encapsulate everything into one files
-(there are many).  Prioritize solutions that do not need installation
-of other software, then list alternatives (`uv`, `docker`, `snap`, etc.) -->
-
-A short list of alternatives to explore follows:
-* [Python Virtual Environments](https://docs.python.org/3/library/venv.html):
-  For software developers, virtual environments are actually quite reasonable.
-  However, asking end users to install a virtual environment prior to execution
-  is asking a lot.
-* [uv](https://docs.astral.sh/uv/):
-  `uv` is gaining popularity as an alternative to Python Virtual Environments.
-* [`zipapp`](https://docs.python.org/3/library/zipapp.html):
-  `zipapp` produces large executable Python archives that contain everything.
-* Container technology:
-  [Docker](https://www.docker.com/) and [Snap](https://snapcraft.io/docs/)
-  provide alternatives to `zipapp`.
--->
-
 ## Download Prompt
 
 When people run the `pip` program manually, they presumably already
@@ -329,6 +292,28 @@ code, and everybody who runs your program afterwards gets exactly the
 packages you approved or a refusal that names the mismatch.  While you are
 still deciding what your program needs, `ALT_VENV_APPROVE=skip` turns the
 checking off for your own runs.
+-->
+
+## Alternatives
+
+<!-- Claude:
+I give you have full permission to rewrite this section of the document.
+I want to focus solutions that encapsulate everything into one files
+(there are many).  Prioritize solutions that do not need installation
+of other software, then list alternatives (`uv`, `docker`, `snap`, etc.) -->
+
+A short list of alternatives to explore follows:
+* [Python Virtual Environments](https://docs.python.org/3/library/venv.html):
+  For software developers, virtual environments are actually quite reasonable.
+  However, asking end users to install a virtual environment prior to execution
+  is asking a lot.
+* [uv](https://docs.astral.sh/uv/):
+  `uv` is gaining popularity as an alternative to Python Virtual Environments.
+* [`zipapp`](https://docs.python.org/3/library/zipapp.html):
+  `zipapp` produces large executable Python archives that contain everything.
+* Container technology:
+  [Docker](https://www.docker.com/) and [Snap](https://snapcraft.io/docs/)
+  provide alternatives to `zipapp`.
 -->
 
 ## Conclusion
