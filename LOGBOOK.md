@@ -2805,6 +2805,28 @@ expected every time the order changes, and is Claude's job.
     opt-in classes and to `skipTest` lines that cannot fire under
     `COMPLETE`.  `alt_venv_coverage.py`'s docstring no longer lists
     the two lines as a blind spot.
+  * 6.16.9 - **Python 3.11 found three faults**, 2026-10-02, overnight
+    while Wayne slept.  Under 3.12, everything at once --
+    `COMPLETE`, `--children`, `ALT_VENV_PYPI` and `ALT_VENV_REPORT` --
+    passed, with `alt_venv.py` and, for the first time, `bootstrap.py`
+    both at 100%.  The same run under uv's CPython 3.11.16, which is
+    not Debian's, failed five tests and passed one it should not:
+
+    * **`pip3` only worked on Debian.**  It takes `pip` from
+      `ensurepip._WHEEL_PKG_DIR`, which Debian and Ubuntu patch to
+      `/usr/share/python-wheels/`; everywhere else it is `''`, so the
+      case globbed the current directory and `next` raised a bare
+      `StopIteration`.  `ensurepip` itself falls back to its own
+      `_bundled` directory, and now so does the case, at the cost of a
+      line: 19 lines, 22 pasted.  A product bug in a case nobody ships.
+    * **`test_the_shipping_path_against_pypi` told the two `pip`s apart
+      by version**, assuming the local one never matches PyPI's newest.
+      uv's 3.11 carries `pip` 26.2.1, which is PyPI's newest, so the
+      wheel kept looked local.  It now compares contents.
+    * **`2wtmifs`'s expected failure passed** under 3.11, because
+      `cryptography` publishes a `cp311-abi3` wheel that the matcher
+      finds by exact tag.  The gap is real only from 3.12, so the test
+      expects failure only there, through `ABI3_GAP`.
 
 * Step 6.17: A fetch from the real PyPI, carried over from Task 5.
 

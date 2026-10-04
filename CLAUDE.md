@@ -243,38 +243,81 @@ cull's report; see Step 6.16.4.  Wait for it, or make the edit first.
 ## Where things stand
 
 Updated at the end of each session, so that a fresh one starts here.
-As of 2026-10-01:
+As of 2026-10-02:
 
-* **Next:** Wayne is rewriting `README.md`, and the next session starts
-  there.  It is his file; help when asked, and do not edit it unasked.
-  The facts it needs:
-  * The shipping bootstrap is `nopip3`: **31 pasted lines** -- its 28
-    line body plus `import importlib`, `import pathlib` and
-    `import sys`.  `bootstrap.pasted("nopip3")` prints exactly what a
-    person pastes.  Since 2026-10-02 it calls `AltVEnv().install()`
-    itself, because a program's author should never have to touch
-    `AltVEnv` or even name `alt_venv`.
-  * What a machine needs: Python 3.11 or later, and a network that
-    reaches PyPI on the first run.  No `pip`, no virtual environment,
-    no administrator rights.  Verified on Linux only, under 3.11 and
-    3.12; Windows and macOS are untried (`2wmau`, `2btosc`).
-  * Wayne wants `pip` kept out of the opening sections.
-  * `install(bootstrap="nopip3")` is read by nothing, since the
-    fingerprint of Step 6.12 identifies the bootstrap, but Wayne wants
-    the label in the bootstrap all the same.  There is no `package=`
-    argument; `bootstrap=` is the one he means.
+* **Next:** `README.md` is nearly finished, and the next session starts
+  there.  It is Wayne's file; help when asked, do not edit it unasked,
+  and rewrap his over-long lines.  Its sections now run: the hook
+  (problem, answer, happy ending), Quick Start (copy and run
+  `quick_start.py`, then a read-along of its five `# Part` comments),
+  Download Prompt, Author Package Management, Miscellaneous,
+  Alternatives, Conclusion.  What is left:
+  * **Conclusion.**  Claude proposed, and Wayne was too tired to read:
+    (1) replace it with four lines closing the opening story -- list
+    packages in Part 1, copy Parts 2 and 3, a single file you can
+    e-mail; (2) add short `## Status` and `## License` sections; (3)
+    say under Status that Windows never shows the download prompt.
+    Also: the repository has no `LICENSE` file, which PyPI and GitHub
+    look for.
+  * **Author Package Management** is a placeholder.  Wayne wants a
+    true freeze, to be "functionally equivalent to" `zipapp` (he wrote
+    `appap`; Claude read it as `zipapp` and said so).  An HTML comment
+    in the section records what a freeze needs: `==` pins in Part 1
+    plus the approvals file, perhaps with `ALT_VENV_APPROVE=write`
+    printing the pins.  Approvals are keyed by wheel file name, so a
+    compiled package approved on one platform is refused on another.
+  * **Alternatives** is a first pass, unreviewed.  Settled overnight:
+    `quick_start.py` does run under `uv run`, but redundantly -- `uv`
+    installs `cowsay` into its environment, then the bootstrap fetches
+    `alt_venv`, downloads `cowsay` again into `~/.alt_venv`, asks, and
+    imports its own copy.  So "works with `uv`" needs that caveat, or a
+    code change: `install()` could skip what is already importable.
+  * **The PyPI names are free**, checked 2026-10-02: `alt_venv`,
+    `alt-venv` and `altvenv` all return 404.  The bootstrap installs
+    whatever PyPI serves under `alt_venv`, so anyone who registers it
+    first owns every program that pastes it.  Worth claiming soon.
+  * The facts the README rests on:
+    * The shipping bootstrap is `nopip3`: **31 pasted lines** -- its 28
+      line body plus `import importlib`, `import pathlib` and
+      `import sys`.  Since 2026-10-02 it calls
+      `AltVEnv().install(bootstrap="nopip3")` itself, so a program's
+      author never touches `AltVEnv` or names `alt_venv`.  The label is
+      read by nothing, but Wayne wants it; there is no `package=`.
+    * What a machine needs: Python 3.11 or later, and a network that
+      reaches PyPI on the first run.  No `pip`, no virtual environment,
+      no administrator rights.  Verified on Linux only, under 3.11 and
+      3.12; Windows and macOS are untried (`2wmau`, `2btosc`).
+    * The Quick Start cannot work until `alt_venv` is on PyPI.  It was
+      verified end to end with `alt_venv` from a local index and `pip`
+      and `cowsay` from the real PyPI.
+    * `README.md` says the bootstrap's first-run `pip` output is
+      visible on purpose, at Wayne's word, and that `AltVEnv` hides
+      `pip`'s output unless `pip` fails, which is what the code does.
+    * Wayne wants `pip` kept out of the opening sections.
 * **Waiting on Wayne:**
-  * Whether to add `stdout=2` to `nopip3`'s `pip` call, so that `pip`'s
-    first-run progress goes to standard error instead of the program's
-    standard output.  It costs no line.  See Step 6.13.1.
+  * Whether `nopip3`'s `pip` call should get `stdout=2`.  The README now
+    calls its output deliberate, so this is only about which stream it
+    goes to.  See Step 6.13.1.
+  * Whether the download prompt should use his wording, `AltVEnv wants
+    to download 2 packages with 3 dependencies ...`.  The README shows
+    the code's real prompt; changing it is a code change, and the
+    README follows.
+  * Windows never shows the download prompt: `terminal()` opens
+    `/dev/tty`.  Part of `2wmau`.
   * Whether the cull should measure a copy of the project, so that an
     edit during a run cannot void it.  See Step 6.16.4.
   * Restructuring `LOGBOOK.md`: Wayne has realised tasks and steps are
     inverted -- steps must be sequential, tasks may run in parallel --
-    and will rework it after `README.md`.  Do not restructure it
-    unasked.  Issue `3rthtf` waits on the same.
-  * Publishing to test.pypi.org, Step 6.17.  Wayne is the blocker, by
-    his own account, and it comes after `README.md`.
+    and will rework his workflow after this project closes.  Do not
+    restructure it unasked.  Issue `3rthtf` waits on the same.
+  * Publishing to test.pypi.org, Step 6.17, after `README.md`.
+* **Overnight 2026-10-02:** everything passes under 3.12 (`COMPLETE`,
+  `--children`, both opt-in classes; `alt_venv.py` 100%, `bootstrap.py`
+  99%, the one line being `pip3`'s non-Debian fallback) and under uv's
+  CPython 3.11.16.  The 3.11 run found three faults, all fixed; see
+  Step 6.16.9.  To rerun under 3.11:
+  `~/.local/share/uv/python/cpython-3.11-linux-x86_64-gnu/bin/python3.11
+  alt_venv_test.py`.
 * **Open issues:** `2btosc` and `2wmau`, waiting on access to macOS and
   Windows, which Wayne is arranging; `3rthtf`, above.
 

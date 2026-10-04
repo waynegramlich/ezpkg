@@ -90,6 +90,12 @@ MODULE: str = "alt_venv"
 VERSION: str = alt_venv.__version__
 SUMMARY: str = "Fetch Python packages that are not preinstalled."
 
+# Whether `2wtmifs` shows on this interpreter.  `cryptography`, the
+# package its test fetches, publishes a `cp311-abi3` wheel, which the
+# matcher finds by exact tag under 3.11; from 3.12 on there is no exact
+# tag to find, and the gap the test documents appears.
+ABI3_GAP: bool = sys.version_info >= (3, 12)
+
 # The distribution name for a rehearsal upload, which is deliberately
 # not `alt-venv` and deliberately not `alt_venv_test` either: the second
 # is this file's own module name, and a published module spelled that way
@@ -5870,10 +5876,11 @@ class PyPITest(unittest.TestCase):
         self.assertEqual(done.returncode, 0, done.stderr[-800:])
 
         # The `pip` kept is PyPI's, not the copy the local index serves.
-        local: str = pip_wheel()[0].split("-")[1]
-        with zipfile.ZipFile(home / ".alt_venv" / "pip.whl") as fetched:
-            self.assertNotIn(f"pip-{local}.dist-info/METADATA",
-                             fetched.namelist())
+        # Compared by content, because the local copy is named after this
+        # interpreter's own `pip`, which can be the very version PyPI has.
+        kept: bytes = (home / ".alt_venv" / "pip.whl").read_bytes()
+        self.assertNotEqual(hashlib.sha256(kept).hexdigest(),
+                            hashlib.sha256(pip_wheel()[1]).hexdigest())
 
         # A program that declares a real package, fetched from PyPI.
         cache: Path = home / ".alt_venv"
@@ -5918,7 +5925,7 @@ class PyPITest(unittest.TestCase):
                     self.assertIn(f"module {package} version",
                                   self.real_case(label, package))
 
-    @unittest.expectedFailure
+    @(unittest.expectedFailure if ABI3_GAP else lambda method: method)
     @runs_cases
     def test_the_matcher_handles_abi3_wheels(self) -> None:
         """A stable ABI wheel is missed, which is issue `2wtmifs`.
@@ -5932,7 +5939,10 @@ class PyPITest(unittest.TestCase):
 
         Written as an expected failure on purpose: it documents the gap
         today, and the day the matcher learns about abi3 the suite
-        reports an unexpected success rather than staying quiet.
+        reports an unexpected success rather than staying quiet.  Only
+        from 3.12, though: under 3.11 the `cp311-abi3` wheel is an exact
+        match, the gap does not show, and the test simply passes; see
+        `ABI3_GAP`.
         """
         # `pip` has no difficulty with this package; we do.
         if not selected("nopip1"):
