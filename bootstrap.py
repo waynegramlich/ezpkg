@@ -107,7 +107,7 @@ user would type.  The real `~/.alt_venv` is never touched.
 |        | in process    |         |       |       |        |        |        |
 | pip2   | no venv, pip  | 1       | 14    | 17    | 2.73 s | 0.14 s | 1762   |
 |        | subprocess    |         |       |       |        |        |        |
-| pip3   | no venv, pip  | 2       | 18    | 21    | 4.22 s | 0.15 s | 1762   |
+| pip3   | no venv, pip  | 2       | 19    | 22    | 4.22 s | 0.15 s | 1762   |
 |        | from wheel    |         |       |       |        |        |        |
 | pip4   | as pip1 plus  | 1       | 15    | 18    | 2.62 s | 0.14 s | 1698   |
 |        | --no-compile  |         |       |       |        |        |        |
@@ -561,7 +561,8 @@ def pip3() -> None:
     try:
         target = pathlib.Path.home() / ".alt_venv"
         if not (target / PACKAGE).is_dir():
-            shipped = ensurepip._WHEEL_PKG_DIR  # type: ignore
+            shipped = (ensurepip._WHEEL_PKG_DIR  # type: ignore
+                       or pathlib.Path(ensurepip.__file__).parent / "_bundled")
             sys.path.insert(0, str(next(
                 pathlib.Path(shipped).glob("pip-*.whl"))))
             from pip._internal.cli.main import main as pip_main
