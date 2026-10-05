@@ -5,7 +5,7 @@
 A test suite for a project about fetching packages that are not
 preinstalled should not itself need a package fetched, which is the
 same criterion that chose `http.server` over `pypiserver` in Step 5.1
-of `LOGBOOK.md`.
+of `TASKS/`.
 
 Run it with no arguments to measure the suite, or with a directory to
 say where the annotated `.cover` files should go.  `ALT_VENV_TEST`
@@ -26,7 +26,7 @@ adds beyond the baseline, the lines only one case reaches, and a greedy
 ordering from the case that ships showing which cases add nothing.
 `--compare <directory>` redoes just the comparison from the saved
 counts, in seconds, which is what makes culling cases cheap to repeat.
-See Step 6.16 of `LOGBOOK.md`.
+See Step 6.16 of `TASKS/`.
 
 Three workarounds here were each found the hard way, and all matter
 more than they look:
@@ -126,7 +126,7 @@ class ProjectOnly:
     for all the others.  A child that met one of this project's first
     went on to trace every `__init__.py` in the standard library, and
     one that met the standard library's first would have skipped this
-    project's.  Step 6.16.4 in `LOGBOOK.md` found it.
+    project's.  Step 6.16.4 in `TASKS/` found it.
 
     This replaces it with a positive rule, cached by path: follow a
     file in this project's directory, or a copy of `alt_venv` that a

@@ -65,67 +65,54 @@ they govern.
    freely and often -- being able to undo is really, really important
    here, and mercurial is the only tool Claude has for it.
 
-6. **`LOGBOOK.md` is this project's running record** -- purpose,
-   problem statement, prior art, findings and decisions.  Wayne and
-   Claude maintain it jointly.
+6. **The work is recorded as tasks under `TASKS/`**, managed by the
+   `./task` program, which is described by the rules imported below;
+   `./task help` lists its commands.  `LOGBOOK.md` held all of this
+   until 2026-10-04, when it was retired: its background went to
+   `ABOUT.md`, its issues to `ISSUES.md`, and each task and step of
+   Task 6 to a task directory of the same number.
 
-   The file is organised as numbered tasks, and a closed task is marked
-   twice.  A marker is the text `(CLOSED ` followed by a real date and
-   a closing parenthesis; the template spelled out as letters is prose
-   about the convention rather than a marker, which is what lets Task 4
-   quote it without failing its own test.  A task is closed when all
-   three of these hold:
-
-   * The heading carries a marker.
-   * The last non-blank line of the task is that same marker, carrying
-     the same date.
-   * The summary section holds at least one line of text besides that
-     closing line.  A `...` placeholder does not count.
-
-   So a task holds either no markers or exactly two with matching
-   dates, and anything else is a mistake to point out.  The usual one
-   is a dated heading with no closing line, where the heading claims
-   what the rest of the task does not support.
-
-   A closed task is settled: do not edit it, propose the change and let
-   Wayne make the call.  An annotation goes above the closing line,
-   never after it, so that the line stays last.
-
-   An open task can be edited normally, and may put its summary heading
-   in early and accumulate working material underneath it -- a chart
-   that gets updated in place, a running list of findings.  That is not
-   a mistake.  The material is provisional, and writing it closes
-   nothing.  This arrangement replaced the `FENCE:` marker on
-   2026-09-24, and the two-marker rule replaced a one-marker version of
-   it on 2026-09-25.
-
-   A task divides into numbered **steps**, written `* Step T.S:` with a
-   blank line before each, and a step's findings into sub-items written
-   `  * T.S.I - `.  Steps are mini-tasks and **do not close**: only
-   tasks do.  A step needs no marker, no summary and no date, and the
-   steps of an open task are listed highest priority first.  A step may
-   also earn a `### Step T.S:` section after the list, for what was
-   learned rather than what was intended.
+   * A task is `Open` while it is being worked on now, `Suspended`
+     while it is unfinished but waiting, usually on Wayne, and `Closed`
+     when it is done.
+   * Each task directory holds three files.  `Details.md` says what the
+     task is, in a few lines; Wayne writes it, and every session reads
+     every task's, through `TASKS/Startup`, so it stays short.
+     `Context.md` is Claude's and says where the work stands, so that a
+     fresh session can pick it up; it is read only while the task is
+     open, and Claude keeps it current.  `History.md` is the full
+     record -- findings, measurements, decisions -- and is not read at
+     startup; read it when the task needs it, and add to it as work is
+     learned.
+   * A closed task is settled: do not edit it, propose the change and
+     let Wayne make the call.
+   * `History.md` files and code comments still say "Step 6.16.4" and
+     the like.  That is task 6.16, item 4 of its `History.md`; "see
+     Step 6.12 in `TASKS/`" in a comment means task 6.12.
 
    The point is to stop settled questions from being reopened over and
    over.
 
-7. **Issues live in `LOGBOOK.md` under `## Issues`**, and that
-   section's own preamble is the authority on how they work.  The
-   parts that are easy to get wrong:
+@RULES/Task_Tracking_Rules.md
+@TASKS/Startup
+
+7. **Issues live in `ISSUES.md`**, until task 7 gives them a program
+   of their own, and that file's preamble is the authority on how they
+   work.  The parts that are easy to get wrong:
 
    * Each issue is named by an identifier such as `0whwnn` -- a
      priority digit, then the first letter of each word of its title,
      lower cased, with `a`, `an`, `the` and `of` dropped.  Punctuation
      is dropped and a hyphenated word counts once.  Two titles that
-     collide take a trailing digit.
+     collide take a trailing digit.  Task 7 replaces these with frozen
+     tags such as `I.whwnn`, renamed in one pass.
    * Changing an issue's priority or its title changes its
      identifier.  Updating every reference to the old name in the
      same pass is Claude's job, and is not a reason to leave an issue
      mis-prioritised.
-   * A resolved issue moves to `### Closed Issues` with the date it
+   * A resolved issue moves to `## Closed Issues` with the date it
      was closed, and is purged later, once every reference to it is
-     gone.  Rejected ones live in `### Rejected Issues` and are not
+     gone.  Rejected ones live in `## Rejected Issues` and are not
      purged by age, because their purpose is to stop the same idea
      coming back.
 
@@ -139,19 +126,6 @@ that happened.
 
 Number the items of any list in a reply, so that Wayne can answer them
 by number.  Asked for on 2026-10-04.
-
-## Tasks under `TASKS/`, on trial
-
-From 2026-10-04 Wayne is trying a new task system alongside the
-numbered tasks in `LOGBOOK.md`, which rule 6 still governs.  It is
-described by the rules imported below, and `./task help` lists its
-commands.  Wayne writes each task's `Details.md`; Claude keeps the
-`Context.md` of every open task current, so that a fresh session can
-pick the work up from it.  `RULES/task.py` lives in another repository,
-so fixes to it are Claude's to make and Wayne's to commit.
-
-@RULES/Task_Tracking_Rules.md
-@TASKS/Startup
 
 ## Who owns which file
 
@@ -171,7 +145,10 @@ so fixes to it are Claude's to make and Wayne's to commit.
   alters anything the README says is not finished until the README
   says it too, and a README claim the code does not back is a mistake
   to fix, or to raise with Wayne if fixing it means changing the code.
-* `LOGBOOK.md` is joint, as described above.
+* `TASKS/`, `ISSUES.md` and `ABOUT.md` are joint, as rules 6 and 7
+  describe.  `RULES/` is a symbolic link into Wayne's `claude_notes`
+  repository: Claude may fix `RULES/task.py` and its rules, and Wayne
+  commits them.
 
 ## The code, and how to run it
 
@@ -182,7 +159,7 @@ Six files, and it matters which is which:
   table; with a case label it runs one case, which is internal.  Cases
   are named by what they need -- `venv1`, `pip2`, `nopip3` -- and not
   numbered 1 to 13 any more; the module docstring maps the old numbers
-  that closed tasks in `LOGBOOK.md` still use.
+  that the `History.md` files under `TASKS/` still use.
 * `alt_venv.py` -- the second stage, fetched as a wheel.  `AltVEnv`
   downloads, approves, unpacks and imports.  It carries its own PEP 723
   block, which is the one place the Python floor is written down.
@@ -231,9 +208,9 @@ measurement takes about twenty minutes, which is why it is off unless
 asked for.
 
 The **cull run** measures what each `bootstrap.py` case adds to
-coverage, so that cases can be deleted on evidence; see Step 6.16 of
-`LOGBOOK.md`.  Wayne starts it himself at bedtime, because the machine
-is a laptop and cron cannot run while it sleeps:
+coverage, so that cases can be deleted on evidence; see task 6.16.
+Wayne starts it himself at bedtime, because the machine is a laptop
+and cron cannot run while it sleeps:
 
     mkdir -p ~/alt_venv_cull && cd ~/public_html/projects/alt_venv && \
       nohup ./alt_venv_coverage.py --per-case \
@@ -261,57 +238,10 @@ cull's report; see Step 6.16.4.  Wait for it, or make the edit first.
 ## Where things stand
 
 Updated at the end of each session, so that a fresh one starts here.
-As of 2026-10-02:
+As of 2026-10-04:
 
-* **Next:** `README.md` is nearly finished, and the next session starts
-  there.  It is Wayne's file; help when asked, do not edit it unasked,
-  and rewrap his over-long lines.  Its sections now run: the hook
-  (problem, answer, happy ending), Quick Start (copy and run
-  `quick_start.py`, then a read-along of its five `# Part` comments),
-  Download Prompt, Author Package Management, Miscellaneous,
-  Alternatives, Conclusion.  What is left:
-  * **Conclusion.**  Claude proposed, and Wayne was too tired to read:
-    (1) replace it with four lines closing the opening story -- list
-    packages in Part 1, copy Parts 2 and 3, a single file you can
-    e-mail; (2) add short `## Status` and `## License` sections; (3)
-    say under Status that Windows never shows the download prompt.
-    Also: the repository has no `LICENSE` file, which PyPI and GitHub
-    look for.
-  * **Author Package Management** is a placeholder.  Wayne wants a
-    true freeze, to be "functionally equivalent to" `zipapp` (he wrote
-    `appap`; Claude read it as `zipapp` and said so).  An HTML comment
-    in the section records what a freeze needs: `==` pins in Part 1
-    plus the approvals file, perhaps with `ALT_VENV_APPROVE=write`
-    printing the pins.  Approvals are keyed by wheel file name, so a
-    compiled package approved on one platform is refused on another.
-  * **Alternatives** is a first pass, unreviewed.  Settled overnight:
-    `quick_start.py` does run under `uv run`, but redundantly -- `uv`
-    installs `cowsay` into its environment, then the bootstrap fetches
-    `alt_venv`, downloads `cowsay` again into `~/.alt_venv`, asks, and
-    imports its own copy.  So "works with `uv`" needs that caveat, or a
-    code change: `install()` could skip what is already importable.
-  * **The PyPI names are free**, checked 2026-10-02: `alt_venv`,
-    `alt-venv` and `altvenv` all return 404.  The bootstrap installs
-    whatever PyPI serves under `alt_venv`, so anyone who registers it
-    first owns every program that pastes it.  Worth claiming soon.
-  * The facts the README rests on:
-    * The shipping bootstrap is `nopip3`: **31 pasted lines** -- its 28
-      line body plus `import importlib`, `import pathlib` and
-      `import sys`.  Since 2026-10-02 it calls
-      `AltVEnv().install(bootstrap="nopip3")` itself, so a program's
-      author never touches `AltVEnv` or names `alt_venv`.  The label is
-      read by nothing, but Wayne wants it; there is no `package=`.
-    * What a machine needs: Python 3.11 or later, and a network that
-      reaches PyPI on the first run.  No `pip`, no virtual environment,
-      no administrator rights.  Verified on Linux only, under 3.11 and
-      3.12; Windows and macOS are untried (`2wmau`, `2btosc`).
-    * The Quick Start cannot work until `alt_venv` is on PyPI.  It was
-      verified end to end with `alt_venv` from a local index and `pip`
-      and `cowsay` from the real PyPI.
-    * `README.md` says the bootstrap's first-run `pip` output is
-      visible on purpose, at Wayne's word, and that `AltVEnv` hides
-      `pip`'s output unless `pip` fails, which is what the code does.
-    * Wayne wants `pip` kept out of the opening sections.
+* **Next:** `README.md`, task 6.10.  Its `Context.md` says what is left
+  and the facts the README rests on.
 * **Waiting on Wayne:**
   * Whether `nopip3`'s `pip` call should get `stdout=2`.  The README now
     calls its output deliberate, so this is only about which stream it
@@ -324,10 +254,6 @@ As of 2026-10-02:
     `/dev/tty`.  Part of `2wmau`.
   * Whether the cull should measure a copy of the project, so that an
     edit during a run cannot void it.  See Step 6.16.4.
-  * Restructuring `LOGBOOK.md`: Wayne has realised tasks and steps are
-    inverted -- steps must be sequential, tasks may run in parallel --
-    and will rework his workflow after this project closes.  Do not
-    restructure it unasked.  Issue `3rthtf` waits on the same.
   * Publishing to test.pypi.org, Step 6.17, after `README.md`.
 * **Overnight 2026-10-02:** everything passes under 3.12 (`COMPLETE`,
   `--children`, both opt-in classes; `alt_venv.py` 100%, `bootstrap.py`
@@ -337,7 +263,7 @@ As of 2026-10-02:
   `~/.local/share/uv/python/cpython-3.11-linux-x86_64-gnu/bin/python3.11
   alt_venv_test.py`.
 * **Open issues:** `2btosc` and `2wmau`, waiting on access to macOS and
-  Windows, which Wayne is arranging; `3rthtf`, above.
+  Windows, which Wayne is arranging; `3rthtf`, which waits on task 7.
 
 ## Python style
 

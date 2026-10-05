@@ -1,3 +1,6 @@
 # 2 Create the bootstrap code
 
-Recorded as Task 2 in `LOGBOOK.md`, closed 2026-09-22.
+Closed 2026-09-22.  Twelve bootstrap mechanisms were written into
+`bootstrap.py` and measured against each other.  The virtual environment
+is never load bearing: `pip install --target` does the same job for
+fewer pasted lines and a tenth of the disk.

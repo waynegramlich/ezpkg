@@ -102,7 +102,7 @@ ABI3_GAP: bool = sys.version_info >= (3, 12)
 # would shadow this suite whenever a cache went on `sys.path` in front of
 # the project.  Spelled with an underscore so that one word serves as the
 # `pip` name and the import name at once, which is what `bootstrap.py`'s
-# single `PACKAGE` needs.  See Step 6.17.2 in `LOGBOOK.md`.
+# single `PACKAGE` needs.  See Step 6.17.2 in `TASKS/`.
 RELEASE_DISTRIBUTION: str = "alt_venv_trial"
 
 
@@ -145,7 +145,7 @@ CONFIRM: str = "Really never ask again? [y=>Yes/n=>No]"
 
 # The case that ships: `nopip3` fetches a `pip` of its own and runs it
 # as a subprocess, so it needs no `pip` on the machine and leaves none of
-# `pip`'s state in the program.  See Step 6.15 in `LOGBOOK.md`.
+# `pip`'s state in the program.  See Step 6.15 in `TASKS/`.
 SHIPPING: str = "nopip3"
 
 # Which cases the all-case tests exercise by default: the three that
@@ -367,7 +367,7 @@ def build_wheel(module: Path, distribution: str, version: str,
     That is a faithful input for anything which reads wheel filenames,
     such as the matcher in `nopip1` and `nopip2` of `bootstrap.py`, because
     that code never opens the archive; it is not a substitute for a
-    genuinely compiled wheel.  See Step 6.5.11 in `LOGBOOK.md`.
+    genuinely compiled wheel.  See Step 6.5.11 in `TASKS/`.
 
     Arguments:
     * `module` (`Path`):
@@ -474,7 +474,7 @@ def dev_version(version: str = VERSION) -> str:
     A minute stamped suffix gives one without anybody having to
     remember what the last attempt was called, and `.devN` sorts below
     the release it rehearses, so publishing `0.0.1` afterwards still
-    supersedes them all.  See Step 6.17.2 in `LOGBOOK.md`.
+    supersedes them all.  See Step 6.17.2 in `TASKS/`.
 
     Arguments:
     * `version` (`str`):
@@ -498,7 +498,7 @@ def release_wheel(directory: Path,
     The same builder the tests use, given the metadata an index wants:
     a long description, a license, an author, a project address and
     classifiers.  Nothing here uploads anything; see Step 6.17.2 in
-    `LOGBOOK.md`, and uploading is Wayne's by hand in any case.
+    `TASKS/`, and uploading is Wayne's by hand in any case.
 
     The module inside is named after the distribution, so that one word
     serves as both the `pip` name and the import name -- which is what
@@ -556,7 +556,7 @@ def add_data_member(wheel: Path, sub: str, name: str,
     directory whose `purelib` and `platlib` contents belong beside the
     modules rather than under `.data`, and moving them is the one part
     of the wheel specification `AltVEnv.unpack` has to know; see Step
-    6.3.12 in `LOGBOOK.md`.  Nothing here can test that without a wheel
+    6.3.12 in `TASKS/`.  Nothing here can test that without a wheel
     shaped this way.
 
     Arguments:
@@ -594,7 +594,7 @@ def add_root_member(wheel: Path, name: str, text: str) -> Path:
     where a wheel carries things that belong elsewhere.  A `.pth` file
     is not one of those: it sits at the root, beside the module, and is
     installed straight into the directory packages land in.  See Step
-    6.9 in `LOGBOOK.md`.
+    6.9 in `TASKS/`.
 
     `RECORD` is left alone, as `add_data_member` leaves it: nothing in
     this project verifies it, and a wheel that disagrees with its own
@@ -1098,7 +1098,7 @@ def with_path(*entries: Path) -> str:
     Replacing `PYTHONPATH` outright would discard whatever is already
     there, and what is already there may be the `trace_hook` directory
     that `alt_venv_coverage.py` uses to measure this very child; see
-    Step 6.6 in `LOGBOOK.md`.
+    Step 6.6 in `TASKS/`.
 
     Arguments:
     * `entries` (`Path`):
@@ -1200,7 +1200,7 @@ class AltVEnvTest(unittest.TestCase):
         # A second wheel, wearing this interpreter's compiled tag and
         # carrying a `.data/purelib` member.  `nopip1` and `nopip2` prefer it,
         # which is the only way to reach their platform branch and their
-        # `.data` move; see Step 6.5.11 in `LOGBOOK.md`.
+        # `.data` move; see Step 6.5.11 in `TASKS/`.
         cls.tagged = build_wheel(module, DISTRIBUTION, VERSION, SUMMARY,
                                  cls.root / "dist", tag=platform_tag(),
                                  floor=FLOOR)
@@ -3817,7 +3817,7 @@ class InstallTest(unittest.TestCase):
         No clock is injected and nothing sleeps: the cache's own notion of
         age is file modification time, so `os.utime` is an exact lever
         where a sleep would be a slow approximation.  See Step 6.11.1 in
-        `LOGBOOK.md`.
+        `TASKS/`.
 
         Arguments:
         * `path` (`Path`):
@@ -5544,7 +5544,7 @@ class ReleaseWheelTest(unittest.TestCase):
     installed on this machine, which is fitting for a project about
     packages that are not preinstalled but does mean `twine check` is
     not the validator; `pip` accepting the wheel is.  See Step 6.17.2 in
-    `LOGBOOK.md`.
+    `TASKS/`.
 
     Attributes:
     * `root` (`Path`):
@@ -5684,7 +5684,7 @@ class PyPITest(unittest.TestCase):
     Everything else in this suite runs against wheels this project built
     and served itself, so three things have never been exercised: real
     wheel tag soup, a real transitive closure, and TLS against the public
-    certificate authorities.  See Step 6.17 in `LOGBOOK.md`.
+    certificate authorities.  See Step 6.17 in `TASKS/`.
 
     Opt in, because this is the one class that can fail for reasons
     outside the repository -- no network, a rate limit, a yanked release

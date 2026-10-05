@@ -5,7 +5,7 @@
 #
 # The block above is this project eating its own cooking, and it is the
 # one place the Python floor is written down.  See Steps 6.7.4 and 6.7.7
-# in `LOGBOOK.md`: 3.11, because `tomllib` reads the block and `tomllib`
+# in `TASKS/`: 3.11, because `tomllib` reads the block and `tomllib`
 # arrived in 3.11, and no higher because nothing here needs 3.12.  The
 # language features used set only 3.10 -- `Path | None` is evaluated at
 # run time and `bootstrap.py` uses `match` -- so the standard library is
@@ -21,10 +21,10 @@
 
 """Fetch Python packages that are not preinstalled, from one file.
 
-This module is the second stage of the two stage design described in
-`LOGBOOK.md`.  A small bootstrap stub, pasted by hand into a program
-that needs it, fetches this package and imports it.  Everything that is
-too large to paste lives here.
+This module is the second stage of a two stage design.  A small
+bootstrap stub, pasted by hand into a program that needs it, fetches
+this package and imports it.  Everything that is too large to paste
+lives here.
 
 The stub fetches exactly one package, of known name and with no
 dependencies.  `AltVEnv` then fetches whatever the calling program
@@ -93,20 +93,20 @@ ATTEMPTS: int = 3
 # the record naming it is written, so anything young may belong to a
 # program that is still running.  A day is far longer than either window
 # and short enough to keep a crashed run's leftovers from accumulating.
-# See Step 6.11 in `LOGBOOK.md`.
+# See Step 6.11 in `TASKS/`.
 CULL_GRACE: float = 86400.0
 CULL_INTERVAL: float = 86400.0
 
 # How long a request may go unanswered before the cache stops keeping the
 # packages that answered it.  Six months, because the cost of being wrong
 # is one download and the cost of being right is a little disk, and those
-# are not symmetrical.  See Step 6.11 in `LOGBOOK.md`.
+# are not symmetrical.  See Step 6.11 in `TASKS/`.
 CULL_DAYS: float = 180.0 * 86400.0
 
 # How often the private `pip` is checked for a newer release.  Weekly, as
 # `pip` checks itself, because each check asks the index and may fetch
 # 1.8 MB, while `pip` releases come every month or two.  See issue
-# `3spinu` in `LOGBOOK.md`.
+# `3spinu` in `ISSUES.md`.
 PIP_INTERVAL: float = 7.0 * 86400.0
 
 # Every bootstrap this project has published, by `bootstrap_fingerprint`,
@@ -114,7 +114,7 @@ PIP_INTERVAL: float = 7.0 * 86400.0
 # bootstrap means adding its fingerprint here; the test suite renders
 # `nopip3` as pasted and fails until the last entry matches it.  Old
 # entries stay, because they are how a stale copy is recognised.  See
-# Step 6.12 in `LOGBOOK.md`.
+# Step 6.12 in `TASKS/`.
 BOOTSTRAPS: dict[str, str] = {
     "46336be666731d6a8999d4233d51b99a0cc327d479e57ece2f7b003290ffa466":
         "nopip3 of 2026-10-02",
@@ -235,7 +235,7 @@ def main_path() -> Path | None:
     There is often no such file.  The interpreter prompt and `python3
     -c` leave `__main__` without a `__file__` at all, and then there is
     nothing to find.  Every caller has to cope with that rather than
-    assume a program has a file; see Step 6.12.1 in `LOGBOOK.md`.
+    assume a program has a file; see Step 6.12.1 in `TASKS/`.
 
     Worse, a `__file__` that is present is not necessarily a file.  A
     program piped in as `python3 - < program.py` gets the literal
@@ -283,7 +283,7 @@ FENCE: re.Pattern[str] = re.compile(r"(?m)^# /// script$")
 # naming two or three numbers, which is what a real block says.  Anything
 # else -- `>=3.9,<4`, `!=3.9.*`, `~=3.11`, a pre-release rule -- is left
 # alone rather than guessed at, because PEP 440 belongs to `pip`.  See
-# Steps 6.3.3 and 6.7.10 in `LOGBOOK.md`.
+# Steps 6.3.3 and 6.7.10 in `TASKS/`.
 PYTHON_FLOOR: re.Pattern[str] = re.compile(
     r"^>=\s*(\d+)\.(\d+)(?:\.(\d+))?$")
 
@@ -318,7 +318,7 @@ def script_metadata(text: str) -> dict[str, Any] | None:
     PEP 723 puts the metadata in `#` comments, opened by `# /// script`
     and closed by `# ///`, with every line between them commented too.
     Stripping the comment markers leaves TOML, which `tomllib` reads.
-    See Steps 6.7.2 and 6.7.7 in `LOGBOOK.md`.
+    See Steps 6.7.2 and 6.7.7 in `TASKS/`.
 
     The argument is source **text**, not a module or a path, because a
     comment does not exist at run time: the compiler drops it, and `-OO`
@@ -485,7 +485,7 @@ def refresh(path: Path, text: str) -> None:
     Making an object used to write a file every time, which is a side
     effect nobody asks a constructor for and which touches the
     modification time of a file a person may be reading; see Step
-    6.10.5 in `LOGBOOK.md`.  A stale copy is still replaced, so a newer
+    6.10.5 in `TASKS/`.  A stale copy is still replaced, so a newer
     `alt_venv` still reaches a cache that holds an older file.
 
     Arguments:
@@ -522,7 +522,7 @@ class AltVEnv:
     Attributes:
     * `bootstrap` (`str`):
       Which bootstrap the program carries, as `install` was told, or the
-      empty string.  Nothing reads it yet; see Step 6.12 in `LOGBOOK.md`.
+      empty string.  Nothing reads it yet; see Step 6.12 in `TASKS/`.
     * `readme` (`Path`):
       The `README.md` written into `root`.
     * `quick_start` (`Path`):
@@ -637,7 +637,7 @@ class AltVEnv:
         is no on every run and the fetch is repeated forever.  `venv4`
         does worse than waste a download: it deletes the `pip` it
         installed with, so its second run has nothing to install with
-        and fails.  This is the `0cctfd` issue in `LOGBOOK.md`.
+        and fails.  This is the `0cctfd` issue in `ISSUES.md`.
 
         Rather than edit every case body that people paste, the
         second stage repairs the layout once, the first time it runs.
@@ -694,7 +694,7 @@ class AltVEnv:
     def paths(self) -> tuple[Path, Path, Path, Path]:
         """Return the four cache directories, creating them if needed.
 
-        See Step 6.3.1 in `LOGBOOK.md`.  `pending` holds wheels that
+        See Step 6.3.1 in `TASKS/`.  `pending` holds wheels that
         have arrived and are not approved, `wheels` holds the approved
         artifacts, `versions` holds one unpacked tree per resolved
         distribution and version, and `requests` holds one small record
@@ -727,7 +727,7 @@ class AltVEnv:
 
         A program with no file of its own -- the interpreter prompt,
         `python3 -c`, a frozen executable -- has nowhere to keep one and
-        gets no verification.  See Step 6.6 in `LOGBOOK.md`.
+        gets no verification.  See Step 6.6 in `TASKS/`.
 
         Returns:
         * (`Path | None`): Where the approvals are, or `None` when this
@@ -1029,7 +1029,7 @@ class AltVEnv:
 
         It lives in the cache, so deleting the cache restores the
         question, which is the same lifetime the question already had:
-        asked once per cache.  See Step 6.10 in `LOGBOOK.md`.
+        asked once per cache.  See Step 6.10 in `TASKS/`.
 
         Returns:
         * (`Path`): The marker, whether or not it exists.
@@ -1176,7 +1176,7 @@ class AltVEnv:
         The hash is of the file that arrived, not of whatever the index
         claimed, which is the better of the two and the only one
         available: `pip download` does not accept `--report`.  See Step
-        6.3.7 in `LOGBOOK.md`.  This is the identity Step 6.6 approves,
+        6.3.7 in `TASKS/`.  This is the identity Step 6.6 approves,
         and the only thing that can notice a distribution being
         re-uploaded under a version it already used.
 
@@ -1280,7 +1280,7 @@ class AltVEnv:
         missing network, a refusal from the index or a full disk all
         leave the cache as it was, and the next attempt is a whole
         `interval` away, because the stamp is written before trying.
-        See issue `3spinu` in `LOGBOOK.md`.
+        See issue `3spinu` in `ISSUES.md`.
 
         Arguments:
         * `interval` (`float`):
@@ -1387,7 +1387,7 @@ class AltVEnv:
         # retries that were buying the diagnosis are no longer needed
         # for it.  One is kept for a genuinely flaky network.  A caller
         # wanting pip's defaults back passes them in `argv`, which wins.
-        # See Step 6.17.7 in `LOGBOOK.md`.
+        # See Step 6.17.7 in `TASKS/`.
         done: subprocess.CompletedProcess[str] = subprocess.run(
             [*self.pip(), "download", "--retries", "1",
              "--no-input", "--disable-pip-version-check",
@@ -1452,7 +1452,7 @@ class AltVEnv:
         # `.data` is not left sitting in an otherwise tidy tree.  A
         # wheel's `scripts`, `headers` or `data` subdirectories are not
         # handled and are deliberately left where they are; see Step
-        # 6.3.12 in `LOGBOOK.md`.
+        # 6.3.12 in `TASKS/`.
         data: Path
         sub: str
         item: Path
@@ -1511,7 +1511,7 @@ class AltVEnv:
         Silent by default; `install` prints this only when
         `ALT_VENV_BOOTSTRAP=check` asks, because the person running a
         program cannot act on it and its author can ask.  See Step 6.12.2
-        in `LOGBOOK.md`.
+        in `TASKS/`.
 
         Returns:
         * (`str`): The line, for standard error.
@@ -1552,7 +1552,7 @@ class AltVEnv:
         cache goes on `sys.path` and the program's own `import`
         statements, written below the bootstrap, then succeed.  This is
         the form the bootstrap calls and the one `README.md` teaches;
-        see Step 6.7.8 in `LOGBOOK.md`.  A program with no block, or a
+        see Step 6.7.8 in `TASKS/`.  A program with no block, or a
         block declaring nothing, asks for nothing and gets nothing,
         without complaint.
 
@@ -1694,7 +1694,7 @@ class AltVEnv:
         """Return the running program's PEP 723 declaration.
 
         The block is in the program's source text, which `main_source`
-        supplies; see Steps 6.7.2 and 6.7.7 in `LOGBOOK.md`.  Two callers
+        supplies; see Steps 6.7.2 and 6.7.7 in `TASKS/`.  Two callers
         want it -- `declared` for the packages and `check_python` for the
         interpreter -- and reading it once means they cannot disagree.
 
@@ -1841,7 +1841,7 @@ class AltVEnv:
         # could aim the fetch at somebody else's index.  Requirement
         # syntax is not checked here, because `pip` owns PEP 508 and
         # rejects a malformed one locally in half a second without
-        # touching the network.  See Step 6.2.4 in `LOGBOOK.md`.
+        # touching the network.  See Step 6.2.4 in `TASKS/`.
         requirement: str
         for requirement in asking:
             if requirement.startswith("-"):
@@ -1916,7 +1916,7 @@ class AltVEnv:
         # A `.pth` line beginning with `import` is **executed** here.
         # That is the specification, not a liberty we are taking, and it
         # happens only for a wheel the gate already approved; see Step
-        # 6.9 in `LOGBOOK.md`.  The guard matters for a second reason
+        # 6.9 in `TASKS/`.  The guard matters for a second reason
         # now: running the same `.pth` twice in one process would run
         # its import line twice.
         tree: Path
@@ -2198,7 +2198,7 @@ class AltVEnv:
 
         Nothing under `pending` is looked at.  A wheel there has not
         been approved, so as far as the rest of the world is concerned
-        it is not in the cache at all; see Step 6.3.1 in `LOGBOOK.md`.
+        it is not in the cache at all; see Step 6.3.1 in `TASKS/`.
 
         Arguments:
         * `package` (`str`):

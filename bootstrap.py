@@ -132,7 +132,7 @@ What the columns mean, in the order they appear above:
   ranking, so adding or removing a case renames nothing else.
 
   Until 2026-10-01 the cases were numbered 1 to 13 in the order they
-  were written, and the closed tasks of `LOGBOOK.md` still use those
+  were written, and the `History.md` files under `TASKS/` still use those
   numbers.  Old to new: 1 `venv1`, 2 `venv2`, 3 `nopip1`, 4 `venv3`,
   5 `venv5`, 6 `pip1`, 7 `pip2`, 8 `pip3`, 9 `pip4`, 10 `pip5`,
   11 `venv4`, 12 `nopip2`, 13 `nopip3`.
@@ -226,7 +226,7 @@ extra 6 lines and 32 KB buy a virtual environment that nothing then
 reads, which is finding 3 of the log book arriving from yet another
 direction.
 
-`nopip3` is the one that ships; see Step 6.15 of `LOGBOOK.md`.  It is
+`nopip3` is the one that ships; see Step 6.15 of `TASKS/`.  It is
 `pip2` with the one thing `pip2` assumes taken away.  Rather than run
 the machine's pip, it fetches pip's own wheel from the JSON API, keeps
 it as `~/.alt_venv/pip.whl`, and runs it as `python pip.whl/pip`, which
