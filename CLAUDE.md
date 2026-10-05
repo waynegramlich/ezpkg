@@ -135,6 +135,24 @@ A log where every entry is meaningful is worth more than a log that
 records everything that happened.  Mercurial already records everything
 that happened.
 
+## Talking to Wayne
+
+Number the items of any list in a reply, so that Wayne can answer them
+by number.  Asked for on 2026-10-04.
+
+## Tasks under `TASKS/`, on trial
+
+From 2026-10-04 Wayne is trying a new task system alongside the
+numbered tasks in `LOGBOOK.md`, which rule 6 still governs.  It is
+described by the rules imported below, and `./task help` lists its
+commands.  Wayne writes each task's `Details.md`; Claude keeps the
+`Context.md` of every open task current, so that a fresh session can
+pick the work up from it.  `RULES/task.py` lives in another repository,
+so fixes to it are Claude's to make and Wayne's to commit.
+
+@RULES/Task_Tracking_Rules.md
+@TASKS/Startup
+
 ## Who owns which file
 
 * `CLAUDE.md` is Claude's.  Wayne does not read it, so keeping it
