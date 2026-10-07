@@ -100,7 +100,7 @@ they govern.
    of their own, and that file's preamble is the authority on how they
    work.  The parts that are easy to get wrong:
 
-   * Each issue is named by an identifier such as `0whwnn` -- a
+   * Each issue is named by an identifier such as `I.whwnn` -- a
      priority digit, then the first letter of each word of its title,
      lower cased, with `a`, `an`, `the` and `of` dropped.  Punctuation
      is dropped and a hyphenated word counts once.  Two titles that
@@ -251,7 +251,7 @@ As of 2026-10-04:
     the code's real prompt; changing it is a code change, and the
     README follows.
   * Windows never shows the download prompt: `terminal()` opens
-    `/dev/tty`.  Part of `2wmau`.
+    `/dev/tty`.  Part of `I.wmau`.
   * Whether the cull should measure a copy of the project, so that an
     edit during a run cannot void it.  See Step 6.16.4.
   * Publishing to test.pypi.org, Step 6.17, after `README.md`.
@@ -262,8 +262,8 @@ As of 2026-10-04:
   Step 6.16.9.  To rerun under 3.11:
   `~/.local/share/uv/python/cpython-3.11-linux-x86_64-gnu/bin/python3.11
   alt_venv_test.py`.
-* **Open issues:** `2btosc` and `2wmau`, waiting on access to macOS and
-  Windows, which Wayne is arranging; `3rthtf`, which waits on task 7.
+* **Open issues:** `I.btosc` and `I.wmau`, waiting on access to macOS and
+  Windows, which Wayne is arranging; `I.rthtf`, which waits on task 7.
 
 ## Python style
 

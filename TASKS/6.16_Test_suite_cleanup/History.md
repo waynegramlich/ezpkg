@@ -163,7 +163,7 @@ Moved here from Step 6.16 of `LOGBOOK.md` on 2026-10-04.
     `ALT_VENV_TEST=COMPLETE ./alt_venv_coverage.py --children`, 220
     tests passing in 20 minutes, 343 children folded in, then the
     opt-in `PyPITest` and `ReportTest`, all passing (one expected
-    failure, `2wtmifs`'s abi3 test).
+    failure, `I.wtmifs`'s abi3 test).
 
     The two lines 6.16.7 accepted as unreachable, in
     `repair_module_layout`, were reached all along; a probe saw
@@ -200,7 +200,7 @@ Moved here from Step 6.16 of `LOGBOOK.md` on 2026-10-04.
       by version**, assuming the local one never matches PyPI's newest.
       uv's 3.11 carries `pip` 26.2.1, which is PyPI's newest, so the
       wheel kept looked local.  It now compares contents.
-    * **`2wtmifs`'s expected failure passed** under 3.11, because
+    * **`I.wtmifs`'s expected failure passed** under 3.11, because
       `cryptography` publishes a `cp311-abi3` wheel that the matcher
       finds by exact tag.  The gap is real only from 3.12, so the test
       expects failure only there, through `ABI3_GAP`.

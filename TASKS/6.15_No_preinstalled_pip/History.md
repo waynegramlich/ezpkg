@@ -53,14 +53,14 @@ Moved here from Step 6.15 of `LOGBOOK.md` on 2026-10-04.
     bootstrap grows some to eliminate the pip preinstalled issue I'm
     probably good with that."  The claim the `README.md` can make is
     Python 3.11 or later, the pasted bootstrap and a network that
-    reaches PyPI.  `FAST_CASES` became `("13",)`.  Still open: `1bfnprp`,
-    `2btosc`, `3fpfipe` and `3spinu`, and Windows and macOS are untried,
-    which is `2hmmdrpe`.
+    reaches PyPI.  `FAST_CASES` became `("13",)`.  Still open: `I.bfnprp`,
+    `I.btosc`, `I.fpfipe` and `I.spinu`, and Windows and macOS are untried,
+    which is `I.hmmdrpe`.
 
   * 6.15.7 - **The paste grew to 43 lines, on purpose**, 2026-10-01.
     Two changes to `nopip3`, both in code nobody can fix once pasted.
     It now fetches not the newest `pip` but the newest **upload** whose
-    `requires_python` floor this Python meets, which closes `1bfnprp`:
+    `requires_python` floor this Python meets, which closes `I.bfnprp`:
     when `pip` drops a Python, that Python keeps getting the last `pip`
     that supported it.  Against the real index, simulated: 3.7 gets
     24.0, 3.8 gets 25.0.1, 3.9 gets 26.0.1, 3.10 to 3.12 get 26.2.1.
@@ -184,7 +184,7 @@ Moved here from Step 6.15 of `LOGBOOK.md` on 2026-10-04.
     `nopip3` is 27 pasted lines.
 
   * 6.15.15 - **`pip`'s SHA-256 is checked**, 2026-10-01, closing
-    `3fpfipe`.  The digest PyPI lists for the file is compared with the
+    `I.fpfipe`.  The digest PyPI lists for the file is compared with the
     bytes before anything is written, so a damaged download fails as
     `download pip failed: ValueError('pip-...whl fails its SHA-256
     check')` and leaves no `pip.whl` behind to fail confusingly on every
@@ -194,7 +194,7 @@ Moved here from Step 6.15 of `LOGBOOK.md` on 2026-10-04.
     the check taken out, that test fails.
 
   * 6.15.16 - **The private `pip` keeps itself current**, 2026-10-01,
-    closing `3spinu`.  `AltVEnv.refresh_pip` runs from `provide`, beside
+    closing `I.spinu`.  `AltVEnv.refresh_pip` runs from `provide`, beside
     the cull, so only when something is about to be fetched anyway, and
     at most weekly by a `last_pip` stamp, as `pip` checks itself.  It
     asks the current private `pip` to download `pip`; `pip` passes over

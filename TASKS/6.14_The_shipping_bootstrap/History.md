@@ -7,7 +7,7 @@ Moved here from Step 6.14 of `LOGBOOK.md` on 2026-10-04.
 * Step 6.14: The shipping bootstrap.  Twelve cases were measured in Task
   2 and never narrowed to one, which left the `paste` metric priced
   against a set rather than a product, `FAST_CASES` looking arbitrary, and
-  issue `2wtmifs` alive because a matcher nobody ships was still on a path
+  issue `I.wtmifs` alive because a matcher nobody ships was still on a path
   somebody might.
   * 6.14.1 - **Case 7 ships**, nominated and accepted 2026-09-29: no
     virtual environment, `pip` as a subprocess, eighteen pasted lines, one
@@ -53,7 +53,7 @@ Moved here from Step 6.14 of `LOGBOOK.md` on 2026-10-04.
     15".  Task 2 is closed, so that is Wayne's to change or leave.
   * 6.14.3 - The other eleven cases stay, as measurement rather than as
     candidates.  `ALT_VENV_TEST=COMPLETE` runs them, the table keeps
-    pricing them, and `2wtmifs` retires further: the matcher is no longer
+    pricing them, and `I.wtmifs` retires further: the matcher is no longer
     on any path a stranger reaches.
 
     Open, and worth deciding before the `README.md` claims anything about

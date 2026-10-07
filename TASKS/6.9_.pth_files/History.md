@@ -4,7 +4,7 @@
 
 Moved here from Step 6.9 of `LOGBOOK.md` on 2026-10-04.
 
-* Step 6.9: `.pth` files, which is `3pfaibne`.  `install` uses
+* Step 6.9: `.pth` files, which is `I.pfaibne`.  `install` uses
   `sys.path.insert`, which never executes a `.pth` file, so a package
   relying on one is quietly half installed.  `site.addsitedir` is the
   experiment.

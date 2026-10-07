@@ -1,0 +1,17 @@
+{
+  "state": "Closed",
+  "created": "2026-10-01T12:00:00Z",
+  "updated": "2026-10-01T12:00:00Z",
+  "history": [
+    {
+      "state": "Pending",
+      "time": "2026-10-01T12:00:00Z"
+    },
+    {
+      "state": "Closed",
+      "time": "2026-10-01T12:00:00Z"
+    }
+  ],
+  "tag": "fpfipe",
+  "priority": 3
+}

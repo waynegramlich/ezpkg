@@ -59,7 +59,7 @@ cannot `pip install` argues against itself.  Dependency counts come
 from `pip install --dry-run --report`.
 
 * `devpi-server` -- rejected: 43 dependencies, one of them the compiled
-  `argon2-cffi-bindings`, which is the `.so` problem of `0nicav`.
+  `argon2-cffi-bindings`, which is the `.so` problem of `I.nicav`.
 * `simpleindex` -- rejected: 14 dependencies, including `pydantic`,
   `uvicorn` and `starlette`, to serve a static file tree.
 * `pypiserver` -- rejected: 4 dependencies, and its JSON route is
@@ -174,9 +174,9 @@ establish.
   `HOME`, so the warm path needed a test of its own.
   `test_every_case_bootstraps_repeatedly` is it: one cache per case,
   three runs through it, all twelve passing.  Three rather than two
-  because the repair that `0cctfd` needed has to be idempotent, and an
+  because the repair that `I.cctfd` needed has to be idempotent, and an
   earlier version of it passed two runs and broke the cache on the
-  third.  `0cctfd` is closed.
+  third.  `I.cctfd` is closed.
 
 ### Step 5.6: TLS
 
@@ -293,12 +293,12 @@ already built, chosen in Step 5.1 because the alternatives cost between
 4 and 43 dependencies and bought nothing.  It serves the JSON API that
 cases 3 and 12 read, it can be told to misbehave, and it can speak TLS.
 None of that cost a single case a line of pasted code: `JSON_API`, the
-`0cctfd` repair and the whole of TLS are steered from outside the case
+`I.cctfd` repair and the whole of TLS are steered from outside the case
 bodies, so every `paste` figure is what Task 2 measured.
 
 Three things were learned rather than assumed.  Pointing the cases at
 the package this project ships, instead of at `coverage`, immediately
-exposed `0cctfd`: the guard every case uses asks whether the package is
+exposed `I.cctfd`: the guard every case uses asks whether the package is
 a directory, a single module install is not one, and case 11 deletes
 the `pip` it would need to fetch again.  Every case fails closed on a
 certificate it cannot verify, which nothing had ever checked and which
@@ -361,17 +361,17 @@ All cases succeeded.
 2026-09-26, so every `paste` figure above is now three higher: 27, 27,
 52, 33, 27, 18, 18, 22, 18, 18, 33 and 58 for cases 1 to 12.  The
 wrapper turns a failed fetch into one line of diagnosis instead of a
-traceback, which is the `0whwnn` issue.}
+traceback, which is the `I.whwnn` issue.}
 
 What the remeasurement says:
 
 * All twelve cases fetch `alt_venv` from our own server and import
   it, with no failures.  That is the thing Task 5 exists to establish.
 * `imports`, `lines` and `paste` are identical to the Task 2 chart in
-  every row.  Neither `JSON_API` nor the `0cctfd` repair cost a case a
+  every row.  Neither `JSON_API` nor the `I.cctfd` repair cost a case a
   line, because both live outside the pasted case bodies.
 * Warm is now genuinely warm: 0.08 to 0.11 s everywhere, against 1.20
-  to 2.76 s before `0cctfd` was fixed.  The guard now trips, so a
+  to 2.76 s before `I.cctfd` was fixed.  The guard now trips, so a
   second run inserts a path and imports rather than fetching again.
   Case 11, which failed on every warm run, passes.
 * Sizes rose by 16 KB per case, which is the `README.md` the

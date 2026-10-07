@@ -19,7 +19,7 @@ managed apart from tasks, by a program of their own.
    regenerates an `ISSUES/Startup` of `@` imports for the active
    issues, so that `CLAUDE.md` can import it.
 5. Until then the issues live in `ISSUES.md`, under its old rules.
-   Their old tags, such as `0whwnn`, are renamed in one pass when the
+   Their old tags, such as `I.whwnn`, are renamed in one pass when the
    program exists.
 
 The work is mostly in `RULES/`, Wayne's `claude_notes` repository.

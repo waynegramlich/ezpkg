@@ -106,7 +106,7 @@ CULL_DAYS: float = 180.0 * 86400.0
 # How often the private `pip` is checked for a newer release.  Weekly, as
 # `pip` checks itself, because each check asks the index and may fetch
 # 1.8 MB, while `pip` releases come every month or two.  See issue
-# `3spinu` in `ISSUES.md`.
+# `I.spinu` in `ISSUES.md`.
 PIP_INTERVAL: float = 7.0 * 86400.0
 
 # Every bootstrap this project has published, by `bootstrap_fingerprint`,
@@ -624,7 +624,7 @@ class AltVEnv:
         refresh(self.quick_start, QUICK_START)
 
         # Repair a single module install, so that the bootstrap that
-        # fetched this one recognises it next time.  See `0cctfd`.
+        # fetched this one recognises it next time.  See `I.cctfd`.
         self.repair_module_layout()
 
     def repair_module_layout(self) -> Path | None:
@@ -637,7 +637,7 @@ class AltVEnv:
         is no on every run and the fetch is repeated forever.  `venv4`
         does worse than waste a download: it deletes the `pip` it
         installed with, so its second run has nothing to install with
-        and fails.  This is the `0cctfd` issue in `ISSUES.md`.
+        and fails.  This is the `I.cctfd` issue in `ISSUES.md`.
 
         Rather than edit every case body that people paste, the
         second stage repairs the layout once, the first time it runs.
@@ -1205,10 +1205,10 @@ class AltVEnv:
         """Return the directory name an unpacked wheel belongs in.
 
         The name carries the interpreter and the platform as well as the
-        distribution and version, which is what `0nicav` is about: the
+        distribution and version, which is what `I.nicav` is about: the
         same directory reached by a different Python would otherwise
         load a shared object built for something else.  It cannot tell
-        musl from glibc, which is the blind spot of `2wtmifs`.
+        musl from glibc, which is the blind spot of `I.wtmifs`.
 
         Arguments:
         * `wheel` (`Path`):
@@ -1280,7 +1280,7 @@ class AltVEnv:
         missing network, a refusal from the index or a full disk all
         leave the cache as it was, and the next attempt is a whole
         `interval` away, because the stamp is written before trying.
-        See issue `3spinu` in `ISSUES.md`.
+        See issue `I.spinu` in `ISSUES.md`.
 
         Arguments:
         * `interval` (`float`):

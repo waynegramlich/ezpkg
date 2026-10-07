@@ -32,7 +32,7 @@ Moved here from Step 6.5 of `LOGBOOK.md` on 2026-10-04.
     0.16 s to 0.29 s.
   * 6.5.5 - The result on the fast suite: `bootstrap.py` 7% to 41%,
     113 child processes folded in, 60 tests in 357 s against 70 s.
-  * 6.5.6 - **`2wtmifs` is now measured rather than argued.**  Cases 3
+  * 6.5.6 - **`I.wtmifs` is now measured rather than argued.**  Cases 3
     and 12 each have exactly seven uncovered lines, the same seven: the
     wheel tag matcher's platform branch,
     `or (machine in name and "linux" in name and sys.platform ==

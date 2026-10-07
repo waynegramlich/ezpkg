@@ -14,7 +14,7 @@ Moved here from Step 6.2 of `LOGBOOK.md` on 2026-10-04.
     to exit codes exactly as the command line does.  The thirteen typed
     exceptions exist, but catching them means driving the resolver
     directly, which is far deeper into private API than the cases that
-    got `0pinpa` filed, for the same stderr text we already have.
+    got `I.pinpa` filed, for the same stderr text we already have.
   * 6.2.2 - Exit codes carry one useful bit.  A missing package, an
     impossible version, a malformed requirement and a dead index all
     exit 1; only a bad option exits 2.  So 2 means we handed `pip` a
@@ -25,7 +25,7 @@ Moved here from Step 6.2 of `LOGBOOK.md` on 2026-10-04.
     Matching `No matching distribution found` to add "check the
     spelling?" is fine, because a rephrasing costs a hint and nothing
     else.  Branching control flow on it breaks on a pip upgrade, which
-    is `0pinpa`'s failure mode reached through text instead of imports.
+    is `I.pinpa`'s failure mode reached through text instead of imports.
   * 6.2.4 - Validate locally what can be validated locally.  A
     requirement beginning with `-` is the one that matters: it would be
     read as an option, so `install("--index-url=...")` could repoint

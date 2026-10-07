@@ -68,7 +68,7 @@ columns mean is in its module docstring.
 2026-09-26, so every `paste` figure above is now three higher: 27, 27,
 52, 33, 27, 18, 18, 22, 18, 18, 33 and 58 for cases 1 to 12.  The
 wrapper turns a failed fetch into one line of diagnosis instead of a
-traceback, which is the `0whwnn` issue.}
+traceback, which is the `I.whwnn` issue.}
 
 ### Findings
 
@@ -211,7 +211,7 @@ the thing that varies.  Which of these the project actually needs
 is still the thing to measure.
 
 **A defect worth recording.**  Experiment 1 also turned up a bug
-that all twelve cases share, written up as `2apiia`.  It affects
+that all twelve cases share, written up as `I.apiia`.  It affects
 every case equally, so it does not disturb the comparison above.
 
 ### Task 2 Summary
@@ -229,7 +229,7 @@ what a venv costs is the `pip` that `ensurepip` puts inside it.
 Two mechanisms turned out to be unsafe rather than merely expensive.
 Driving `pip` in process leaves 451 of its modules in `sys.modules` and
 three of its handlers on the caller's root logger.  Reaching into
-`pip._internal` at all uses a private interface, recorded as `0pinpa`.
+`pip._internal` at all uses a private interface, recorded as `I.pinpa`.
 
 One packaging fact matters more than it looks.  Debian ships `venv` in
 the base standard library package but splits `ensurepip` into

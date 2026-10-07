@@ -47,7 +47,7 @@ the count for that reason.
 imports, which the person moves to the top of their program, and the
 rest sits inside a `try` whose `except Exception` turns any failure into
 one line on standard error and exit status 1.  Without it a missing
-network is a traceback rather than a message, which is the `0whwnn`
+network is a traceback rather than a message, which is the `I.whwnn`
 issue.  `Exception` rather than `BaseException`, so that a control-C
 still reads as a control-C.  The `try` used to live once, at this file's
 entry point, so that no case body had to be indented under it; moving
@@ -66,7 +66,7 @@ all: a bare `StopIteration` used to print `cannot fetch alt_venv: ` and
 nothing more.  The other cases name no stage, report the type and text
 alone, and begin `cannot fetch alt_venv`, which `nopip3` cannot say
 since its last stage fetches the program's packages.  See issue
-`3fpfipe`.
+`I.fpfipe`.
 
 The `paste` column was corrected twice on 2026-09-29: it had been left
 at `lines + 4` from before the `try` was charged, and then dropped by
@@ -269,7 +269,7 @@ avoids parsing version strings, and pip has written its floor as a
 plain `>=3.N` since it dropped Python 2; an older or odder specifier is
 simply passed over.  Against the real index that gives pip 24.0 on
 3.7, 25.0.1 on 3.8 and 26.0.1 on 3.9, each the last release for its
-Python.  See issue `1bfnprp`.
+Python.  See issue `I.bfnprp`.
 
 MIT No Attribution
 
@@ -825,7 +825,7 @@ def main() -> None:
     # install so that this case's own `is_dir()` guard recognises it on
     # the following run, and `install()` walks the declared path in every
     # one of the thirteen shapes, virtual environments included.  This file
-    # has no PEP 723 block, so nothing is fetched.  See `0cctfd` and Step
+    # has no PEP 723 block, so nothing is fetched.  See `I.cctfd` and Step
     # 6.7.8.  Harness machinery, so `paste` does not count it.
     if hasattr(module, "AltVEnv"):
         module.AltVEnv().install(bootstrap=sys.argv[1])

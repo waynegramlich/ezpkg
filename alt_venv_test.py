@@ -90,7 +90,7 @@ MODULE: str = "alt_venv"
 VERSION: str = alt_venv.__version__
 SUMMARY: str = "Fetch Python packages that are not preinstalled."
 
-# Whether `2wtmifs` shows on this interpreter.  `cryptography`, the
+# Whether `I.wtmifs` shows on this interpreter.  `cryptography`, the
 # package its test fetches, publishes a `cp311-abi3` wheel, which the
 # matcher finds by exact tag under 3.11; from 3.12 on there is no exact
 # tag to find, and the gap the test documents appears.
@@ -1441,7 +1441,7 @@ class AltVEnvTest(unittest.TestCase):
     def test_a_failed_fetch_is_one_line(self) -> None:
         """A case that cannot reach the index says so, without a traceback.
 
-        This is the `0whwnn` issue.  Before Step 6.1 `nopip1` buried
+        This is the `I.whwnn` issue.  Before Step 6.1 `nopip1` buried
         `Connection refused` under 47 lines of traceback and `pip1`
         ended in `RuntimeError: pip failed` without ever mentioning the
         network.
@@ -1516,7 +1516,7 @@ class AltVEnvTest(unittest.TestCase):
         """Three runs in one cache all succeed.
 
         This is the warm path, which nothing tested before.  It is
-        where `0cctfd` lived: the guard every case uses asks whether
+        where `I.cctfd` lived: the guard every case uses asks whether
         the package is a directory, a single module install is not
         one, and `venv4` deletes the `pip` it would need for the
         second fetch.  `AltVEnv.repair_module_layout` is what
@@ -1556,7 +1556,7 @@ class AltVEnvTest(unittest.TestCase):
         Both regions were dead until the index carried a wheel with this
         interpreter's tag: the matcher's platform branch short-circuits
         on `py3-none-any`, and its `.data` move needs a wheel with a
-        `.data` tree.  See `2wtmifs` and Step 6.5.11.
+        `.data` tree.  See `I.wtmifs` and Step 6.5.11.
 
         What this cannot check is that a genuinely compiled wheel would
         import, since ours is pure Python wearing a compiled name.
@@ -1586,7 +1586,7 @@ class AltVEnvTest(unittest.TestCase):
 
         The `raise RuntimeError("no compatible wheel found")` in `nopip1`
         and `nopip2` had never executed.  This is as close as a Linux machine
-        can get to the failure `2wtmifs` predicts, which is a manylinux
+        can get to the failure `I.wtmifs` predicts, which is a manylinux
         wheel being taken on Alpine: here the only wheel on offer is
         tagged for Windows, so nothing matches.
         """
@@ -1626,7 +1626,7 @@ class AltVEnvTest(unittest.TestCase):
 
         Before 2026-10-01 a bare exception reached the person as
         `cannot fetch alt_venv: ` with nothing after it whenever the
-        exception had no text.  See issue `3fpfipe`.
+        exception had no text.  See issue `I.fpfipe`.
         """
         # A 404 for `pip`'s own page fails the very first stage.
         if not selected(SHIPPING):
@@ -1644,7 +1644,7 @@ class AltVEnvTest(unittest.TestCase):
 
         Without the check a truncated download became `pip.whl`, and the
         failure surfaced one stage later as a zip error from running it,
-        which said nothing about the download.  See issue `3fpfipe`.
+        which said nothing about the download.  See issue `I.fpfipe`.
         """
         # Half of every wheel, so the digest PyPI lists cannot match.
         if not selected(SHIPPING):
@@ -1665,7 +1665,7 @@ class AltVEnvTest(unittest.TestCase):
         floor is exactly this Python, and the newest, which wants a
         Python that does not exist yet.  The middle one is right.  When
         `pip` drops a Python, this is what keeps every pasted bootstrap
-        on that Python working; see issue `1bfnprp`.  The releases are
+        on that Python working; see issue `I.bfnprp`.  The releases are
         stand-ins that cannot install anything, so the case fails at the
         next stage, and the wheel it kept says which one it chose.
         """
@@ -2627,7 +2627,7 @@ class InstallTest(unittest.TestCase):
 
     def test_install_reports_a_missing_package(self) -> None:
         """A package the index does not have raises a clear error."""
-        # This is the `0whwnn` shape: say why, do not just fail to import.
+        # This is the `I.whwnn` shape: say why, do not just fail to import.
         target: Path = self.root / "missing"
         output: str = self.install(target, "nosuchwidget")
         self.assertIn("could not fetch nosuchwidget", output)
@@ -2800,7 +2800,7 @@ class InstallTest(unittest.TestCase):
     def test_a_version_tree_names_the_interpreter(self) -> None:
         """A tree name carries version, interpreter and platform.
 
-        This is the `0nicav` fix: the same directory reached by a
+        This is the `I.nicav` fix: the same directory reached by a
         different Python would otherwise load whatever the last one
         left behind.
         """
@@ -5804,7 +5804,7 @@ class PyPITest(unittest.TestCase):
         """Run one `bootstrap.py` case against real PyPI.
 
         `nopip1` and `nopip2` are the two that choose a wheel themselves, with
-        the five line matcher of issue `2wtmifs`, rather than leaving it
+        the five line matcher of issue `I.wtmifs`, rather than leaving it
         to `pip`.  Everything else has only ever met wheels this project
         built, so this is the first real tag soup they have seen.
 
@@ -5928,7 +5928,7 @@ class PyPITest(unittest.TestCase):
     @(unittest.expectedFailure if ABI3_GAP else lambda method: method)
     @runs_cases
     def test_the_matcher_handles_abi3_wheels(self) -> None:
-        """A stable ABI wheel is missed, which is issue `2wtmifs`.
+        """A stable ABI wheel is missed, which is issue `I.wtmifs`.
 
         Measured 2026-09-28: `cryptography` publishes
         `cp39-abi3` and `cp311-abi3` wheels, because an abi3 wheel is

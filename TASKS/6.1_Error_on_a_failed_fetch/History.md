@@ -4,8 +4,8 @@
 
 Moved here from Step 6.1 of `LOGBOOK.md` on 2026-10-04.
 
-* Step 6.1: Generate error on bootstrap fetch error (`0whwnn`):
-  * The new bootstrap diagnoses a failed fetch, which closes `0whwnn`.
+* Step 6.1: Generate error on bootstrap fetch error (`I.whwnn`):
+  * The new bootstrap diagnoses a failed fetch, which closes `I.whwnn`.
   * Measured 2026-09-25 against a dead port: case 6 ends in
    `RuntimeError: pip failed` after ten lines of traceback and never
     mentions the network, and case 3 buries `Connection refused` under 47.
@@ -21,7 +21,7 @@ Moved here from Step 6.1 of `LOGBOOK.md` on 2026-10-04.
 ### Step 6.1: Error on a failed fetch
 
 A failed fetch now exits with one line instead of a traceback, which
-closes `0whwnn`.  Measured against a dead port, before and after:
+closes `I.whwnn`.  Measured against a dead port, before and after:
 
 | case        | before                    | after                     |
 | ----------- | ------------------------- | ------------------------- |

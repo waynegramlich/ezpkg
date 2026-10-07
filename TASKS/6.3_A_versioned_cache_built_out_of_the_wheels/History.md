@@ -5,10 +5,10 @@
 Moved here from Step 6.3 of `LOGBOOK.md` on 2026-10-04.
 
 * Step 6.3: A versioned cache built out of the wheels themselves.  This
-  is the fix for `0nicav`, priority 0 because the cache path carries no
+  is the fix for `I.nicav`, priority 0 because the cache path carries no
   version, interpreter or platform, so the same directory reached by a
   different Python loads whatever the last one left.  It also settles
-  where the cache lives, `2wscdl`, and it carries the jail that Step 6.6
+  where the cache lives, `I.wscdl`, and it carries the jail that Step 6.6
   needs.
 
   The pipeline is download, approve, unpack, import.  `pip download`
@@ -28,16 +28,16 @@ Moved here from Step 6.3 of `LOGBOOK.md` on 2026-10-04.
     atomic.
   * 6.3.2 - Do not move `root` itself.  `repair_module_layout` fires
     only for a module under `self.root`, so relocating the cache
-    silently reopens `0cctfd` and case 11 fails on its second run.
+    silently reopens `I.cctfd` and case 11 fails on its second run.
     Stage 1 is pinned to `~/.alt_venv` by the pasted code, so all of
-    this goes beneath it.  That answers `2wscdl` with a constraint
+    this goes beneath it.  That answers `I.wscdl` with a constraint
     rather than a preference.
   * 6.3.3 - Write no version expression parser.  Measured 2026-09-26
     with 1.0.0, 2.0.0 and 3.0.0rc1 published: `sprocket>=3` **fails**,
     although `3.0.0rc1` satisfies `>=3` numerically, because PEP 440
     excludes pre-releases unless asked.  A tuple comparing parser would
     have installed the release candidate, silently, on somebody else's
-    machine.  That is `2wtmifs`'s failure mode exactly.  PEP 440 also
+    machine.  That is `I.wtmifs`'s failure mode exactly.  PEP 440 also
     has epochs, post and dev releases, local versions, `~=` and `==1.2.*`
     wildcards.  `pip` owns all of it.
 
@@ -61,10 +61,10 @@ Moved here from Step 6.3 of `LOGBOOK.md` on 2026-10-04.
     index, so even a perfect parser would not save that round trip,
     which is most of the reason not to write one.
   * 6.3.6 - A version directory name has to carry the interpreter and
-    the platform as well as the version, which is what `0nicav` is
+    the platform as well as the version, which is what `I.nicav` is
     about: `sys.implementation.cache_tag` and
     `sysconfig.get_platform()`.  Neither can tell musl from glibc, the
-    blind spot of `2wtmifs`.
+    blind spot of `I.wtmifs`.
   * 6.3.7 - `pip download` does not accept `--report`, measured
     2026-09-26: exit 2, it is an `install` option.  So hash the wheel
     that arrived rather than trusting what the index claimed, which is
@@ -91,7 +91,7 @@ Moved here from Step 6.3 of `LOGBOOK.md` on 2026-10-04.
     do.  A file named by the hash of the request cannot collide, is
     smaller to read and write, and is moved into place with `replace`
     rather than `rename`, which is the same on POSIX but does not raise
-    on Windows where `3vedih` is already waiting.  The request is stored
+    on Windows where `I.vedih` is already waiting.  The request is stored
     inside the record as well, so a person can read it and a hash
     collision cannot pass as a hit.  Two writers recording the *same*
     request may honestly disagree, if the index gained a release between
@@ -114,6 +114,6 @@ Moved here from Step 6.3 of `LOGBOOK.md` on 2026-10-04.
   * 6.3.12 - Unpacking wheels ourselves takes on part of the wheel spec
     that `pip` currently handles: `RECORD`, `.data/purelib` and
     `.data/scripts`, entry points, and `.pth` files, which is
-    `3pfaibne`.  For a pure Python wheel it is the `purelib` move and
+    `I.pfaibne`.  For a pure Python wheel it is the `purelib` move and
     little else, but it is a real scope increase and should be entered
     knowingly.  Cases 3 and 12 already do this much.

@@ -108,7 +108,7 @@ Moved here from Step 6.17 of `LOGBOOK.md` on 2026-10-04.
   * 6.17.5 - Done 2026-09-28, and it found what it was meant to find.
     `install` hands resolution and tag matching to `pip`, so a real index
     tests our plumbing; cases 3 and 12 choose for themselves with the
-    five line matcher of `2wtmifs`, and those are the ones worth aiming
+    five line matcher of `I.wtmifs`, and those are the ones worth aiming
     at real tag soup.  Four packages, both cases:
 
     * `certifi`, pure `py3-none-any`: fetched.
@@ -119,7 +119,7 @@ Moved here from Step 6.17 of `LOGBOOK.md` on 2026-10-04.
       and a musl name contains both `linux` and `x86_64`, so the matcher
       accepts either; PyPI happens to list manylinux first.  A project
       listing them the other way round would hand a glibc machine a musl
-      wheel whose shared objects cannot load.  That is `2wtmifs`
+      wheel whose shared objects cannot load.  That is `I.wtmifs`
       predicted and now confirmed against real data.
     * `cryptography`: **cannot be fetched at all.**  An abi3 wheel is
       tagged with the **lowest** Python it supports and serves every
@@ -129,7 +129,7 @@ Moved here from Step 6.17 of `LOGBOOK.md` on 2026-10-04.
 
     The abi3 gap is now a `@unittest.expectedFailure` in `PyPITest`, so
     it documents itself and reports an unexpected success the day the
-    matcher learns about abi3.  Both faults belong to `2wtmifs` and the
+    matcher learns about abi3.  Both faults belong to `I.wtmifs` and the
     fix is pasted code, so it is Wayne's call: matching `cpXY-abi3` for
     any `XY` at or below the running version is a comparison, not a
     parser, and costs a line or two of paste.

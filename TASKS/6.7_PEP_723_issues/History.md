@@ -4,7 +4,7 @@
 
 Moved here from Step 6.7 of `LOGBOOK.md` on 2026-10-04.
 
-* Step 6.7: Deal with PEP 723 issues, which is `2hsrpbd`.
+* Step 6.7: Deal with PEP 723 issues, which is `I.hsrpbd`.
 
   This step covers everything the standard asks of a program that
   declares its own requirements: finding the block, reading it, and
@@ -51,7 +51,7 @@ Moved here from Step 6.7 of `LOGBOOK.md` on 2026-10-04.
     22.04 LTS ships 3.10 and is supported to April 2027, Debian 12 ships
     3.11, and RHEL 9 ships 3.9 and is supported to 2032.  Requiring 3.12
     would turn all three away and buy nothing, since no 3.12 feature is
-    used.  What distributions actually ship is `2hmmdrpe`, still
+    used.  What distributions actually ship is `I.hmmdrpe`, still
     unmeasured.
 
     Until now the floor was stated nowhere at all, which is ironic for a

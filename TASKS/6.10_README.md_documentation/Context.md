@@ -41,7 +41,7 @@ Alternatives, Conclusion.  What is left:
   * What a machine needs: Python 3.11 or later, and a network that
     reaches PyPI on the first run.  No `pip`, no virtual environment,
     no administrator rights.  Verified on Linux only, under 3.11 and
-    3.12; Windows and macOS are untried (`2wmau`, `2btosc`).
+    3.12; Windows and macOS are untried (`I.wmau`, `I.btosc`).
   * The Quick Start cannot work until `alt_venv` is on PyPI.  It was
     verified end to end with `alt_venv` from a local index and `pip`
     and `cowsay` from the real PyPI.
