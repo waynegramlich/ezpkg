@@ -49,3 +49,10 @@ Alternatives, Conclusion.  What is left:
     visible on purpose, at Wayne's word, and that `AltVEnv` hides
     `pip`'s output unless `pip` fails, which is what the code does.
   * Wayne wants `pip` kept out of the opening sections.
+
+As of 2026-10-10: Wayne chose Claude's Conclusion, which replaced his
+(`README.md:332-338`).  Wayne skipped `## Status` and `## License`
+(nobody reads them); `LICENSE` now holds the MIT-0 text copied from
+`alt_venv.py:37-54`.  Wayne now thinks Author Package Management and
+Alternatives (the `uv` double download) are related; they come after the
+Conclusion.

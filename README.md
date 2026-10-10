@@ -331,11 +331,8 @@ block, Part 1 of a program is the same either way.
 
 ## Conclusion
 
-In short, `AltVEnv` allows you to entirely avoid Python Virtual Environments
-if you do the following:
-* Provide Python standard metadata about the needed packages at the front
-  of your program.
-* Paste the `AltVEnv` bootstrap into your code right before you do the
-  `import` statements for your package dependencies.
-After that, your program will just download your packages automatically
-without any need to deal with a Python Virtual Environment.
+No more remembering which virtual environment is active.  List your packages
+in Part 1, copy Parts 2 and 3 exactly, and each program quietly gets its own
+packages, with nothing to create or activate.  What you are left with is a
+single file you can e-mail to somebody who has nothing but Python, and it
+will just work.
