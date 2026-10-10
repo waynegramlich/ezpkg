@@ -14,7 +14,7 @@ is honoured by the suite as usual, so `COMPLETE` measures every
 
 `--per-case <directory>` answers a different question: what does each
 `bootstrap.py` case add?  The cases are those `ALT_VENV_TEST` selects,
-so `nopip1` to `nopip3` unless it says `COMPLETE`.  It makes one
+so `nopip1` to `nopip4` unless it says `COMPLETE`.  It makes one
 baseline run of the whole suite with `ALT_VENV_TEST=NONE`, so that no
 case runs, and then one run per case of only the tests marked
 `runs_cases`, with `ALT_VENV_TEST` naming that case.  Children are
@@ -54,7 +54,7 @@ more than they look:
 One blind spot remains, and it is not a defect in the tests:
 
 * **Child processes are not followed** unless `--children` is given.
-  Without it `bootstrap.py` reports about 7%, because its thirteen
+  Without it `bootstrap.py` reports about 7%, because its fourteen
   cases only ever run in child interpreters.  With it, a copy of
   `alt_venv.py` that a bootstrap installed is credited to the project's
   own file when the two are identical; see `trace_hook/sitecustomize.py`.
@@ -337,7 +337,7 @@ def trace_children(counts: Path) -> None:
     """Arrange for child processes to be traced as well.
 
     Most of what this suite does happens in children: every `pip`, and
-    `bootstrap.py` once or thirteen times over.  `trace` follows neither
+    `bootstrap.py` once or fourteen times over.  `trace` follows neither
     those nor threads by itself, so `bootstrap.py` reads as about 7%
     however thoroughly its cases are exercised.
 
@@ -622,7 +622,7 @@ def measure_cases(directory: Path, jobs: int) -> bool:
     """Measure a baseline, then each case separately, `jobs` at a time.
 
     The cases are the ones `ALT_VENV_TEST` selects, as for the suite
-    itself: `nopip1` to `nopip3` by default, and all thirteen under
+    itself: `nopip1` to `nopip4` by default, and all fourteen under
     `COMPLETE`.
 
     The baseline is the whole suite with no case selected, and is the

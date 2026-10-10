@@ -15,7 +15,7 @@ ensue.  The question that arose was "Is there a better way that avoids Python
 virtual environments entirely?"  The answer turned out to be "Absolutely
 yes!!!"
 
-Paste a 31-line bootstrap near the top of a Python program, and the program
+Paste a 35-line bootstrap near the top of a Python program, and the program
 fetches the packages it needs the first time it runs.  There is no virtual
 environment to create or activate, nothing to install beforehand, and no
 administrator rights needed -- just Python 3.11 or later.  Packages are
@@ -51,7 +51,10 @@ import urllib.request as req
 # Part 3: The bootstrap.  Copy it exactly, and never edit it.
 try:
     s = "find home"; t = pathlib.Path.home()/".alt_venv"; w = t/"pip.whl"
-    if not (t/"alt_venv").is_dir():  # Not installed yet.
+    m = None
+    try: m = importlib.import_module("alt_venv")  # Already importable?
+    except ImportError: pass
+    if m is None and not (t/"alt_venv").is_dir():  # Not installed yet.
         s = "choose pip"; v = sys.version_info[1]
         d = json.load(req.urlopen("https://pypi.org/pypi/pip/json", None, 30))
         e = max((e for f in d["releases"].values() for e in f  # Newest pip
@@ -67,9 +70,10 @@ try:
         s = "install alt_venv"; subprocess.run([
             sys.executable, w/"pip", "install", "--no-input", "-t", t,
             "--disable-pip-version-check", "alt_venv"], check=True)
-    s = "import alt_venv"; sys.path.insert(0, str(t))
-    importlib.invalidate_caches(); m = importlib.import_module("alt_venv")
-    s = "fetch packages"; m.AltVEnv().install(bootstrap="nopip3")
+    if m is None:
+        s = "import alt_venv"; sys.path.insert(0, str(t))
+        importlib.invalidate_caches(); m = importlib.import_module("alt_venv")
+    s = "fetch packages"; m.AltVEnv().install(bootstrap="nopip4")
 except Exception as x:
     raise SystemExit(f"alt_venv: {s} failed: {x!r}")
 
@@ -169,7 +173,9 @@ comments does no harm, but changing its code makes it a different
 bootstrap.  To see whether a program carries the current one, run it with
 `ALT_VENV_BOOTSTRAP=check` set, and it says so on standard error.
 
-The first time any program runs it on a machine, it fetches `alt_venv`:
+The bootstrap first tries to import `alt_venv`, and uses it if it is already
+there, such as inside a program bundled with `zipapp`.  Otherwise, the first
+time any program runs it on a machine, it fetches `alt_venv`:
 
 1. It asks [PyPI](https://pypi.org/), the Python Package Index, for the
    newest `pip` that this Python can run.
@@ -179,8 +185,8 @@ The first time any program runs it on a machine, it fetches `alt_venv`:
 3. It runs that `pip` to install `alt_venv` into `~/.alt_venv`.
 
 Later runs skip the previous three steps.  Every run, the first one included,
-then just uses the downloaded `AltVEnv` package to download any further
-packages and perform housekeeping in the `~/.alt_venv/` directory.
+then just uses the `AltVEnv` package to download any further packages and
+perform housekeeping in the `~/.alt_venv/` directory.
 
 #### Part 4: Import the packages listed in Part 1
 

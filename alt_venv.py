@@ -112,12 +112,14 @@ PIP_INTERVAL: float = 7.0 * 86400.0
 # Every bootstrap this project has published, by `bootstrap_fingerprint`,
 # oldest first, so the last is the current one.  Publishing a changed
 # bootstrap means adding its fingerprint here; the test suite renders
-# `nopip3` as pasted and fails until the last entry matches it.  Old
+# the shipping case as pasted and fails until the last entry matches it.  Old
 # entries stay, because they are how a stale copy is recognised.  See
 # Step 6.12 in `TASKS/`.
 BOOTSTRAPS: dict[str, str] = {
     "46336be666731d6a8999d4233d51b99a0cc327d479e57ece2f7b003290ffa466":
         "nopip3 of 2026-10-02",
+    "1bbfbc6633ef35ce5e2c5bb742465cff84b0c89c13af3e3a97363f81daf1d0a3":
+        "nopip4 of 2026-10-10",
 }
 
 # The Quick Start program from `README.md`, which the constructor writes
@@ -147,7 +149,10 @@ import urllib.request as req
 # Part 3: The bootstrap.  Copy it exactly, and never edit it.
 try:
     s = "find home"; t = pathlib.Path.home()/".alt_venv"; w = t/"pip.whl"
-    if not (t/"alt_venv").is_dir():  # Not installed yet.
+    m = None
+    try: m = importlib.import_module("alt_venv")  # Already importable?
+    except ImportError: pass
+    if m is None and not (t/"alt_venv").is_dir():  # Not installed yet.
         s = "choose pip"; v = sys.version_info[1]
         d = json.load(req.urlopen("https://pypi.org/pypi/pip/json", None, 30))
         e = max((e for f in d["releases"].values() for e in f  # Newest pip
@@ -163,9 +168,10 @@ try:
         s = "install alt_venv"; subprocess.run([
             sys.executable, w/"pip", "install", "--no-input", "-t", t,
             "--disable-pip-version-check", "alt_venv"], check=True)
-    s = "import alt_venv"; sys.path.insert(0, str(t))
-    importlib.invalidate_caches(); m = importlib.import_module("alt_venv")
-    s = "fetch packages"; m.AltVEnv().install(bootstrap="nopip3")
+    if m is None:
+        s = "import alt_venv"; sys.path.insert(0, str(t))
+        importlib.invalidate_caches(); m = importlib.import_module("alt_venv")
+    s = "fetch packages"; m.AltVEnv().install(bootstrap="nopip4")
 except Exception as x:
     raise SystemExit(f"alt_venv: {s} failed: {x!r}")
 

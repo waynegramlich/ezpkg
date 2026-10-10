@@ -32,10 +32,11 @@ Alternatives, Conclusion.  What is left:
   whatever PyPI serves under `alt_venv`, so anyone who registers it
   first owns every program that pastes it.  Worth claiming soon.
 * The facts the README rests on:
-  * The shipping bootstrap is `nopip3`: **31 pasted lines** -- its 28
-    line body plus `import importlib`, `import pathlib` and
-    `import sys`.  Since 2026-10-02 it calls
-    `AltVEnv().install(bootstrap="nopip3")` itself, so a program's
+  * The shipping bootstrap is `nopip4` (since 2026-10-10; `nopip3`
+    before): **35 pasted lines** -- its 32 line body plus
+    `import importlib`, `import pathlib` and `import sys`.  It first
+    uses an `alt_venv` that is already importable.  Since 2026-10-02
+    it calls `AltVEnv().install(bootstrap=...)` itself, so a program's
     author never touches `AltVEnv` or names `alt_venv`.  The label is
     read by nothing, but Wayne wants it; there is no `package=`.
   * What a machine needs: Python 3.11 or later, and a network that

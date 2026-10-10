@@ -143,16 +143,17 @@ FLOOR: str = floor()
 PROMPT: str = "go ahead? [y=>Yes/n=>No/a=>Always/?=>Explanation]"
 CONFIRM: str = "Really never ask again? [y=>Yes/n=>No]"
 
-# The case that ships: `nopip3` fetches a `pip` of its own and runs it
-# as a subprocess, so it needs no `pip` on the machine and leaves none of
-# `pip`'s state in the program.  See Step 6.15 in `TASKS/`.
-SHIPPING: str = "nopip3"
+# The case that ships: `nopip4` uses an `alt_venv` that is already
+# importable, and otherwise fetches a `pip` of its own and runs it as a
+# subprocess, so it needs no `pip` on the machine and leaves none of
+# `pip`'s state in the program.  See Step 6.15 and `T.ewar` in `TASKS/`.
+SHIPPING: str = "nopip4"
 
-# Which cases the all-case tests exercise by default: the three that
+# Which cases the all-case tests exercise by default: the four that
 # need no `pip`, since the first cull found that only they add anything
 # to coverage (Step 6.16.3).  The other ten are kept, because keeping
 # them costs nothing, and run under `ALT_VENV_TEST=COMPLETE`.
-FAST_CASES: tuple[str, ...] = ("nopip1", "nopip2", "nopip3")
+FAST_CASES: tuple[str, ...] = ("nopip1", "nopip2", "nopip3", "nopip4")
 
 def platform_tag() -> str:
     """Return a compatibility tag this interpreter would accept.
@@ -258,7 +259,7 @@ def runs_cases(test: Marked) -> Marked:
 
     `alt_venv_coverage.py --per-case` measures the suite once with no
     cases, as a baseline, and then only the marked tests once per case,
-    which is what makes measuring thirteen cases take minutes rather
+    which is what makes measuring fourteen cases take minutes rather
     than hours.  An unmarked test that runs a case would be missing
     from every per-case run, so its coverage would be credited to no
     case at all.  `test_case_runners_are_marked` checks the marking
@@ -278,7 +279,8 @@ def runs_cases(test: Marked) -> Marked:
 
 def run_bootstrap_case(label: str, home: Path, index_url: str,
                        extra: dict[str, str] | None = None,
-                       python: str = sys.executable
+                       python: str = sys.executable,
+                       safe_path: bool = True
                        ) -> subprocess.CompletedProcess[str]:
     """Run one `bootstrap.py` case against a local index.
 
@@ -302,6 +304,12 @@ def run_bootstrap_case(label: str, home: Path, index_url: str,
     * `python` (`str`):
       The interpreter to run the case with.  The default is this one;
       the no-`pip` test passes one that has never had `pip`.
+    * `safe_path` (`bool`):
+      Run with `-P`, so that this directory, which holds `alt_venv.py`,
+      is not put on the child's `sys.path`.  Without it `nopip4` imports
+      the working copy and fetches nothing, which is right for a program
+      but defeats every test of the fetch.  Only the test that wants the
+      working copy found passes `False`.
 
     Returns:
     * (`subprocess.CompletedProcess[str]`): The finished child.
@@ -316,9 +324,13 @@ def run_bootstrap_case(label: str, home: Path, index_url: str,
         BOOTSTRAP_PACKAGE=MODULE, BOOTSTRAP_JSON_API=f"{index_url}pypi")
     environment.update(extra or {})
     environment.pop("VIRTUAL_ENV", None)
+    # `-P` keeps the script's directory off `sys.path`; it is new in
+    # 3.11, which is the floor.
+    command: list[str] = [python, *(["-P"] if safe_path else []),
+                          str(script), label]
     return subprocess.run(
-        [python, str(script), label],
-        env=environment, capture_output=True, text=True, check=False)
+        command, env=environment, capture_output=True, text=True,
+        check=False)
 
 
 def escaped_name(distribution: str) -> str:
@@ -1639,6 +1651,28 @@ class AltVEnvTest(unittest.TestCase):
                       done.stderr)
 
     @runs_cases
+    def test_the_shipping_case_uses_an_importable_alt_venv(self) -> None:
+        """An `alt_venv` already on `sys.path` is used, and nothing fetched.
+
+        Inside a `zipapp`, or beside a working copy, `alt_venv` imports
+        before the bootstrap has done anything.  `nopip3` fetched `pip`
+        and `alt_venv` regardless, and failed with no network.  Here the
+        index is dead and this directory, with `alt_venv.py` in it, is on
+        the child's `sys.path`.  See `T.ewar` and `I.apiia`.
+        """
+        # A port nothing listens on: any fetch at all would fail.
+        if not selected(SHIPPING):
+            self.skipTest(f"{SHIPPING} is not selected")
+        home: Path = Path(tempfile.mkdtemp(prefix="importable-",
+                                           dir=self.root))
+        done: subprocess.CompletedProcess[str] = run_bootstrap_case(
+            SHIPPING, home, "http://127.0.0.1:1/", safe_path=False)
+        self.assertEqual(done.returncode, 0, done.stderr[-400:])
+        here: Path = Path(__file__).resolve().parent
+        self.assertIn(f"from {here / 'alt_venv.py'}", done.stdout)
+        self.assertFalse((home / ".alt_venv" / "pip.whl").exists())
+
+    @runs_cases
     def test_the_shipping_case_refuses_a_damaged_pip(self) -> None:
         """A `pip` wheel that fails its SHA-256 is refused, and not kept.
 
@@ -2508,14 +2542,14 @@ class InstallTest(unittest.TestCase):
 
         This is the claim `README.md` makes: Python and the pasted
         bootstrap are all that is needed.  An interpreter that has never
-        had `pip` stands in for such a machine.  `nopip3` fetches `pip`'s
+        had `pip` stands in for such a machine.  `nopip4` fetches `pip`'s
         wheel, keeps it as `pip.whl`, installs this project with it, and
         `AltVEnv` then uses that same copy to fetch what the program
         declares.
         """
-        # Only when `nopip3` is wanted; see `selected`.
-        if not selected("nopip3"):
-            self.skipTest("nopip3 is not selected")
+        # Only when the shipping case is wanted; see `selected`.
+        if not selected(SHIPPING):
+            self.skipTest(f"{SHIPPING} is not selected")
 
         # The zipped `pip` only runs alone if its libraries are inside.
         import pip._vendor
@@ -4456,7 +4490,7 @@ class HarnessTest(unittest.TestCase):
 
     def test_measure_source_counts_the_shipping_case(self) -> None:
         """The counts come from parsing the file, not from a table."""
-        # `nopip3` is the one that ships; see Step 6.15.
+        # `SHIPPING` is the one that ships; see Step 6.15.
         counts: dict[str, tuple[int, int]] = bootstrap.measure_source()
         self.assertEqual(sorted(counts), sorted(bootstrap.MECHANISMS))
         imports: int
@@ -4528,7 +4562,7 @@ class HarnessTest(unittest.TestCase):
         path is the one where a case does not work: the numbers are
         meaningless then, and saying which case broke is the only useful
         output.  `subprocess.run` is patched rather than breaking a real
-        index, which makes thirteen cases times three repetitions
+        index, which makes fourteen cases times three repetitions
         instantaneous instead of minutes.
         """
         # Every case "fails", so every case must be named.
@@ -4864,6 +4898,9 @@ class CoverageToolTest(unittest.TestCase):
                              ("alt_venv.py", 13),
                              ("bootstrap.py", statement)])
         self.save("nopip2", [("alt_venv.py", 12)])
+        # `nopip3` no longer ships but is still a fast case, and adds
+        # nothing here.
+        self.save("nopip3", [])
         self.save(SHIPPING, [("alt_venv.py", 12), ("alt_venv.py", 14),
                              ("bootstrap.py", def_line)])
         text: str = alt_venv_coverage.compare(self.root)
@@ -4874,10 +4911,10 @@ class CoverageToolTest(unittest.TestCase):
         self.assertIn("| nopip1 | 1 of ", text)
         self.assertIn(" | 2 | 2 | 1 | 1 |", text)
         self.assertIn(f"| {SHIPPING} | 0 of ", text)
-        self.assertIn("| 1 | nopip3 | 2 | 4 |", text)
+        self.assertIn(f"| 1 | {SHIPPING} | 2 | 4 |", text)
         self.assertIn("| 2 | nopip1 | 1 | 5 |", text)
         self.assertIn("| 3 | nopip2 | 0 | 5 |", text)
-        self.assertIn("## Only `nopip3`", text)
+        self.assertIn(f"## Only `{SHIPPING}`", text)
         self.assertIn("alt_venv.py:14:", text)
         self.assertNotIn("## Only `nopip2`", text)
         self.assertNotIn(f"bootstrap.py:{def_line}:", text)
@@ -4886,8 +4923,8 @@ class CoverageToolTest(unittest.TestCase):
         """Runs that never finished are named rather than ignored."""
         # An empty directory is missing everything the default selects.
         text: str = alt_venv_coverage.compare(self.root)
-        self.assertIn("No counts for: baseline, nopip1, nopip2, nopip3.",
-                      text)
+        self.assertIn("No counts for: baseline, nopip1, nopip2, nopip3, "
+                      "nopip4.", text)
 
     def test_report_keeps_the_counts(self) -> None:
         """`report` saves what `compare` later reads back."""

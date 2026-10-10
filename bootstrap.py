@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Thirteen ways to get a package onto `sys.path` with nothing preinstalled.
+"""Fourteen ways to get a package onto `sys.path` with nothing preinstalled.
 
 Run it with no arguments: `python3 bootstrap.py`.  It runs every case
 three times and prints the table below to standard output, so
@@ -80,7 +80,7 @@ steer them at a local server.  A pasted case carries the literal
 The substitution costs a case no lines, so the `paste` column is
 unchanged.
 
-Measuring thirteen cases against one `~/.alt_venv` would be wrong: the
+Measuring fourteen cases against one `~/.alt_venv` would be wrong: the
 second case onwards would find `coverage` already on disk and report a
 warm time as its cold time.  Each run therefore gets its own `HOME`,
 which `pathlib.Path.home()` honours -- the isolation is in the
@@ -120,6 +120,9 @@ user would type.  The real `~/.alt_venv` is never touched.
 | nopip3 | no venv, PyPI | 4       | 28    | 31    | 3.05 s | 0.14 s | 3538   |
 |        | pip           |         |       |       |        |        |        |
 |        | subprocess    |         |       |       |        |        |        |
+| nopip4 | as nopip3,    | 4       | 32    | 35    | --     | --     | --     |
+|        | importable    |         |       |       |        |        |        |
+|        | first         |         |       |       |        |        |        |
 +--------+---------------+---------+-------+-------+--------+--------+--------+
 
 What the columns mean, in the order they appear above:
@@ -172,7 +175,7 @@ What the columns mean, in the order they appear above:
 
 * **warm** -- wall clock for the second run, when the package is already
   on disk.  Median of `REPETITIONS` runs.  It is ~0.14 s for every case
-  because all thirteen then do the same thing: one existence check, one
+  because all fourteen then do the same thing: one existence check, one
   `sys.path.insert`, and one import.  Cold cost is paid once per
   machine; warm cost is paid on every run of the program, forever.
 
@@ -220,13 +223,14 @@ load pip at all.
 `nopip2` exists to answer a question about the instructions rather than
 to be shipped.  Those asked for a venv built with `venv`, no spawning
 of `python3 -m pip install`, only `venv` and standard libraries, and
-an `importlib` import.  `nopip2` is the only one of the thirteen that
+an `importlib` import.  `nopip2` is the only one of the fourteen that
 does all four, and it costs 57 pasted lines against `nopip1`'s 51.  The
 extra 6 lines and 32 KB buy a virtual environment that nothing then
 reads, which is finding 3 of the log book arriving from yet another
 direction.
 
-`nopip3` is the one that ships; see Step 6.15 of `TASKS/`.  It is
+`nopip3` shipped until 2026-10-10, when `nopip4` replaced it; see Step
+6.15 and `T.ewar` of `TASKS/`.  It is
 `pip2` with the one thing `pip2` assumes taken away.  Rather than run
 the machine's pip, it fetches pip's own wheel from the JSON API, keeps
 it as `~/.alt_venv/pip.whl`, and runs it as `python pip.whl/pip`, which
@@ -270,6 +274,21 @@ plain `>=3.N` since it dropped Python 2; an older or odder specifier is
 simply passed over.  Against the real index that gives pip 24.0 on
 3.7, 25.0.1 on 3.8 and 26.0.1 on 3.9, each the last release for its
 Python.  See issue `I.bfnprp`.
+
+`nopip4` is the one that ships, since 2026-10-10.  It is `nopip3` with
+one question asked first: is `alt_venv` already importable?  Inside a
+`zipapp`, beside a working copy, or wherever an installer has already
+put it, `nopip3` fetched `pip` and `alt_venv` regardless, and with no
+network it failed.  `nopip4` tries the import, and only when that fails
+does `nopip3`'s work, unchanged.  It costs four lines, 35 pasted: `m =
+None`, a one line `try` and `except`, and an `if` around the import from
+`~/.alt_venv`.  The `m = None` is there for `mypy`, which at module
+level, where a program pastes it, refuses `None` assigned in the
+`except` to a name the `try` made a module.  The harness runs every
+case with `python -P`, so that this directory, which holds
+`alt_venv.py`, is not on the child's `sys.path`; otherwise `nopip4`
+would import the working copy and measure nothing.  See `T.ewar` and
+`I.apiia`.
 
 MIT No Attribution
 
@@ -797,6 +816,53 @@ def nopip3() -> None:
         raise SystemExit(f"{PACKAGE}: {s} failed: {x!r}")
 
 
+def nopip4() -> None:
+    """As nopip3, but first use an `alt_venv` that is already importable.
+
+    `nopip3` asks only whether `~/.alt_venv` holds `alt_venv`, so inside
+    a `zipapp`, or under `uv run`, it fetches `pip` and `alt_venv` that
+    are already on `sys.path`, and fails with no network.  This case
+    tries the import first and falls back to `nopip3` unchanged.  See
+    `T.ewar` and `I.apiia`.
+
+    Raises:
+    * `SystemExit`:
+      If any step fails, with one line saying what failed and why.
+    """
+    # Ensure `alt_venv` is downloaded.
+    import hashlib
+    import json
+    import subprocess
+    import urllib.request as req
+    try:
+        s = "find home"; t = pathlib.Path.home()/".alt_venv"; w = t/"pip.whl"
+        m = None
+        try: m = importlib.import_module(PACKAGE)  # Already importable?
+        except ImportError: pass
+        if m is None and not (t/PACKAGE).is_dir():  # Not installed yet.
+            s = "choose pip"; v = sys.version_info[1]
+            d = json.load(req.urlopen(f"{JSON_API}/pip/json", None, 30))
+            e = max((e for f in d["releases"].values() for e in f  # Newest pip
+                     if e["url"][-4:] == ".whl" and not e["yanked"]
+                     and (q := e["requires_python"] or "")[:4] == ">=3."
+                     and "," not in q and int(q.split(".")[1]) <= v),
+                    key=lambda e: e["upload_time"])  # whose floor we meet.
+            s = "download pip"; r = req.urlopen(e["url"], None, 60).read()
+            if hashlib.sha256(r).hexdigest() != e["digests"]["sha256"]:
+                raise ValueError(f"{e['filename']} fails its SHA-256 check")
+            t.mkdir(parents=True, exist_ok=True); p = t/"pip.part"
+            p.write_bytes(r); p.replace(w)  # The rename is atomic.
+            s = f"install {PACKAGE}"; subprocess.run([
+                sys.executable, w/"pip", "install", "--no-input", "-t", t,
+                "--disable-pip-version-check", PACKAGE], check=True)
+        if m is None:
+            s = f"import {PACKAGE}"; sys.path.insert(0, str(t))
+            importlib.invalidate_caches(); m = importlib.import_module(PACKAGE)
+        s = "fetch packages"; m.AltVEnv().install(bootstrap="nopip4")
+    except Exception as x:
+        raise SystemExit(f"{PACKAGE}: {s} failed: {x!r}")
+
+
 def main() -> None:
     """Run the single bootstrap mechanism named by `sys.argv[1]`.
 
@@ -824,8 +890,8 @@ def main() -> None:
     # neither is idle here: the constructor repairs a single module
     # install so that this case's own `is_dir()` guard recognises it on
     # the following run, and `install()` walks the declared path in every
-    # one of the thirteen shapes, virtual environments included.  This file
-    # has no PEP 723 block, so nothing is fetched.  See `I.cctfd` and Step
+    # one of the fourteen shapes, virtual environments included.  This
+    # file has no PEP 723 block, so nothing is fetched.  See `I.cctfd` and Step
     # 6.7.8.  Harness machinery, so `paste` does not count it.
     if hasattr(module, "AltVEnv"):
         module.AltVEnv().install(bootstrap=sys.argv[1])
@@ -848,6 +914,7 @@ MECHANISMS = {
     "nopip1": "no venv, stdlib wheel",
     "nopip2": "venv(no pip), stdlib wheel",
     "nopip3": "no venv, PyPI pip subprocess",
+    "nopip4": "as nopip3, importable first",
 }
 # Lines a case needs but does not contain: the three module level
 # imports.  This is the difference between `lines` and `paste`.
@@ -1035,7 +1102,7 @@ def run_tests() -> None:
             environment = dict(base, HOME=home)
             for samples in (colds, warms):
                 start = time.perf_counter()
-                done = subprocess.run([sys.executable, script, label],
+                done = subprocess.run([sys.executable, "-P", script, label],
                                       env=environment, capture_output=True,
                                       text=True, check=False)
                 samples.append(time.perf_counter() - start)
