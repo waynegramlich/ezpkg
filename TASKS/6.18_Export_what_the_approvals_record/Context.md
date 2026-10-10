@@ -30,9 +30,13 @@ The steps, one task (Wayne collapsed the 6.18.1-4 children on
    `QUICK_START`, README Part 3 and `BOOTSTRAPS`.  Test harness runs
    cases with `python -P`;
    `test_the_shipping_case_uses_an_importable_alt_venv` covers it.
-   Still to do: `AltVEnv.install` skipping the
-   program's packages that are already importable (`contains()` looks
-   only in the cache), and measuring `nopip4`'s cold/warm/size row in
+   **Package half done 2026-10-10:** `satisfied()` in `alt_venv.py`
+   checks the installed version against plain-release specifiers
+   (`== != >= <= > < ~=`) and answers `False` when unsure; `provide()`
+   skips fetching only when *every* requirement is satisfied (all or
+   nothing, so `pip` still resolves the set together) and no `argv` was
+   given.  Wayne chose the version check over "importable is enough".
+   Still to do: measuring `nopip4`'s cold/warm/size row in
    `bootstrap.py` (now `--`).
 2. **Pins for Part 1.**  The freeze from the note at
    `README.md:252-261`: `==` pins for every wheel, including those that
@@ -41,7 +45,26 @@ The steps, one task (Wayne collapsed the 6.18.1-4 children on
    which both `pip` and `uv pip install -r` accept.  Catch: approvals
    are keyed by wheel file name, so a compiled package is
    platform-specific.
-3. **A `zipapp` export.**  Pure-Python wheels unpack straight into the
+   **Done 2026-10-10:** `ALT_VENV_EXPORT=pins` (no-argument `install`
+   only) runs `provide()`, then `AltVEnv.export("pins")` prints
+   `# dependencies = [ ... ]` with every approved wheel pinned
+   (`AltVEnv.pins()`, from the wheel names in `prog.altvenv`), then
+   `sys.exit(0)` before Part 5.  Refuses with no approvals file, and
+   with two versions of one distribution.  One run does both:
+   `ALT_VENV_APPROVE=write ALT_VENV_EXPORT=pins python3 prog.py`.  The
+   `requirements.txt --hash` form was not done.
+3. **A `zipapp` export.**  **Done 2026-10-10, pure Python only:**
+   `ALT_VENV_EXPORT=zipapp[:PATH]` → `build_zipapp()`.  At Wayne's
+   request the archive leaves `alt_venv` out: `strip_bootstrap()`
+   replaces the pasted bootstrap in `__main__.py` with `pass`, so the
+   `.pyz` never runs `alt_venv` and writes nothing to `~`.  A program
+   with no bootstrap is refused.  Verified with real PyPI packages
+   (cowsay, humanize, pyfiglet, python-slugify, tabulate, termcolor,
+   text-unidecode) from an empty HOME with a dead index.  Found:
+   `prettytable` needs `wcwidth` 0.9.2, now a compiled abi3 wheel, so
+   it cannot be zipped yet.  `find_bootstrap` matches any `try`
+   naming `alt_venv` and `import_module`, first in source order.
+   Original notes:  Pure-Python wheels unpack straight into the
    `.pyz`.  Compiled ones cannot be imported from a zip; the `.pyz`
    could carry those wheels and unpack them into `~/.alt_venv` on first
    run, which is what the bootstrap already does, but offline.  The

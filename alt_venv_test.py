@@ -1654,7 +1654,7 @@ class AltVEnvTest(unittest.TestCase):
     def test_the_shipping_case_uses_an_importable_alt_venv(self) -> None:
         """An `alt_venv` already on `sys.path` is used, and nothing fetched.
 
-        Inside a `zipapp`, or beside a working copy, `alt_venv` imports
+        Under `uv run`, or beside a working copy, `alt_venv` imports
         before the bootstrap has done anything.  `nopip3` fetched `pip`
         and `alt_venv` regardless, and failed with no network.  Here the
         index is dead and this directory, with `alt_venv.py` in it, is on
@@ -2338,13 +2338,18 @@ class InstallTest(unittest.TestCase):
 
         Arguments:
         * `entry` (`str`):
-          The `sys.path` entry to take out again.
+          The cache root; every `sys.path` entry at or under it is taken
+          out again.
         * `name` (`str`):
           The module to drop from `sys.modules`.
         """
-        # `install` inserts and imports; both have to be undone.
-        while entry in sys.path:
-            sys.path.remove(entry)
+        # `install` inserts and imports; both have to be undone.  It
+        # inserts the version trees inside the cache, not the cache
+        # itself, and a tree left behind made the next test's package
+        # look installed once `satisfied` began asking.
+        sys.path[:] = [one for one in sys.path
+                       if one != entry
+                       and not one.startswith(entry + os.sep)]
         sys.modules.pop(name, None)
         importlib.invalidate_caches()
 
@@ -2636,6 +2641,22 @@ class InstallTest(unittest.TestCase):
                     venv.install([bad])
                 self.assertIn("reads as an option", str(caught.exception))
 
+    def test_an_installed_requirement_fetches_nothing(self) -> None:
+        """Already importable at an allowed version means no `pip` run.
+
+        Under `uv run`, or from the operating system, the packages are
+        already on `sys.path`; fetching them again wasted a download,
+        and with no network failed.  `pip` is the package every test
+        machine has.
+        """
+        # Any fetch would have to run `pip`, so forbid that outright.
+        venv: alt_venv.AltVEnv = alt_venv.AltVEnv(self.root / "installed")
+        with unittest.mock.patch.object(
+                venv, "download", side_effect=AssertionError("fetched")):
+            module: ModuleType = venv.install("pip>=1")
+        self.assertEqual(module.__name__, "pip")
+        self.assertEqual(list(venv.paths()[2].iterdir()), [])
+
     def test_install_refuses_a_repeated_import_name(self) -> None:
         """Two entries cannot claim one import name."""
         # `pip` cannot catch this: it never sees our import names, and
@@ -2768,7 +2789,9 @@ class InstallTest(unittest.TestCase):
         with unittest.mock.patch.dict(
                 os.environ, {"PIP_INDEX_URL": self.index_url}):
             venv.install("sprocket<2")
-            del sys.modules["sprocket"]
+            # As a second program would start: without the first tree on
+            # `sys.path`, which would otherwise satisfy the second request.
+            self.forget(str(cache), "sprocket")
             venv.install("sprocket==1.0.0")
         pending: Path
         wheels: Path
@@ -4353,6 +4376,198 @@ class InstallTest(unittest.TestCase):
         self.assertEqual(done.returncode, 0, done.stderr[-400:])
         self.assertEqual(done.stdout.strip(), "1.0.0")
 
+    def test_export_pins_everything_approved(self) -> None:
+        """`ALT_VENV_EXPORT=pins` prints Part 1 pinned, and stops.
+
+        `needy` brings `widget` along, so the pins include a package
+        nobody declared, which is what makes them a freeze.  Approving
+        and exporting in one run is the documented way to do it.
+        """
+        # The program's own line must not run once the pins are out.
+        program: Path = self.declaring_program(
+            "pinned", 'dependencies = ["needy"]', "print('ran')")
+        done: subprocess.CompletedProcess[str] = self.run_program(
+            program, ALT_VENV_APPROVE="write", ALT_VENV_EXPORT="pins")
+        self.assertEqual(done.returncode, 0, done.stderr[-400:])
+        self.assertEqual(done.stdout.splitlines(), [
+            "# dependencies = [",
+            '#   "needy==1.0.0",',
+            '#   "widget==1.2.3",',
+            "# ]"])
+
+    def bootstrapped_program(self, name: str, block: str, tail: str
+                             ) -> tuple[Path, Path]:
+        """Write a program carrying the real pasted bootstrap, and a HOME.
+
+        `declaring_program` stands in for the bootstrap with an import
+        from this tree; a `zipapp` needs the real thing, because the
+        build takes it out.  `alt_venv` cannot be fetched from the local
+        index the way the bootstrap fetches it from PyPI, so the HOME
+        already holds it where the bootstrap looks, as a package.
+
+        Arguments:
+        * `name` (`str`):
+          A directory name, to keep one test's program from another's.
+        * `block` (`str`):
+          The TOML inside the PEP 723 block, one line.
+        * `tail` (`str`):
+          Statements after the bootstrap, such as the imports.
+
+        Returns:
+        * (`tuple[Path, Path]`): The program written, and its HOME.
+        """
+        # Part 1, Part 2's three shared imports, Part 3, then the rest.
+        where: Path = self.root / name
+        home: Path = where / "home"
+        installed: Path = home / ".alt_venv" / MODULE
+        installed.mkdir(parents=True)
+        shutil.copyfile(Path(__file__).resolve().parent / f"{MODULE}.py",
+                        installed / "__init__.py")
+        program: Path = where / "prog.py"
+        program.write_text(
+            f"# /// script\n# {block}\n# ///\n"
+            "import importlib\nimport pathlib\nimport sys\n"
+            + bootstrap.pasted(SHIPPING) + tail + "\n")
+        return program, home
+
+    def test_export_zipapp_runs_without_a_network(self) -> None:
+        """`ALT_VENV_EXPORT=zipapp` writes a `.pyz` that needs nothing.
+
+        Built in one run with the approvals, from a program carrying the
+        real bootstrap.  The archive holds neither `alt_venv` nor the
+        bootstrap, and is run with an empty HOME and an index nothing
+        listens on: every package, `widget` that came along included,
+        has to import from inside it, and nothing may be written.
+        """
+        # Building is not running: the program's own line stays silent.
+        program: Path
+        home: Path
+        program, home = self.bootstrapped_program(
+            "zipped", 'dependencies = ["needy"]',
+            "import needy\nimport widget\n"
+            "print(needy.__file__)\nprint(widget.__file__)")
+        built: subprocess.CompletedProcess[str] = self.run_program(
+            program, HOME=str(home), ALT_VENV_APPROVE="write",
+            ALT_VENV_EXPORT="zipapp")
+        self.assertEqual(built.returncode, 0, built.stderr[-400:])
+        archive: Path = program.with_suffix(".pyz")
+        self.assertEqual(built.stdout.strip(), f"alt_venv: wrote {archive}")
+        with zipfile.ZipFile(archive) as opened:
+            self.assertFalse([name for name in opened.namelist()
+                              if name.startswith(MODULE)])
+            main: str = opened.read("__main__.py").decode()
+        self.assertIsNone(alt_venv.find_bootstrap(main))
+
+        # Run it with an empty HOME and nowhere to fetch from.
+        empty: Path = self.root / "zipped" / "empty"
+        empty.mkdir()
+        environment: dict[str, str] = dict(
+            os.environ, HOME=str(empty), PIP_INDEX_URL="http://127.0.0.1:1/")
+        environment.pop("VIRTUAL_ENV", None)
+        done: subprocess.CompletedProcess[str] = subprocess.run(
+            [sys.executable, str(archive)], env=environment,
+            capture_output=True, text=True, check=False)
+        self.assertEqual(done.returncode, 0, done.stderr[-400:])
+        lines: list[str] = done.stdout.splitlines()
+        self.assertEqual(len(lines), 2, done.stdout)
+        self.assertTrue(all(line.startswith(str(archive) + os.sep)
+                            for line in lines), done.stdout)
+        self.assertEqual(list(empty.iterdir()), [])
+
+    def test_strip_bootstrap_keeps_a_nested_block_valid(self) -> None:
+        """A bootstrap inside a function becomes an indented `pass`."""
+        # The pasted text, indented one level under a `def`.
+        pasted: str = textwrap.indent(bootstrap.pasted(SHIPPING), "    ")
+        text: str = "def start():\n" + pasted + "    print('after')\n"
+        stripped: str | None = alt_venv.strip_bootstrap(text)
+        assert stripped is not None
+        compile(stripped, "<stripped>", "exec")
+        self.assertIsNone(alt_venv.find_bootstrap(stripped))
+        self.assertIn("    pass  # The bootstrap", stripped)
+        self.assertIn("    print('after')", stripped)
+        self.assertIsNone(alt_venv.strip_bootstrap("print('no bootstrap')\n"))
+
+    def test_zipapp_refuses_what_a_zip_cannot_carry(self) -> None:
+        """Compiled, unapproved or `.pth` packages are refused, not bundled.
+
+        Each would be a `.pyz` that fails, or half works, only on the
+        machine it was sent to.
+        """
+        # A program file and a cache holding one tree, set up by hand.
+        venv: alt_venv.AltVEnv = alt_venv.AltVEnv(self.root / "refuse")
+        program: Path = self.root / "refuse" / "prog.py"
+        program.write_text(bootstrap.pasted(SHIPPING))
+        tree: Path = venv.paths()[2] / "hooked-1.0-py3"
+        tree.mkdir(parents=True)
+        pure: str = "hooked-1.0-py3-none-any.whl"
+        native: str = "fast-1.0-cp312-cp312-linux_x86_64.whl"
+        cases: list[tuple[list[str], dict[str, str], bool, str]] = [
+            ([native], {native: "0" * 64}, False, "compiled"),
+            ([pure], {}, False, "no approvals"),
+            ([pure], {"other.whl": "0" * 64}, False, "not approved"),
+            ([pure], {pure: "0" * 64}, True, ".pth file"),
+        ]
+        wheels: list[str]
+        approved: dict[str, str]
+        hooked: bool
+        expected: str
+        for wheels, approved, hooked, expected in cases:
+            with self.subTest(expected=expected):
+                if hooked:
+                    (tree / "hooked.pth").write_text("import os\n")
+                with (unittest.mock.patch.object(alt_venv, "main_path",
+                                                 return_value=program),
+                      unittest.mock.patch.object(venv, "approved",
+                                                 return_value=approved),
+                      unittest.mock.patch.object(
+                          venv, "remember",
+                          return_value=([tree.name], wheels)),
+                      self.assertRaises(RuntimeError) as caught):
+                    venv.build_zipapp(["hooked"])
+                self.assertIn(expected, str(caught.exception))
+                self.assertFalse(program.with_suffix(".pyz").exists())
+
+        # A program with no bootstrap uses `alt_venv` some other way, and
+        # would fail in an archive that leaves it out.
+        program.write_text("print('ran')\n")
+        with (unittest.mock.patch.object(alt_venv, "main_path",
+                                         return_value=program),
+              self.assertRaises(RuntimeError) as caught):
+            venv.build_zipapp(["hooked"])
+        self.assertIn("has none", str(caught.exception))
+
+    def test_export_needs_approvals(self) -> None:
+        """Without an approvals file there is nothing to pin from."""
+        # `skip` leaves no file behind, so the export has to refuse.
+        program: Path = self.declaring_program(
+            "unpinned", 'dependencies = ["widget"]', "print('ran')")
+        done: subprocess.CompletedProcess[str] = self.run_program(
+            program, ALT_VENV_APPROVE="skip", ALT_VENV_EXPORT="pins")
+        self.assertNotEqual(done.returncode, 0)
+        self.assertIn("ALT_VENV_APPROVE=write", done.stderr)
+        self.assertNotIn("ran", done.stdout)
+
+    def test_export_refuses_an_unknown_form(self) -> None:
+        """A misspelt form is refused rather than silently ignored."""
+        # In process: the refusal comes before anything is read.
+        venv: alt_venv.AltVEnv = alt_venv.AltVEnv(self.root / "form")
+        with self.assertRaises(ValueError) as caught:
+            venv.export("pinz")
+        self.assertIn("use pins or zipapp", str(caught.exception))
+
+    def test_pins_refuse_two_versions_of_one_package(self) -> None:
+        """No single `==` can say two versions, so none is guessed."""
+        # Approvals as a hand-edited file might have them.
+        venv: alt_venv.AltVEnv = alt_venv.AltVEnv(self.root / "two")
+        approved: dict[str, str] = {
+            "sprocket-1.0.0-py3-none-any.whl": "0" * 64,
+            "sprocket-2.0.0-py3-none-any.whl": "1" * 64}
+        with (unittest.mock.patch.object(venv, "approved",
+                                         return_value=approved),
+              self.assertRaises(RuntimeError) as caught):
+            venv.pins()
+        self.assertIn("sprocket", str(caught.exception))
+
     def test_a_declaration_needs_no_import_name(self) -> None:
         """A distribution named apart from its module just works.
 
@@ -5329,6 +5544,59 @@ class MetadataTest(unittest.TestCase):
                           "==3.11.*", ">=3", "", "3.11", ">=3.x"):
             with self.subTest(specifier=specifier):
                 self.assertIsNone(alt_venv.python_floor(specifier))
+
+    def test_satisfied_compares_plain_releases(self) -> None:
+        """The common operators decide, against the installed version.
+
+        PEP 440 pads with zeros, so `2.32` and `2.32.0` are equal, and
+        `~=2.32.1` means `>=2.32.1` and `==2.32.*`.
+        """
+        # One installed version, 2.32.3, judged by many requirements.
+        cases: dict[str, bool] = {
+            "requests": True, "requests>=2.28,<3": True,
+            "requests >= 2.28 , < 3": True, "requests<3": True,
+            "requests==2.32.3": True, "requests==2.32.3.0": True,
+            "requests!=2.31.0": True, "requests~=2.32.0": True,
+            "requests~=2.32.4": False, "requests~=2.31": True,
+            "requests~=3.0": False, "requests>2.32.3": False,
+            "requests<=2.32.2": False, "requests!=2.32.3": False,
+            "requests>=3": False}
+        requirement: str
+        expected: bool
+        with unittest.mock.patch.object(
+                alt_venv.importlib.metadata, "version",
+                return_value="2.32.3"):
+            for requirement, expected in cases.items():
+                with self.subTest(requirement=requirement):
+                    self.assertIs(alt_venv.satisfied(requirement),
+                                  expected)
+
+    def test_satisfied_fetches_when_unsure(self) -> None:
+        """Anything it cannot be certain about answers `False`.
+
+        A wrong `True` runs the program against the wrong version; a
+        wrong `False` costs one download.  See `T.ewar`.
+        """
+        # Shapes outside the plain-release subset, then odd versions.
+        requirement: str
+        with unittest.mock.patch.object(
+                alt_venv.importlib.metadata, "version",
+                return_value="2.32.3"):
+            for requirement in ("requests[socks]", "requests==2.32.*",
+                                "requests===2.32.3", "requests~=2",
+                                "requests; sys_platform == 'linux'",
+                                "requests @ https://example.com/r.whl",
+                                "requests>=2.32.3rc1"):
+                with self.subTest(requirement=requirement):
+                    self.assertFalse(alt_venv.satisfied(requirement))
+        version: str
+        for version in ("2.33.0rc1", "2.32.3.post1", "2.32.3+local"):
+            with (self.subTest(version=version),
+                  unittest.mock.patch.object(
+                      alt_venv.importlib.metadata, "version",
+                      return_value=version)):
+                self.assertFalse(alt_venv.satisfied("requests>=2"))
+        self.assertFalse(alt_venv.satisfied("no-such-distribution-here"))
 
     def test_our_own_block_reads_back(self) -> None:
         """`alt_venv.py`'s own block parses, and declares nothing.

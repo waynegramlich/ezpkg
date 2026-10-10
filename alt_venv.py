@@ -60,6 +60,7 @@ SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 import ast
 import hashlib
 import importlib
+import importlib.metadata
 import inspect
 import io
 import json
@@ -75,6 +76,7 @@ import textwrap
 import time
 import tokenize
 import tomllib
+import zipapp
 import zipfile
 from collections.abc import Sequence
 from pathlib import Path
@@ -229,6 +231,78 @@ def import_name(requirement: str) -> str:
     # Everything from the first constraint, extra or marker onwards is
     # about which version to fetch, not about what to import.
     return re.sub(r"[-.]+", "_", requirement_name(requirement))
+
+
+# One clause of a version specifier that `satisfied` can be sure about:
+# a comparison against a plain release such as `2.32.0`.  Wildcards,
+# `===`, pre-releases and anything else do not match, and so fetch.
+CLAUSE = re.compile(r"(==|!=|>=|<=|>|<|~=)\s*(\d+(?:\.\d+)*)")
+
+
+def satisfied(requirement: str) -> bool:
+    """Report whether a requirement is already met without the cache.
+
+    Under `uv run`, in a virtual environment, or with a package the
+    operating system installed, a requirement may already be importable, and
+    fetching it again wastes a download and, with no network, fails.
+    The installed version is read from its metadata and compared with
+    the requirement's specifier.  Only plain releases and the common
+    operators are understood: anything else -- an extra, an environment
+    marker, a URL, a wildcard, a pre-release, a missing `.dist-info` --
+    answers `False`, which fetches exactly as before.  A wrong `True`
+    would run the program against the wrong version; a wrong `False`
+    costs one download.  See `T.ewar` and `I.apiia`.
+
+    Arguments:
+    * `requirement` (`str`):
+      A requirement as `pip` spells it.
+
+    Returns:
+    * (`bool`): True only when the installed version certainly meets
+      the requirement.
+    """
+    # Extras, markers and URLs are not this function's to judge.
+    name: str = requirement_name(requirement)
+    rest: str = requirement[requirement.find(name) + len(name):].strip()
+    if not name or any(mark in rest for mark in "[;@"):
+        return False
+
+    # Installed at all, and as a plain release?
+    try:
+        found: str = importlib.metadata.version(name)
+    except importlib.metadata.PackageNotFoundError:
+        return False
+    if not re.fullmatch(r"\d+(?:\.\d+)*", found):
+        return False
+    have: list[int] = [int(part) for part in found.split(".")]
+
+    # Every clause must hold.  PEP 440 pads a release with zeros, so
+    # `2.0` equals `2.0.0`.
+    clause: str
+    for clause in filter(None, (one.strip() for one in rest.split(","))):
+        matched: re.Match[str] | None = CLAUSE.fullmatch(clause)
+        if matched is None:
+            return False
+        operator: str = matched.group(1)
+        want: list[int] = [int(part) for part in matched.group(2).split(".")]
+        width: int = max(len(have), len(want))
+        mine: tuple[int, ...] = tuple(have + [0] * (width - len(have)))
+        theirs: tuple[int, ...] = tuple(want + [0] * (width - len(want)))
+        holds: bool
+        if operator == "~=":
+            # `~=2.32.1` is `>=2.32.1` and `==2.32.*`; one number is
+            # not allowed.
+            if len(want) < 2:
+                return False
+            holds = (mine >= theirs
+                     and have[:len(want) - 1] == want[:-1])
+        else:
+            holds = {"==": mine == theirs, "!=": mine != theirs,
+                     ">=": mine >= theirs, "<=": mine <= theirs,
+                     ">": mine > theirs, "<": mine < theirs}[operator]
+        if not holds:
+            return False
+    return True
 
 
 def main_path() -> Path | None:
@@ -467,6 +541,30 @@ def find_bootstrap(text: str) -> str | None:
     * (`str | None`): The block, or `None` when there is none or the
       program does not parse.
     """
+    # Padded and then dedented, because the segment's first line
+    # otherwise comes without its indentation and the rest with theirs,
+    # which `tokenize` rejects when the `try` is nested.
+    found: ast.Try | None = bootstrap_node(text)
+    if found is None:
+        return None
+    return textwrap.dedent(
+        ast.get_source_segment(text, found, padded=True) or "")
+
+
+def bootstrap_node(text: str) -> ast.Try | None:
+    """Return the pasted bootstrap's `try` statement, parsed.
+
+    The search `find_bootstrap` and `strip_bootstrap` share: a `try`
+    whose text mentions both `alt_venv` and `import_module`.
+
+    Arguments:
+    * `text` (`str`):
+      The program's source.
+
+    Returns:
+    * (`ast.Try | None`): The statement, or `None` when there is none or
+      the program does not parse.
+    """
     # The first match wins; a program has one bootstrap.
     try:
         tree: ast.Module = ast.parse(text)
@@ -475,14 +573,41 @@ def find_bootstrap(text: str) -> str | None:
     node: ast.AST
     for node in ast.walk(tree):
         if isinstance(node, ast.Try):
-            # Padded and then dedented, because the segment's first line
-            # otherwise comes without its indentation and the rest with
-            # theirs, which `tokenize` rejects when the `try` is nested.
-            block: str | None = ast.get_source_segment(text, node,
-                                                       padded=True)
+            block: str | None = ast.get_source_segment(text, node)
             if block and "alt_venv" in block and "import_module" in block:
-                return textwrap.dedent(block)
+                return node
     return None
+
+
+def strip_bootstrap(text: str) -> str | None:
+    """Return a program's text with its pasted bootstrap taken out.
+
+    For a `zipapp`, which carries the program's packages and not
+    `alt_venv`: there the bootstrap has nothing to do, and left in it
+    would find no `alt_venv` and go to the network for one.  The `try`
+    becomes a `pass` at the same indentation, so a bootstrap nested in
+    a function or an `if` leaves that block still valid.  The imports of
+    Part 2 stay; they are the standard library, and harmless.
+
+    Arguments:
+    * `text` (`str`):
+      The program's source.
+
+    Returns:
+    * (`str | None`): The program without its bootstrap, or `None` when
+      it has none to take out.
+    """
+    # Whole lines, from the `try` to the end of its `except`.
+    found: ast.Try | None = bootstrap_node(text)
+    if found is None or found.end_lineno is None:
+        return None
+    lines: list[str] = text.splitlines(keepends=True)
+    ending: str = "\r\n" if lines[found.lineno - 1].endswith("\r\n") else "\n"
+    replacement: str = (" " * found.col_offset
+                        + "pass  # The bootstrap: a zipapp carries its "
+                        "packages." + ending)
+    return "".join(lines[:found.lineno - 1] + [replacement]
+                   + lines[found.end_lineno:])
 
 
 def refresh(path: Path, text: str) -> None:
@@ -802,6 +927,188 @@ class AltVEnv:
             "# with ALT_VENV_APPROVE=write after changing what it needs.\n"
             + "".join(f"{row}\n" for row in rows))
         return record
+
+    def pins(self) -> list[str]:
+        """Return an exact `==` pin for every approved wheel.
+
+        The approvals already name every wheel the program needs, the
+        ones that came along included, and a wheel's file name carries
+        its distribution and version.  Pinning all of them in Part 1
+        makes `pip` fetch the same versions every time, and the
+        approvals then check that those are the same files: together, a
+        freeze.  See `T.ewar` in `TASKS/`.
+
+        Returns:
+        * (`list[str]`): Requirements such as `widget==1.2.3`, sorted.
+
+        Raises:
+        * `RuntimeError`:
+          If there is no approvals file to pin from, or it approves two
+          versions of one distribution, which no single pin can say.
+        """
+        # A wheel is `{name}-{version}-...`, and the name has no hyphen.
+        approved: dict[str, str] | None = self.approved()
+        if not approved:
+            raise RuntimeError(
+                "no approvals to pin; run once with "
+                "ALT_VENV_APPROVE=write first")
+        versions: dict[str, set[str]] = {}
+        wheel: str
+        for wheel in approved:
+            name, version = wheel.split("-")[:2]
+            versions.setdefault(name, set()).add(version)
+        mixed: list[str] = sorted(name for name, found in versions.items()
+                                  if len(found) > 1)
+        if mixed:
+            raise RuntimeError(
+                "more than one version approved for "
+                + ", ".join(mixed))
+        return sorted(f"{name}=={found.pop()}"
+                      for name, found in versions.items())
+
+    def export(self, form: str, asking: Sequence[str] = ()) -> None:
+        """Write what the approvals record in another tool's form.
+
+        Called when `ALT_VENV_EXPORT` is set, after the packages have
+        been provided and checked, and the program exits straight after
+        without running its own code.  `pins` prints the `dependencies`
+        lines for Part 1, ready to paste over the old ones.  `zipapp`
+        writes `prog.pyz` beside the program, and `zipapp:PATH` writes
+        it at `PATH`; see `build_zipapp`.
+
+        Arguments:
+        * `form` (`str`):
+          What to write: `pins`, `zipapp` or `zipapp:PATH`.  The kind is
+          read in any case; the path is taken as written.
+        * `asking` (`Sequence[str]`):
+          The requirements just provided, which `build_zipapp` bundles.
+
+        Raises:
+        * `ValueError`:
+          If `form` is not one this knows.
+        * `RuntimeError`:
+          If `pins` or `build_zipapp` does; see there.
+        """
+        # The kind, then for `zipapp` an optional place to put it.
+        kind: str
+        target: str
+        kind, _, target = form.partition(":")
+        kind = kind.lower()
+        if kind == "zipapp":
+            self.build_zipapp(asking, Path(target) if target else None)
+            return
+        if kind != "pins" or target:
+            raise ValueError(
+                f"ALT_VENV_EXPORT is {form!r}; use pins or zipapp")
+
+        # Comment lines, because Part 1 is a PEP 723 block.
+        print("# dependencies = [")
+        pin: str
+        for pin in self.pins():
+            print(f'#   "{pin}",')
+        print("# ]")
+
+    def build_zipapp(self, asking: Sequence[str],
+                     target: Path | None = None) -> Path:
+        """Bundle the program and its packages into a `.pyz`.
+
+        The result runs as `python3 prog.pyz` on a machine with no
+        network, and leaves nothing behind: `alt_venv` is not in it and
+        never runs.  The program goes in as `__main__.py` with its
+        pasted bootstrap taken out (`strip_bootstrap`), because the
+        packages the bootstrap would have fetched are already inside,
+        and its own imports find them there.  A program with no
+        bootstrap to take out is refused, since it must use `alt_venv`
+        some other way and would fail without it.
+
+        Only what the approvals vouch for goes in, and only what a zip
+        can carry: Python cannot import compiled code from inside an
+        archive, and does not run `.pth` files there, so a package with
+        either is refused rather than bundled half working.
+
+        Arguments:
+        * `asking` (`Sequence[str]`):
+          The requirements the program declared.
+        * `target` (`Path | None`):
+          Where to write the archive; `None` means beside the program,
+          as `prog.py` to `prog.pyz`.
+
+        Returns:
+        * (`Path`): The archive written.
+
+        Raises:
+        * `RuntimeError`:
+          If the program has no file or no bootstrap, there are no
+          approvals, the packages did not come from the cache, or any
+          of them is unapproved, compiled, or carries a `.pth` file.
+        """
+        # The program, without its bootstrap, is the archive's
+        # `__main__.py`.  Read as bytes and written back in the encoding
+        # it declares, so a `coding:` line stays true.
+        program: Path | None = main_path()
+        if program is None:
+            raise RuntimeError("a zipapp needs the program's own file")
+        target = target or program.with_suffix(".pyz")
+        raw: bytes = program.read_bytes()
+        encoding: str = tokenize.detect_encoding(io.BytesIO(raw).readline)[0]
+        stripped: str | None = strip_bootstrap(raw.decode(encoding))
+        if stripped is None:
+            raise RuntimeError(
+                "a zipapp leaves alt_venv out, so the program needs the "
+                "pasted bootstrap for it to take out, and has none")
+
+        # What this request resolved to, as the cache recorded it.
+        approved: dict[str, str] | None = self.approved()
+        if not approved:
+            raise RuntimeError(
+                "no approvals to bundle from; run once with "
+                "ALT_VENV_APPROVE=write first")
+        remembered: tuple[list[str], list[str]] | None = (
+            self.remember(" ".join(sorted(asking))) if asking
+            else ([], []))
+        if remembered is None:
+            raise RuntimeError(
+                "the declared packages did not come from the cache, so "
+                "there is nothing approved to bundle")
+        trees: list[str]
+        wheels: list[str]
+        trees, wheels = remembered
+
+        # Approved, pure Python, and no `.pth` to go unrun.
+        versions: Path = self.paths()[2]
+        unapproved: list[str] = sorted(set(wheels) - set(approved))
+        compiled: list[str] = sorted(
+            wheel for wheel in wheels
+            if not wheel.endswith("-none-any.whl"))
+        hooks: list[str] = sorted(
+            found.name for tree in trees
+            for found in (versions / tree).glob("*.pth"))
+        problem: str
+        names: list[str]
+        for problem, names in (("not approved", unapproved),
+                               ("compiled, which a zip cannot import",
+                                compiled),
+                               ("a .pth file, which a zip never runs",
+                                hooks)):
+            if names:
+                raise RuntimeError(
+                    f"cannot bundle {', '.join(names)}: {problem}")
+
+        # Stage the trees and the program, then zip them.
+        staging: str
+        with tempfile.TemporaryDirectory(prefix="alt_venv-zipapp-") \
+                as staging:
+            stage: Path = Path(staging)
+            tree: str
+            for tree in trees:
+                shutil.copytree(
+                    versions / tree, stage, dirs_exist_ok=True,
+                    ignore=shutil.ignore_patterns("__pycache__"))
+            (stage / "__main__.py").write_bytes(stripped.encode(encoding))
+            zipapp.create_archive(stage, target,
+                                  interpreter="/usr/bin/env python3")
+        print(f"alt_venv: wrote {target}")
+        return target
 
     def summary(self, wheel: Path) -> str:
         """Return what a wheel says about itself, in one safe line.
@@ -1571,9 +1878,12 @@ class AltVEnv:
         Whatever is missing is installed into the cache directory with
         `pip install --target`, which needs no virtual environment, and
         the cache directory is put on `sys.path` so that the imports
-        succeed.  Anything already in the cache is not fetched again.
-        One `pip` is run for the whole set rather than one per package,
-        so `pip` resolves them together and can notice a conflict that
+        succeed.  Anything already in the cache is not fetched again,
+        and when every requirement is already importable at a version
+        it allows, as under `uv run`, nothing is
+        fetched or put on `sys.path` at all; see `satisfied`.  One
+        `pip` is run for the whole set rather than one per package, so
+        `pip` resolves them together and can notice a conflict that
         installing them separately would hide.
 
         The name says `install` rather than something friendlier
@@ -1592,6 +1902,11 @@ class AltVEnv:
         file.  `skip` checks nothing, which is for an author still
         deciding what the program needs.  A program with no approvals
         file is told what arrived and not asked about it; see Step 6.6.
+
+        `ALT_VENV_EXPORT`, in the no-argument form, writes what the
+        approvals record in another form and then exits instead of
+        returning, so the program's own code never runs.  `pins` prints
+        Part 1's `dependencies` with every package pinned; see `export`.
 
         A requirement is spelled the way `pip` spells it, so a version
         constraint needs no special support:
@@ -1660,7 +1975,15 @@ class AltVEnv:
         if requirements is None:
             declaration: dict[str, Any] = self.declaration()
             self.check_python(declaration)
-            self.provide(self.declared(), argv)
+            asked: list[str] = self.declared()
+            self.provide(asked, argv)
+
+            # An export is a build step, not a run: once written, the
+            # program stops before its own code.  See `export`.
+            form: str = os.environ.get("ALT_VENV_EXPORT", "")
+            if form:
+                self.export(form, asked)
+                sys.exit(0)
             return None
 
         # One string is the simple case, and it returns one module.
@@ -1833,15 +2156,6 @@ class AltVEnv:
         if not asking:
             return
 
-        # A good moment to sweep: something is about to be fetched, so a
-        # little work here is invisible beside a download, and anything
-        # this program is about to create is younger than the grace
-        # period and so cannot be swept by mistake.  The same reasoning
-        # makes it the moment to see whether `pip` has moved on.
-        if self.due():
-            self.cull()
-        self.refresh_pip()
-
         # Refuse the one thing `pip` would accept and should not: a
         # leading dash reads as an option, so `install("--index-url=")`
         # could aim the fetch at somebody else's index.  Requirement
@@ -1853,6 +2167,25 @@ class AltVEnv:
             if requirement.startswith("-"):
                 raise ValueError(
                     f"requirement reads as an option: {requirement!r}")
+
+        # Everything already importable at the right version, as under
+        # `uv run` or in a virtual environment, needs nothing from the
+        # cache or the network.  All or nothing: fetching only the rest
+        # would let `pip` resolve them apart from what is installed, and the
+        # cache, which goes first on `sys.path`, could then shadow a
+        # shared dependency with a version the installed ones never
+        # agreed to.  See `satisfied`.
+        if not argv and all(satisfied(one) for one in asking):
+            return
+
+        # A good moment to sweep: something is about to be fetched, so a
+        # little work here is invisible beside a download, and anything
+        # this program is about to create is younger than the grace
+        # period and so cannot be swept by mistake.  The same reasoning
+        # makes it the moment to see whether `pip` has moved on.
+        if self.due():
+            self.cull()
+        self.refresh_pip()
 
         # A request answered before is answered from the cache, keyed by
         # what was asked rather than by what it resolved to; see Step

@@ -276,19 +276,19 @@ simply passed over.  Against the real index that gives pip 24.0 on
 Python.  See issue `I.bfnprp`.
 
 `nopip4` is the one that ships, since 2026-10-10.  It is `nopip3` with
-one question asked first: is `alt_venv` already importable?  Inside a
-`zipapp`, beside a working copy, or wherever an installer has already
-put it, `nopip3` fetched `pip` and `alt_venv` regardless, and with no
-network it failed.  `nopip4` tries the import, and only when that fails
-does `nopip3`'s work, unchanged.  It costs four lines, 35 pasted: `m =
-None`, a one line `try` and `except`, and an `if` around the import from
-`~/.alt_venv`.  The `m = None` is there for `mypy`, which at module
-level, where a program pastes it, refuses `None` assigned in the
-`except` to a name the `try` made a module.  The harness runs every
-case with `python -P`, so that this directory, which holds
-`alt_venv.py`, is not on the child's `sys.path`; otherwise `nopip4`
-would import the working copy and measure nothing.  See `T.ewar` and
-`I.apiia`.
+one question asked first: is `alt_venv` already importable?  Under
+`uv run`, beside a working copy, or wherever an installer such as shiv
+or PEX has already put it, `nopip3` fetched `pip` and `alt_venv`
+regardless, and with no network it failed.  `nopip4` tries the import,
+and only when that fails does `nopip3`'s work, unchanged.  It costs four
+lines, 35 pasted: `m = None`, a one line `try` and `except`, and an `if`
+around the import from `~/.alt_venv`.  The `m = None` is there for
+`mypy`, which at module level, where a program pastes it, refuses `None`
+assigned in the `except` to a name the `try` made a module.  The
+harness runs every case with `python -P`, so that this directory, which
+holds `alt_venv.py`, is not on the child's `sys.path`; otherwise
+`nopip4` would import the working copy and measure nothing.  See
+`T.ewar` and `I.apiia`.
 
 MIT No Attribution
 
@@ -819,9 +819,9 @@ def nopip3() -> None:
 def nopip4() -> None:
     """As nopip3, but first use an `alt_venv` that is already importable.
 
-    `nopip3` asks only whether `~/.alt_venv` holds `alt_venv`, so inside
-    a `zipapp`, or under `uv run`, it fetches `pip` and `alt_venv` that
-    are already on `sys.path`, and fails with no network.  This case
+    `nopip3` asks only whether `~/.alt_venv` holds `alt_venv`, so under
+    `uv run`, or beside a working copy, it fetches `pip` and `alt_venv`
+    that are already on `sys.path`, and fails with no network.  This case
     tries the import first and falls back to `nopip3` unchanged.  See
     `T.ewar` and `I.apiia`.
 

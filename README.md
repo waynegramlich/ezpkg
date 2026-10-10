@@ -174,8 +174,8 @@ bootstrap.  To see whether a program carries the current one, run it with
 `ALT_VENV_BOOTSTRAP=check` set, and it says so on standard error.
 
 The bootstrap first tries to import `alt_venv`, and uses it if it is already
-there, such as inside a program bundled with `zipapp`.  Otherwise, the first
-time any program runs it on a machine, it fetches `alt_venv`:
+there, such as when something like `uv` has installed it.  Otherwise, the
+first time any program runs it on a machine, it fetches `alt_venv`:
 
 1. It asks [PyPI](https://pypi.org/), the Python Package Index, for the
    newest `pip` that this Python can run.
