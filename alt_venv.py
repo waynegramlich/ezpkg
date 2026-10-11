@@ -61,6 +61,7 @@ import ast
 import hashlib
 import importlib
 import importlib.metadata
+import importlib.util
 import inspect
 import io
 import json
@@ -78,7 +79,7 @@ import tokenize
 import tomllib
 import zipapp
 import zipfile
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 from types import ModuleType
 from typing import IO, Any, overload
@@ -686,6 +687,110 @@ def pin_dependencies(text: str, pins: Sequence[str]) -> str | None:
             + text[found.end("content"):])
 
 
+# The names an `if` test uses when it picks an import by platform, as in
+# `if sys.platform == "win32": import winreg`.  See `program_imports`.
+PLATFORM_NAMES: frozenset[str] = frozenset(
+    {"sys.platform", "os.name", "platform.system", "sys_platform"})
+
+
+def program_imports(text: str) -> list[tuple[str, int, bool]]:
+    """Return the top-level modules a program imports, and where.
+
+    Read with `ast`, so nothing is imported and nothing runs.  Called
+    only by `AltVEnv.check_imports`, at export time, which is when a
+    package the author's own Python happens to have, and Part 1 does
+    not name, turns into a program that fails somewhere else.  See
+    `T.cibe` in `TASKS/`.
+
+    Three kinds of import are left out, because the program is ready
+    for them to fail or never runs them: one in the body of a `try`
+    whose handlers catch `ImportError`, `ModuleNotFoundError`,
+    `Exception` or everything; one under `if TYPE_CHECKING:`; and a
+    relative one.  An import under an `if` that tests the platform is
+    kept but marked, since on this machine it may find nothing and
+    still be right.
+
+    Arguments:
+    * `text` (`str`):
+      The program's source.
+
+    Returns:
+    * (`list[tuple[str, int, bool]]`): Each module once, as its
+      top-level name, the line that first imports it, and whether that
+      import is under a platform test, in order of first appearance.
+
+    Raises:
+    * `SyntaxError`:
+      If the text is not Python, which a running program's is.
+    """
+    # Breadth does not matter, only what encloses each import.
+    found: dict[str, tuple[int, bool]] = {}
+    tolerant: tuple[str, ...] = (
+        "ImportError", "ModuleNotFoundError", "Exception", "BaseException")
+
+    def catches(handler: ast.ExceptHandler) -> bool:
+        """Report whether an `except` clause catches a failed import."""
+        # A bare `except:`, one name, or a tuple of names.
+        if handler.type is None:
+            return True
+        kinds: list[ast.expr] = (list(handler.type.elts)
+                                 if isinstance(handler.type, ast.Tuple)
+                                 else [handler.type])
+        return any(ast.unparse(kind).split(".")[-1] in tolerant
+                   for kind in kinds)
+
+    def visit(nodes: list[ast.stmt], guarded: bool) -> None:
+        """Record the imports in `nodes`, descending into blocks."""
+        node: ast.stmt
+        for node in nodes:
+            # The imports themselves, top-level names only.
+            names: list[str] = []
+            if isinstance(node, ast.Import):
+                names = [alias.name for alias in node.names]
+            elif isinstance(node, ast.ImportFrom) and not node.level:
+                names = [node.module or ""]
+            name: str
+            for name in names:
+                top: str = name.split(".")[0]
+                if top and top not in found:
+                    found[top] = (node.lineno, guarded)
+
+            # A `try` that expects the import to fail keeps its body.
+            if isinstance(node, ast.Try | ast.TryStar):
+                if not any(catches(one) for one in node.handlers):
+                    visit(node.body, guarded)
+                visit(node.orelse, guarded)
+                visit(node.finalbody, guarded)
+                handler: ast.ExceptHandler
+                for handler in node.handlers:
+                    visit(handler.body, guarded)
+                continue
+
+            # `TYPE_CHECKING` never runs; a platform test may not here.
+            if isinstance(node, ast.If):
+                test: str = ast.unparse(node.test)
+                if "TYPE_CHECKING" not in test:
+                    visit(node.body, guarded or any(
+                        platform in test for platform in PLATFORM_NAMES))
+                visit(node.orelse, guarded)
+                continue
+
+            # Everything else with statements inside it.
+            field: str
+            for field in ("body", "orelse", "finalbody"):
+                inner: Any = getattr(node, field, None)
+                if isinstance(inner, list):
+                    visit(inner, guarded)
+            if isinstance(node, ast.Match):
+                case: ast.match_case
+                for case in node.cases:
+                    visit(case.body, guarded)
+
+    visit(ast.parse(text).body, False)
+    return [(name, line, guarded)
+            for name, (line, guarded) in found.items()]
+
+
 def lock_mismatches(lock: dict[str, Any],
                     approved: dict[str, str]) -> list[str]:
     """Return the approved wheels a `uv` lock disagrees with.
@@ -1101,7 +1206,8 @@ class AltVEnv:
 
         Called when `ALT_VENV_EXPORT` is set, after the packages have
         been provided and checked, and the program exits straight after
-        without running its own code.  `pins` prints the `dependencies`
+        without running its own code.  Every form first checks that Part
+        1 covers what the program imports; see `check_imports`.  `pins` prints the `dependencies`
         lines for Part 1, ready to paste over the old ones.  `zipapp`
         writes `prog.pyz` beside the program, and `zipapp:PATH` writes
         it at `PATH`; see `build_zipapp`.  `uv` writes `prog-uv.py` and
@@ -1120,22 +1226,28 @@ class AltVEnv:
         * `ValueError`:
           If `form` is not one this knows.
         * `RuntimeError`:
-          If `pins`, `build_zipapp` or `build_uv` does; see there.
+          If `check_imports`, `pins`, `build_zipapp` or `build_uv` does;
+          see there.
         """
-        # The kind, then for a file an optional place to put it.
+        # The kind, then for a file an optional place to put it.  A
+        # misspelt form is refused before anything is read.
         kind: str
         target: str
         kind, _, target = form.partition(":")
         kind = kind.lower()
+        if kind not in ("pins", "zipapp", "uv") or (kind == "pins"
+                                                    and target):
+            raise ValueError(
+                f"ALT_VENV_EXPORT is {form!r}; use pins, zipapp or uv")
+
+        # Whatever leaves this machine must not lean on what is on it.
+        self.check_imports(asking)
         if kind == "zipapp":
             self.build_zipapp(asking, Path(target) if target else None)
             return
         if kind == "uv":
             self.build_uv(Path(target) if target else None)
             return
-        if kind != "pins" or target:
-            raise ValueError(
-                f"ALT_VENV_EXPORT is {form!r}; use pins, zipapp or uv")
 
         # Comment lines, because Part 1 is a PEP 723 block.
         print("# dependencies = [")
@@ -1143,6 +1255,98 @@ class AltVEnv:
         for pin in self.pins():
             print(f'#   "{pin}",')
         print("# ]")
+
+    def check_imports(self, asking: Sequence[str]) -> None:
+        """Refuse an export whose imports Part 1 does not cover.
+
+        While a program is being written, a missing package shows up at
+        once as an `ImportError`, so nothing is checked then.  What does
+        not show up is a package the author's own Python happens to
+        have -- one a Linux distribution installed, say -- that Part 1
+        never names: it works here and fails on the machine the program
+        is sent to.  Exporting is when the program leaves, so every
+        export checks first, and lists every problem before failing.
+        See `T.cibe` in `TASKS/`.
+
+        Each module `program_imports` finds is accepted when it is in
+        the standard library, is `alt_venv` itself (the bootstrap's
+        business), is a file or directory beside the program, or comes
+        from a distribution that Part 1 declares or that the approvals
+        record, which covers the packages that came along.  Which
+        distribution provides a module is read from the installed
+        metadata and never guessed.
+
+        Arguments:
+        * `asking` (`Sequence[str]`):
+          The requirements the program declared.
+
+        Raises:
+        * `RuntimeError`:
+          If any import is not covered, after each one is printed on
+          standard error with its line number.
+        """
+        # A program with no file has no imports to read.
+        source: tuple[Path, str] | None = main_source()
+        if source is None:
+            return
+        program: Path
+        text: str
+        program, text = source
+
+        # Distributions are compared by normalized name, the way PEP 503
+        # compares them, so `PyYAML` and `pyyaml` are one.
+        def normal(name: str) -> str:
+            """Return a distribution name in one spelling."""
+            return re.sub(r"[-_.]+", "_", name).lower()
+        covered: set[str] = {normal(requirement_name(one))
+                             for one in asking}
+        covered |= {normal(wheel.split("-")[0])
+                    for wheel in self.approved() or {}}
+        providers: Mapping[str, list[str]] = (
+            importlib.metadata.packages_distributions())
+
+        # Everything left after the exemptions has to be covered.
+        problems: list[str] = []
+        module: str
+        line: int
+        guarded: bool
+        for module, line, guarded in program_imports(text):
+            if (module in sys.stdlib_module_names or module == "alt_venv"
+                    or (program.parent / f"{module}.py").is_file()
+                    or (program.parent / module).is_dir()):
+                continue
+            spec: Any
+            try:
+                spec = importlib.util.find_spec(module)
+            except (ImportError, ValueError):
+                spec = None
+            if spec is None:
+                if not guarded:
+                    problems.append(
+                        f"line {line}: `{module}` is not importable "
+                        f"here; add its package to Part 1")
+                continue
+            names: list[str] = sorted(set(providers.get(module, [])))
+            if not names:
+                problems.append(
+                    f"line {line}: `{module}` comes from "
+                    f"{spec.origin or 'somewhere'}, which no package "
+                    f"provides; it cannot travel with the program")
+            elif not covered & {normal(name) for name in names}:
+                problems.append(
+                    f"line {line}: `{module}` comes from "
+                    f"{' or '.join(names)}, which Part 1 does not "
+                    f"declare; add it to `dependencies`")
+
+        # Every problem first, so one export shows them all.
+        if problems:
+            problem: str
+            for problem in problems:
+                print(f"alt_venv: {program.name}: {problem}",
+                      file=sys.stderr)
+            raise RuntimeError(
+                f"{len(problems)} import(s) in {program.name} are not "
+                f"covered by Part 1; see above")
 
     def build_zipapp(self, asking: Sequence[str],
                      target: Path | None = None) -> Path:

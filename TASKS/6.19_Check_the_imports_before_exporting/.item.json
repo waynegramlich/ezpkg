@@ -1,0 +1,16 @@
+{
+  "state": "Open",
+  "created": "2026-10-11T17:53:07Z",
+  "updated": "2026-10-11T17:53:11Z",
+  "history": [
+    {
+      "state": "Pending",
+      "time": "2026-10-11T17:53:07Z"
+    },
+    {
+      "state": "Open",
+      "time": "2026-10-11T17:53:11Z"
+    }
+  ],
+  "tag": "cibe"
+}

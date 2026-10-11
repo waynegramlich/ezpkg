@@ -4606,6 +4606,74 @@ class InstallTest(unittest.TestCase):
         self.assertIn("ALT_VENV_APPROVE=write", done.stderr)
         self.assertNotIn("ran", done.stdout)
 
+    def test_export_refuses_an_undeclared_import(self) -> None:
+        """An import that works only on the author's machine fails export.
+
+        `lurker` is installed, as a Linux distribution might install it,
+        but Part 1 does not name it; `gadgetlib` is not installed at
+        all.  Both are listed with their lines, then the export fails.
+        `widget` is declared and `helper.py` sits beside the program, so
+        neither is mentioned.  See `T.cibe`.
+        """
+        # A distribution on `PYTHONPATH`, with the metadata that maps
+        # its module to its name, and a module beside the program.
+        program: Path = self.declaring_program(
+            "undeclared", 'dependencies = ["widget"]',
+            "import widget\nimport helper\nimport lurker\n"
+            "import gadgetlib\nprint('ran')")
+        program.with_name("helper.py").write_text("")
+        system: Path = self.root / "undeclared" / "system"
+        (system / "lurker").mkdir(parents=True)
+        (system / "lurker" / "__init__.py").write_text("")
+        info: Path = system / "lurker-1.0.dist-info"
+        info.mkdir()
+        (info / "METADATA").write_text(
+            "Metadata-Version: 2.1\nName: lurker\nVersion: 1.0\n")
+        (info / "top_level.txt").write_text("lurker\n")
+
+        # Nothing pinned, nothing run, and both problems named.
+        done: subprocess.CompletedProcess[str] = self.run_program(
+            program, PYTHONPATH=str(system), ALT_VENV_APPROVE="write",
+            ALT_VENV_EXPORT="pins")
+        self.assertNotEqual(done.returncode, 0)
+        self.assertEqual(done.stdout, "")
+        self.assertIn("line 13: `lurker` comes from lurker, which Part 1 "
+                      "does not declare", done.stderr)
+        self.assertIn("line 14: `gadgetlib` is not importable",
+                      done.stderr)
+        self.assertIn("2 import(s) in prog.py", done.stderr)
+        self.assertNotIn("`helper`", done.stderr)
+        self.assertNotIn("`widget`", done.stderr)
+
+    def test_program_imports_leaves_out_what_may_fail(self) -> None:
+        """Guarded, type-only and relative imports are not demanded."""
+        # One of each kind, and the ones that do count.
+        text: str = textwrap.dedent("""\
+            import os, sys
+            import requests.adapters
+            from yaml import safe_load
+            from . import sibling
+            try:
+                import ujson
+            except (ValueError, ImportError):
+                ujson = None
+            try:
+                import strict
+            except KeyError:
+                pass
+            if sys.platform == "win32":
+                import win32api
+            if TYPE_CHECKING:
+                import _typeshed
+            def later():
+                import numpy as np
+            import yaml
+            """)
+        self.assertEqual(alt_venv.program_imports(text), [
+            ("os", 1, False), ("sys", 1, False), ("requests", 2, False),
+            ("yaml", 3, False), ("strict", 10, False),
+            ("win32api", 14, True), ("numpy", 18, False)])
+
     def test_export_refuses_an_unknown_form(self) -> None:
         """A misspelt form is refused rather than silently ignored."""
         # In process: the refusal comes before anything is read.

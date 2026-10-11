@@ -8,6 +8,8 @@
 @6.17_A_fetch_from_the_real_PyPI/Details.md
 @6.18_Export_what_the_approvals_record/Details.md
 @6.18_Export_what_the_approvals_record/Context.md
+@6.19_Check_the_imports_before_exporting/Details.md
+@6.19_Check_the_imports_before_exporting/Context.md
 @7_Separate_the_issue_tracker/Details.md
 @../ISSUES/1_The_bootstrap_trusts_only_system_certificates/Details.md
 @../ISSUES/2_Windows_and_macOS_are_untried/Details.md
