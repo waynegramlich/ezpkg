@@ -2,6 +2,7 @@
 @6_Flesh_out_the_AltVEnv_class/Context.md
 @6.3_A_versioned_cache_built_out_of_the_wheels/Details.md
 @6.10_README.md_documentation/Details.md
+@6.10_README.md_documentation/Context.md
 @6.13_Messages/Details.md
 @6.16_Test_suite_cleanup/Details.md
 @6.17_A_fetch_from_the_real_PyPI/Details.md

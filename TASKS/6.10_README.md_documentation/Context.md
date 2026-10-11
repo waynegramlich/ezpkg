@@ -25,8 +25,11 @@ Alternatives, Conclusion.  What is left:
   `quick_start.py` does run under `uv run`, but redundantly -- `uv`
   installs `cowsay` into its environment, then the bootstrap fetches
   `alt_venv`, downloads `cowsay` again into `~/.alt_venv`, asks, and
-  imports its own copy.  So "works with `uv`" needs that caveat, or a
-  code change: `install()` could skip what is already importable.
+  imports its own copy.  Fixed 2026-10-10: `nopip4` uses an importable
+  `alt_venv`, and `provide()` skips what `satisfied()` says is already
+  installed.  Better still, `ALT_VENV_EXPORT=uv` writes a stripped,
+  pinned `prog-uv.py` with its locks (`T.ewar`), so the README can say
+  "start with `AltVEnv`, export for `uv`".
 * **The PyPI names are free**, checked 2026-10-02: `alt_venv`,
   `alt-venv` and `altvenv` all return 404.  The bootstrap installs
   whatever PyPI serves under `alt_venv`, so anyone who registers it

@@ -579,12 +579,14 @@ def bootstrap_node(text: str) -> ast.Try | None:
     return None
 
 
-def strip_bootstrap(text: str) -> str | None:
+def strip_bootstrap(text: str, why: str = "a zipapp carries its packages."
+                    ) -> str | None:
     """Return a program's text with its pasted bootstrap taken out.
 
     For a `zipapp`, which carries the program's packages and not
-    `alt_venv`: there the bootstrap has nothing to do, and left in it
-    would find no `alt_venv` and go to the network for one.  The `try`
+    `alt_venv`, or a `uv` script, whose packages `uv` installs: there
+    the bootstrap has nothing to do, and left in it would find no
+    `alt_venv` and go to the network for one.  The `try`
     becomes a `pass` at the same indentation, so a bootstrap nested in
     a function or an `if` leaves that block still valid.  The imports of
     Part 2 stay; they are the standard library, and harmless.
@@ -592,6 +594,8 @@ def strip_bootstrap(text: str) -> str | None:
     Arguments:
     * `text` (`str`):
       The program's source.
+    * `why` (`str`):
+      The comment on the `pass`, saying where the packages come from.
 
     Returns:
     * (`str | None`): The program without its bootstrap, or `None` when
@@ -604,10 +608,136 @@ def strip_bootstrap(text: str) -> str | None:
     lines: list[str] = text.splitlines(keepends=True)
     ending: str = "\r\n" if lines[found.lineno - 1].endswith("\r\n") else "\n"
     replacement: str = (" " * found.col_offset
-                        + "pass  # The bootstrap: a zipapp carries its "
-                        "packages." + ending)
+                        + f"pass  # The bootstrap: {why}" + ending)
     return "".join(lines[:found.lineno - 1] + [replacement]
                    + lines[found.end_lineno:])
+
+
+def pin_dependencies(text: str, pins: Sequence[str]) -> str | None:
+    """Return a program's text with Part 1 pinned for `uv`.
+
+    The `dependencies` array in the PEP 723 block is replaced by `pins`,
+    and unless the block already has a `[tool.uv]` table, one is added
+    saying `no-build = true`: `uv` then installs wheels only, as
+    `alt_venv` does with `--only-binary`, and never needs a compiler.
+    Everything else in the block, and outside it, stays as written.
+
+    Arguments:
+    * `text` (`str`):
+      The program's source.
+    * `pins` (`Sequence[str]`):
+      The requirements to declare, such as `widget==1.2.3`.
+
+    Returns:
+    * (`str | None`): The program with the new block, or `None` when it
+      has no block, or no `dependencies` this can find and replace.
+    """
+    # The block's TOML, without its comment markers.
+    found: re.Match[str] | None = next(
+        (match for match in BLOCK.finditer(text)
+         if match.group("type") == "script"), None)
+    if found is None:
+        return None
+    toml: str = "\n".join(
+        line[2:] if line.startswith("# ") else line[1:]
+        for line in found.group("content").splitlines())
+
+    # The array runs to the `]` that closes it, skipping over strings,
+    # which may hold a `]` of their own, as in `widget[extra]`.
+    key: re.Match[str] | None = re.search(
+        r"(?m)^dependencies\s*=\s*\[", toml)
+    if key is None:
+        return None
+    depth: int = 1
+    index: int = key.end()
+    while depth and index < len(toml):
+        char: str = toml[index]
+        if char in "\"'":
+            index = toml.find(char, index + 1)
+            if index < 0:
+                return None
+        elif char == "#":
+            index = toml.find("\n", index)
+            if index < 0:
+                return None
+        elif char == "[":
+            depth += 1
+        elif char == "]":
+            depth -= 1
+        index += 1
+    if depth:
+        return None
+    array: str = ("dependencies = [\n"
+                  + "".join(f'  "{pin}",\n' for pin in pins) + "]")
+    toml = toml[:key.start()] + array + toml[index:]
+    try:
+        metadata: dict[str, Any] = tomllib.loads(toml)
+    except tomllib.TOMLDecodeError:
+        return None
+    if "uv" not in metadata.get("tool", {}):
+        toml += "\n[tool.uv]\nno-build = true"
+    if tomllib.loads(toml).get("dependencies") != list(pins):
+        return None
+
+    # Commented back, `#` alone for a blank line, as the PEP spells it.
+    content: str = "".join(f"# {line}\n" if line else "#\n"
+                           for line in toml.splitlines())
+    return (text[:found.start("content")] + content
+            + text[found.end("content"):])
+
+
+def lock_mismatches(lock: dict[str, Any],
+                    approved: dict[str, str]) -> list[str]:
+    """Return the approved wheels a `uv` lock disagrees with.
+
+    `uv` resolves for itself, so its lock is checked against the
+    approvals: each approved wheel must be listed, by file name, with
+    the same SHA-256.  Wheels for other platforms are listed too and
+    are not checked, since nothing here has approved them.
+
+    Arguments:
+    * `lock` (`dict[str, Any]`):
+      A `prog.py.lock`, as `tomllib` reads it.
+    * `approved` (`dict[str, str]`):
+      Wheel names to digests, as `approved` returns them.
+
+    Returns:
+    * (`list[str]`): One line per wheel missing or different, sorted;
+      empty when the lock agrees.
+    """
+    # Every wheel the lock lists, by the last part of its URL or path.
+    listed: dict[str, str] = {}
+    package: dict[str, Any]
+    for package in lock.get("package", []):
+        wheel: dict[str, Any]
+        for wheel in package.get("wheels", []):
+            where: str = wheel.get("url") or wheel.get("path") or ""
+            listed[where.rsplit("/", 1)[-1]] = str(wheel.get("hash", ""))
+    problems: list[str] = []
+    name: str
+    digest: str
+    for name, digest in sorted(approved.items()):
+        if name not in listed:
+            problems.append(f"{name}: not in the lock")
+        elif not listed[name]:
+            problems.append(f"{name}: lock has no hash")
+        elif listed[name] != f"sha256:{digest}":
+            problems.append(f"{name}: lock has {listed[name]}")
+    return problems
+
+
+def find_uv() -> str | None:
+    """Return the `uv` command, or `None` when it is not installed.
+
+    The `PATH` first, then `~/.local/bin`, which is where `uv`'s own
+    installer puts it and which is not always on the `PATH`.
+
+    Returns:
+    * (`str | None`): The command to run.
+    """
+    # `shutil.which` also checks that the file is executable.
+    return (shutil.which("uv")
+            or shutil.which("uv", path=str(Path.home() / ".local" / "bin")))
 
 
 def refresh(path: Path, text: str) -> None:
@@ -974,12 +1104,15 @@ class AltVEnv:
         without running its own code.  `pins` prints the `dependencies`
         lines for Part 1, ready to paste over the old ones.  `zipapp`
         writes `prog.pyz` beside the program, and `zipapp:PATH` writes
-        it at `PATH`; see `build_zipapp`.
+        it at `PATH`; see `build_zipapp`.  `uv` writes `prog-uv.py` and
+        its two lock files, and `uv:PATH` names the script; see
+        `build_uv`.
 
         Arguments:
         * `form` (`str`):
-          What to write: `pins`, `zipapp` or `zipapp:PATH`.  The kind is
-          read in any case; the path is taken as written.
+          What to write: `pins`, `zipapp`, `zipapp:PATH`, `uv` or
+          `uv:PATH`.  The kind is read in any case; the path is taken as
+          written.
         * `asking` (`Sequence[str]`):
           The requirements just provided, which `build_zipapp` bundles.
 
@@ -987,9 +1120,9 @@ class AltVEnv:
         * `ValueError`:
           If `form` is not one this knows.
         * `RuntimeError`:
-          If `pins` or `build_zipapp` does; see there.
+          If `pins`, `build_zipapp` or `build_uv` does; see there.
         """
-        # The kind, then for `zipapp` an optional place to put it.
+        # The kind, then for a file an optional place to put it.
         kind: str
         target: str
         kind, _, target = form.partition(":")
@@ -997,9 +1130,12 @@ class AltVEnv:
         if kind == "zipapp":
             self.build_zipapp(asking, Path(target) if target else None)
             return
+        if kind == "uv":
+            self.build_uv(Path(target) if target else None)
+            return
         if kind != "pins" or target:
             raise ValueError(
-                f"ALT_VENV_EXPORT is {form!r}; use pins or zipapp")
+                f"ALT_VENV_EXPORT is {form!r}; use pins, zipapp or uv")
 
         # Comment lines, because Part 1 is a PEP 723 block.
         print("# dependencies = [")
@@ -1108,6 +1244,98 @@ class AltVEnv:
             zipapp.create_archive(stage, target,
                                   interpreter="/usr/bin/env python3")
         print(f"alt_venv: wrote {target}")
+        return target
+
+    def build_uv(self, target: Path | None = None) -> Path:
+        """Write the program as a `uv` script, with its two lock files.
+
+        Three files, beside the program unless `target` says otherwise:
+        `prog-uv.py`, the program with Part 1 pinned to what was approved
+        and its bootstrap taken out (`pin_dependencies`,
+        `strip_bootstrap`); `prog-uv.py.lock`, which `uv run prog-uv.py`
+        uses by itself; and `pylock.prog-uv.toml`, the PEP 751 lock that
+        other installers read.  Unlike a `zipapp`, compiled packages are
+        fine: the lock lists every platform's wheels.
+
+        `uv` writes the locks, because it resolves for every platform and
+        records where each wheel is downloaded from, which the approvals
+        do not.  The pins hold it to the approved versions, and the lock
+        is then checked against the approvals by SHA-256
+        (`lock_mismatches`).  A `PIP_INDEX_URL` is handed on as `uv`'s
+        default index, so both resolve against the same one.  Without
+        `uv`, the script is still written, with the commands to finish.
+
+        Arguments:
+        * `target` (`Path | None`):
+          The script to write; `None` means `prog-uv.py` beside the
+          program.  The locks are named after it.
+
+        Returns:
+        * (`Path`): The script written.
+
+        Raises:
+        * `RuntimeError`:
+          If the program has no file, bootstrap or readable Part 1, there
+          are no approvals, `uv` fails, or its lock disagrees with them.
+        """
+        # The program, pinned and without its bootstrap, in the encoding
+        # it declares, so a `coding:` line stays true.
+        program: Path | None = main_path()
+        if program is None:
+            raise RuntimeError("a uv script needs the program's own file")
+        target = target or program.with_name(f"{program.stem}-uv.py")
+        raw: bytes = program.read_bytes()
+        encoding: str = tokenize.detect_encoding(io.BytesIO(raw).readline)[0]
+        stripped: str | None = strip_bootstrap(
+            raw.decode(encoding), "uv installs the packages.")
+        if stripped is None:
+            raise RuntimeError(
+                "a uv script leaves alt_venv out, so the program needs "
+                "the pasted bootstrap for it to take out, and has none")
+        pinned: str | None = pin_dependencies(stripped, self.pins())
+        if pinned is None:
+            raise RuntimeError(
+                "cannot find the dependencies in Part 1 to pin")
+        target.write_bytes(pinned.encode(encoding))
+        print(f"alt_venv: wrote {target}")
+
+        # `uv` locks it; without `uv`, say how to finish elsewhere.
+        pylock: Path = target.with_name(f"pylock.{target.stem}.toml")
+        commands: list[list[str]] = [
+            ["lock", "--script", str(target)],
+            ["export", "--script", str(target), "--format", "pylock.toml",
+             "--quiet", "-o", str(pylock)]]
+        uv: str | None = find_uv()
+        if uv is None:
+            print("alt_venv: uv is not installed; to finish, run:")
+            command: list[str]
+            for command in commands:
+                print("    uv " + " ".join(command))
+            return target
+        environment: dict[str, str] = dict(os.environ)
+        index: str = environment.get("PIP_INDEX_URL", "")
+        if index and not (environment.get("UV_DEFAULT_INDEX")
+                          or environment.get("UV_INDEX_URL")):
+            environment["UV_DEFAULT_INDEX"] = index
+        for command in commands:
+            done: subprocess.CompletedProcess[str] = subprocess.run(
+                [uv, *command], env=environment, capture_output=True,
+                text=True, check=False)
+            if done.returncode:
+                raise RuntimeError(
+                    f"uv {command[0]} failed: {done.stderr.strip()}")
+
+        # The lock must list the very wheels that were approved.
+        lock: Path = target.with_name(target.name + ".lock")
+        problems: list[str] = lock_mismatches(
+            tomllib.loads(lock.read_text(encoding="utf-8")),
+            self.approved() or {})
+        if problems:
+            raise RuntimeError(
+                "uv's lock disagrees with the approvals: "
+                + "; ".join(problems))
+        print(f"alt_venv: wrote {lock}")
+        print(f"alt_venv: wrote {pylock}")
         return target
 
     def summary(self, wheel: Path) -> str:

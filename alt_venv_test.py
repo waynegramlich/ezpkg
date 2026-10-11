@@ -723,6 +723,8 @@ def build_index(wheels: list[Path],
     A directory in this shape is a complete implementation of the
     protocol rather than a simplification of it, because `pip` does
     all of its filtering locally; the index only has to list files.
+    Each link carries its `#sha256=` digest, as PyPI's do, so that a
+    `uv` lock made from the index has hashes to check.
 
     Arguments:
     * `wheels` (`list[Path]`):
@@ -754,7 +756,9 @@ def build_index(wheels: list[Path],
         directory = root / project
         directory.mkdir(exist_ok=True)
         links = "".join(
-            f'<a href="{html.escape(wheel.name)}">{wheel.name}</a><br>'
+            f'<a href="{html.escape(wheel.name)}#sha256='
+            f'{hashlib.sha256(wheel.read_bytes()).hexdigest()}">'
+            f'{wheel.name}</a><br>'
             for wheel in files)
         (directory / "index.html").write_text(
             f"<!DOCTYPE html><html><body>{links}</body></html>")
@@ -4536,6 +4540,61 @@ class InstallTest(unittest.TestCase):
             venv.build_zipapp(["hooked"])
         self.assertIn("has none", str(caught.exception))
 
+    @unittest.skipIf(alt_venv.find_uv() is None, "uv is not installed")
+    def test_export_uv_writes_a_script_and_its_locks(self) -> None:
+        """`ALT_VENV_EXPORT=uv` writes three files that `uv run` uses.
+
+        Built in one run with the approvals, from a program carrying the
+        real bootstrap.  The script is pinned, has no bootstrap and says
+        `no-build`; both locks name `widget`, which came along.  Run with
+        `uv run` and an empty HOME, every package comes from `uv`, and
+        nothing of `alt_venv` is made.
+        """
+        # Building is not running: the program's own line stays silent.
+        program: Path
+        home: Path
+        program, home = self.bootstrapped_program(
+            "locked", 'dependencies = ["needy"]',
+            "import needy\nimport widget\n"
+            "print(needy.__file__)\nprint(widget.__file__)")
+        built: subprocess.CompletedProcess[str] = self.run_program(
+            program, HOME=str(home), ALT_VENV_APPROVE="write",
+            ALT_VENV_EXPORT="uv")
+        self.assertEqual(built.returncode, 0, built.stderr[-400:])
+        script: Path = program.with_name("prog-uv.py")
+        lock: Path = program.with_name("prog-uv.py.lock")
+        pylock: Path = program.with_name("pylock.prog-uv.toml")
+        self.assertEqual(built.stdout.splitlines(),
+                         [f"alt_venv: wrote {path}"
+                          for path in (script, lock, pylock)])
+        text: str = script.read_text()
+        self.assertIsNone(alt_venv.find_bootstrap(text))
+        metadata: dict[str, Any] | None = alt_venv.script_metadata(text)
+        assert metadata is not None
+        self.assertEqual([pin.split("==")[0]
+                          for pin in metadata["dependencies"]],
+                         ["needy", "widget"])
+        self.assertIs(metadata["tool"]["uv"]["no-build"], True)
+        self.assertIn('name = "widget"', lock.read_text())
+        self.assertIn('name = "widget"', pylock.read_text())
+
+        # Run it the way a `uv` user would, from an empty HOME.
+        empty: Path = self.root / "locked" / "empty"
+        empty.mkdir()
+        uv: str | None = alt_venv.find_uv()
+        assert uv is not None
+        environment: dict[str, str] = dict(
+            os.environ, HOME=str(empty), UV_DEFAULT_INDEX=self.index_url)
+        environment.pop("VIRTUAL_ENV", None)
+        done: subprocess.CompletedProcess[str] = subprocess.run(
+            [uv, "run", "--python", sys.executable, str(script)],
+            env=environment, capture_output=True, text=True, check=False)
+        self.assertEqual(done.returncode, 0, done.stderr[-400:])
+        lines: list[str] = done.stdout.splitlines()
+        self.assertEqual(len(lines), 2, done.stdout)
+        self.assertFalse([line for line in lines if ".alt_venv" in line])
+        self.assertFalse((empty / ".alt_venv").exists())
+
     def test_export_needs_approvals(self) -> None:
         """Without an approvals file there is nothing to pin from."""
         # `skip` leaves no file behind, so the export has to refuse.
@@ -4553,7 +4612,7 @@ class InstallTest(unittest.TestCase):
         venv: alt_venv.AltVEnv = alt_venv.AltVEnv(self.root / "form")
         with self.assertRaises(ValueError) as caught:
             venv.export("pinz")
-        self.assertIn("use pins or zipapp", str(caught.exception))
+        self.assertIn("use pins, zipapp or uv", str(caught.exception))
 
     def test_pins_refuse_two_versions_of_one_package(self) -> None:
         """No single `==` can say two versions, so none is guessed."""
@@ -5597,6 +5656,67 @@ class MetadataTest(unittest.TestCase):
                       return_value=version)):
                 self.assertFalse(alt_venv.satisfied("requests>=2"))
         self.assertFalse(alt_venv.satisfied("no-such-distribution-here"))
+
+    def test_pin_dependencies_rewrites_only_the_array(self) -> None:
+        """Part 1 is pinned, `no-build` added, and the rest kept.
+
+        A `]` inside a requirement's extras must not end the array, and
+        a block that already has a `[tool.uv]` table keeps it as written.
+        """
+        # Extras, a comment and a trailing key around the array.
+        text: str = ("#!/usr/bin/env python3\n# /// script\n"
+                     '# requires-python = ">=3.11"\n'
+                     '# dependencies = [\n#   "widget[fast]>=1",  # why\n'
+                     '#   "needy",\n# ]\n# [tool.other]\n# x = 1\n'
+                     "# ///\nprint('ran')\n")
+        pins: list[str] = ["needy==2.0", "widget==1.5"]
+        pinned: str | None = alt_venv.pin_dependencies(text, pins)
+        assert pinned is not None
+        metadata: dict[str, Any] | None = alt_venv.script_metadata(pinned)
+        self.assertEqual(metadata, {
+            "requires-python": ">=3.11", "dependencies": pins,
+            "tool": {"other": {"x": 1}, "uv": {"no-build": True}}})
+        self.assertTrue(pinned.startswith("#!/usr/bin/env python3\n"))
+        self.assertTrue(pinned.endswith("# ///\nprint('ran')\n"))
+
+        # An author's own `[tool.uv]` is left alone.
+        own: str = text.replace("[tool.other]", "[tool.uv]")
+        kept: str | None = alt_venv.pin_dependencies(own, pins)
+        assert kept is not None
+        self.assertEqual(alt_venv.script_metadata(kept),
+                         {"requires-python": ">=3.11", "dependencies": pins,
+                          "tool": {"uv": {"x": 1}}})
+
+        # Nothing to pin: no block, or a block without `dependencies`.
+        self.assertIsNone(alt_venv.pin_dependencies("print('ran')\n", pins))
+        self.assertIsNone(alt_venv.pin_dependencies(
+            '# /// script\n# requires-python = ">=3.11"\n# ///\n', pins))
+
+    def test_lock_mismatches_checks_the_approved_wheels(self) -> None:
+        """A wheel missing from the lock, or listed differently, is named.
+
+        Other platforms' wheels are in a lock too, and are ignored.  A
+        wheel listed with no hash cannot be checked, so it is named too.
+        """
+        # One package, two wheels, of which one was approved here.
+        lock: dict[str, Any] = {"package": [{"name": "widget", "wheels": [
+            {"url": "https://x/a/widget-1.0-py3-none-any.whl",
+             "hash": "sha256:" + "a" * 64},
+            {"url": "https://x/b/widget-1.0-cp312-win_amd64.whl",
+             "hash": "sha256:" + "b" * 64}]}]}
+        pure: str = "widget-1.0-py3-none-any.whl"
+        self.assertEqual(alt_venv.lock_mismatches(lock, {pure: "a" * 64}),
+                         [])
+        self.assertEqual(
+            alt_venv.lock_mismatches(lock, {pure: "c" * 64}),
+            [f"{pure}: lock has sha256:{'a' * 64}"])
+        self.assertEqual(
+            alt_venv.lock_mismatches(lock, {"needy-2.0-py3-none-any.whl":
+                                            "a" * 64}),
+            ["needy-2.0-py3-none-any.whl: not in the lock"])
+        del lock["package"][0]["wheels"][0]["hash"]
+        self.assertEqual(alt_venv.lock_mismatches(lock, {pure: "a" * 64}),
+                         [f"{pure}: lock has no hash"])
 
     def test_our_own_block_reads_back(self) -> None:
         """`alt_venv.py`'s own block parses, and declares nothing.

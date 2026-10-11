@@ -75,3 +75,21 @@ The steps, one task (Wayne collapsed the 6.18.1-4 children on
    which `AltVEnv` does not record today: capture it at download or ask
    PyPI.  Cheaper fallback: write the pins into the `# /// script`
    block, which `uv run` reads.
+   **Done 2026-10-10, by having `uv` write the locks:**
+   `ALT_VENV_EXPORT=uv[:PATH]` → `build_uv()` writes three files beside
+   the program (Wayne: "3 files is fine"; no subdirectory):
+   `prog-uv.py` (Part 1 pinned by `pin_dependencies()`, plus
+   `[tool.uv] no-build = true` unless the block has a `[tool.uv]`;
+   bootstrap stripped), then runs `uv lock --script` → `prog-uv.py.lock`
+   and `uv export --format pylock.toml` → `pylock.prog-uv.toml`.
+   `uv` supplies the download URLs and every platform's wheels, so
+   compiled packages are fine here.  `lock_mismatches()` checks each
+   approved wheel is in the lock with the same SHA-256 (missing or
+   hashless is refused).  `PIP_INDEX_URL` is passed on as
+   `UV_DEFAULT_INDEX`.  `find_uv()` looks on `PATH`, then
+   `~/.local/bin`; without `uv` the script is still written and the two
+   commands are printed.  The test index now gives `#sha256=` links, as
+   PyPI does.  Verified with the 7-package demo: `uv run demo-uv.py`
+   from an empty HOME loads all 7 from `uv`'s environment and creates
+   no `~/.alt_venv`.  `no-build` still lets a lock list an sdist; it
+   only stops `uv` building one.
