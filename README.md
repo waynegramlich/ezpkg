@@ -6,24 +6,17 @@ Before uploading AltVEnv to PyPI, all TBD's needs to be fixed. -->
 # `AltVEnv`: Alternative to Virtual Environments
 
 `AltVEnv` (short for Alternative to Virtual Environments) grew out of the
-frustration of developing several Python programs at once, where each program
-needs its own Python virtual environment.  When switching development from
-one program to the next, it is easy to forget to deactivate the current
-virtual environment before activating the next one.  If you forget, you end up
-running one program against another program's packages, and confusion can
-ensue.  The question that arose was "Is there a better way that avoids Python
-virtual environments entirely?"  The answer turned out to be "Absolutely
-yes!!!"
+frustration of developing several Python programs concurrently, where each
+program needed its own Python virtual environment.  When switching development
+between programs, it is really easy to forget to deactivate one before
+activating another, and then run one program against the other's packages.
 
-Paste a 35-line bootstrap near the top of a Python program, and the program
-fetches the packages it needs the first time it runs.  There is no virtual
-environment to create or activate, nothing to install beforehand, and no
-administrator rights needed -- just Python 3.11 or later.  Packages are
-downloaded once and shared by every program that uses them.
-
-A single-file Python program can literally be e-mailed to somebody and it
-will just work!  With `AltVEnv`, neither the developer nor the end user has
-to deal with the dreaded missing Python package problem.
+To get started with `AltVEnv`, you paste a 35-line bootstrap at the front of
+your program and go.  After that, `AltVEnv` fetches your packages over the
+net on demand, without a virtual environment or the right to install
+packages.  Get everything working with `AltVEnv` first, then either email
+the single `.py` file to a friend or let `AltVEnv` package it up in `zipapp`
+or `uv` format.
 
 ## Quick Start
 
@@ -78,16 +71,17 @@ except Exception as x:
     raise SystemExit(f"alt_venv: {s} failed: {x!r}")
 
 # Part 4: Import the packages listed in Part 1.
-import cowsay  # type: ignore[import-not-found]
+import cowsay  # type: ignore[import-not-found]  # For mypy.
 
 # Part 5: The program itself.
 cowsay.cow("AltVEnv works!")
 print(f"cowsay {cowsay.__version__} was loaded from {cowsay.__file__}")
 ```
 
-The first run fetches `alt_venv`, then the `cowsay` package that the program
-lists at the top, and asks once whether it may install `cowsay`.  Answer `y`,
-and the program runs:
+The first run creates `~/.alt_venv/` in your home directory, which is where
+`AltVEnv` keeps everything it fetches.  It fetches `alt_venv` into it, then
+the `cowsay` package that the program lists at the top, and asks once whether
+it may install `cowsay`.  Answer `y`, and the program runs:
 
 ```
   ______________
@@ -105,107 +99,17 @@ cowsay 6.1 was loaded from /home/you/.alt_venv/versions/cowsay-6.1-.../...
 
 Now run it a second time.  There is no question and no download, and it
 starts in a fraction of a second, because `cowsay` is already in
-`~/.alt_venv`.  That directory holds everything `AltVEnv` has fetched, and
-deleting it is always safe; the next run simply fetches again:
-
-```
-rm -rf ~/.alt_venv
-```
+`~/.alt_venv/`.  It is always safe to delete the `~/.alt_venv/` directory;
+the next run simply fetches again.
 
 All the machine needs is Python 3.11 or later, plus a network connection the
 first time a program needs a package.
-
-### Using It in Your Own Program
-
-`quick_start.py` is also a template.  Open it in your editor and read along:
-after the first run there is a copy in `~/.alt_venv/quick_start.py`, or use
-the one above.  It has five parts, each starting with a `# Part` comment,
-and every program that uses `AltVEnv` has the same five.  Parts 2 and 3 are
-copied as they are; Parts 1, 4 and 5 are yours.
-
-#### Part 1: The packages this program needs
-
-This is a standard [inline script metadata](
-https://packaging.python.org/en/latest/specifications/inline-script-metadata/)
-block, the same one that tools such as `uv` and `pipx` read.  It holds two
-settings:
-
-* `requires-python` is the oldest Python the program will run on.  If the
-  program is started on an older one, `AltVEnv` stops with a message saying
-  so, rather than letting it fail somewhere obscure.  `AltVEnv` itself needs
-  3.11 or later.
-* `dependencies` lists the packages the program needs, one string each.
-  Changing this list is usually the only change a program needs.
-
-Each string is handed to `pip` exactly as written, so it can say which
-versions are acceptable:
-
-```
-# dependencies = [
-#   "requests",                    any version at all
-#   "requests<3",                  anything before 3
-#   "requests>=2.28,<3",           a range
-#   "requests~=2.32.0",            2.32.anything, but not 2.33
-#   "requests!=2.31.0",            any version except this one
-#   "requests===2.32.3",           that version and no other
-#   "requests[socks]",             with an optional extra
-#   "pywin32; sys_platform == 'win32'",  only on Windows
-# ]
-```
-
-A comma after the last string is allowed but not required.  The full syntax
-is in the [dependency specifiers](
-https://packaging.python.org/en/latest/specifications/dependency-specifiers/)
-specification.  `pip` resolves the whole list at once, so it notices when
-two packages disagree about a third, which is very hard to get right by
-hand.
-
-#### Part 2: The standard library imports that the bootstrap uses
-
-Seven imports, all from the standard library, so there is nothing to
-install.  Put them among your own imports, in alphabetical order, and if
-your program already imports some of them, keep one copy of each.
-
-#### Part 3: The bootstrap
-
-Copy it exactly, and never edit it.  Re-indenting it or changing its
-comments does no harm, but changing its code makes it a different
-bootstrap.  To see whether a program carries the current one, run it with
-`ALT_VENV_BOOTSTRAP=check` set, and it says so on standard error.
-
-The bootstrap first tries to import `alt_venv`, and uses it if it is already
-there, such as when something like `uv` has installed it.  Otherwise, the
-first time any program runs it on a machine, it fetches `alt_venv`:
-
-1. It asks [PyPI](https://pypi.org/), the Python Package Index, for the
-   newest `pip` that this Python can run.
-2. It downloads that `pip`, checks its SHA-256 against the one PyPI
-   publishes, and keeps it as `~/.alt_venv/pip.whl`.  The machine's own
-   `pip`, if it has one, is never used or changed.
-3. It runs that `pip` to install `alt_venv` into `~/.alt_venv`.
-
-Later runs skip the previous three steps.  Every run, the first one included,
-then just uses the `AltVEnv` package to download any further packages and
-perform housekeeping in the `~/.alt_venv/` directory.
-
-#### Part 4: Import the packages listed in Part 1
-
-Your own `import` statements come after the bootstrap, because the bootstrap
-is what makes the packages importable.  Import each package by its module
-name, which is not always the name in Part 1: `python-dateutil` is imported
-as `dateutil`.  The `# type: ignore[import-not-found]` comments are only for
-`mypy`, which cannot see packages that live in `~/.alt_venv`; leave them out
-if you do not use it.
-
-#### Part 5: The program itself
-
-Everything from here down is yours.
 
 ## Download Prompt
 
 When people run `pip` by hand, they know they are downloading packages onto
 their computer.  A program that uses `AltVEnv` downloads them on its own, so
-whoever runs it may not know.  It would be rude to do that without asking,
+whoever runs it may not know.  It would be rude to do downloads without asking,
 so `AltVEnv` asks.
 
 If you tried the Quick Start, you have already seen the download prompt.
@@ -226,32 +130,13 @@ Successfully installed alt_venv-0.0.1
 go ahead? [y=>Yes/n=>No/a=>Always/?=>Explanation] y
 ```
 
-The two `#` lines are not output; they mark where each part begins.  The
-`pip` output is the bootstrap installing `alt_venv` itself.  It is left
-visible on purpose, so that you can see something being downloaded, and it
-appears only on a machine's very first run.
-
-The download prompt comes from `AltVEnv`.  It appears whenever a program
-needs packages that are not already in `~/.alt_venv`.  It lists what was
-downloaded, then asks the question before anything is installed.  When
-`AltVEnv` runs `pip` itself, it hides `pip`'s output unless `pip` fails.
-
-Each package is marked `asked for` when Part 1 of the program names it, or
-`came along` when it is only there because something else needs it.  The
-answers are:
-
-* `y` or `yes`: install them and run the program.
-* `n`, `no`, or just Enter: install nothing.  The program stops with
-  `alt_venv: fetch packages failed: RuntimeError('declined: ...')`.  Nothing
-  has been unpacked and nothing from the packages has run.  The downloads
-  are thrown away, so the next run asks again.
-* `?`: show where the packages came from and what each one says about
-  itself, then ask again.
-* `a` or `always`: stop asking; delete `~/.alt_venv/FOREVER_APPROVE` to be
-  asked again.
-
-A program with no terminal, such as one started by `cron`, is not asked; it
-lists what it downloaded and carries on.
+The `pip` output is the bootstrap installing `alt_venv`, and appears only on
+a machine's very first run.  The prompt appears whenever a program needs
+packages that are not in `~/.alt_venv/` yet, and nothing is installed until
+it is answered: `y` installs, `n` or Enter installs nothing and stops, `?`
+says where each package came from, and `a` stops asking for good (delete
+`~/.alt_venv/FOREVER_APPROVE` to be asked again).  A program with no
+terminal, such as one started by `cron`, is not asked.
 
 ## Author Package Management
 
@@ -335,10 +220,97 @@ somebody who has Python and nothing else, and whom you would rather not ask
 to install a tool before trying it.  Because both read the same metadata
 block, Part 1 of a program is the same either way.
 
+## Anatomy of an `AltVEnv` Program
+
+`quick_start.py` is also a template for your own programs.  Open it in your
+editor and read along: after the first run there is a copy in
+`~/.alt_venv/quick_start.py`, or use the one in the
+[Quick Start](#quick-start).  It has five parts, each starting with a
+`# Part` comment, and every program that uses `AltVEnv` has the same five.
+Copy it, then change the packages in Part 1, the imports in Part 4, and the
+program in Part 5.  Leave Parts 2 and 3 exactly as they are.
+
+### Part 1: The packages this program needs
+
+This is a standard [inline script metadata](
+https://packaging.python.org/en/latest/specifications/inline-script-metadata/)
+block, the same one that tools such as `uv` and `pipx` read.  It holds two
+settings:
+
+* `requires-python` is the oldest Python the program will run on.  If the
+  program is started on an older one, `AltVEnv` stops with a message saying
+  so, rather than letting it fail somewhere obscure.  `AltVEnv` itself needs
+  3.11 or later.
+* `dependencies` lists the packages the program needs, one string each.
+  Changing this list is usually the only change a program needs.
+
+Each string is handed to `pip` exactly as written, so it can say which
+versions are acceptable:
+
+```
+# dependencies = [
+#   "requests",                    any version at all
+#   "requests<3",                  anything before 3
+#   "requests>=2.28,<3",           a range
+#   "requests~=2.32.0",            2.32.anything, but not 2.33
+#   "requests!=2.31.0",            any version except this one
+#   "requests===2.32.3",           that version and no other
+#   "requests[socks]",             with an optional extra
+#   "pywin32; sys_platform == 'win32'",  only on Windows
+# ]
+```
+
+A comma after the last string is allowed but not required.  The full syntax
+is in the [dependency specifiers](
+https://packaging.python.org/en/latest/specifications/dependency-specifiers/)
+specification.  `pip` resolves the whole list at once, so it notices when
+two packages disagree about a third, which is very hard to get right by
+hand.
+
+### Part 2: The standard library imports that the bootstrap uses
+
+Seven imports, all from the standard library, so there is nothing to
+install.  Put them among your own imports, in alphabetical order, and if
+your program already imports some of them, keep one copy of each.
+
+### Part 3: The bootstrap
+
+Copy it exactly, and never edit it.  Re-indenting it or changing its
+comments does no harm, but changing its code makes it a different
+bootstrap.  To see whether a program carries the current one, run it with
+`ALT_VENV_BOOTSTRAP=check` set, and it says so on standard error.
+
+The bootstrap first tries to import `alt_venv`, and uses it if it is already
+there, such as when something like `uv` has installed it.  Otherwise, the
+first time any program runs it on a machine, it fetches `alt_venv`:
+
+1. It asks [PyPI](https://pypi.org/), the Python Package Index, for the
+   newest `pip` that this Python can run.
+2. It downloads that `pip`, checks its SHA-256 against the one PyPI
+   publishes, and keeps it as `~/.alt_venv/pip.whl`.  The machine's own
+   `pip`, if it has one, is never used or changed.
+3. It runs that `pip` to install `alt_venv` into `~/.alt_venv`.
+
+Later runs skip the previous three steps.  Every run, the first one included,
+then just uses the `AltVEnv` package to download any further packages and
+perform housekeeping in the `~/.alt_venv/` directory.
+
+### Part 4: Import the packages listed in Part 1
+
+Your own `import` statements come after the bootstrap, because the bootstrap
+is what makes the packages importable.  Import each package by its module
+name, which is not always the name in Part 1: `python-dateutil` is imported
+as `dateutil`.  Leave out the `# type: ignore` comments if you do not use
+`mypy`.
+
+### Part 5: The program itself
+
+Everything from here down is yours.
+
 ## Conclusion
 
 No more remembering which virtual environment is active.  List your packages
 in Part 1, copy Parts 2 and 3 exactly, and each program quietly gets its own
 packages, with nothing to create or activate.  What you are left with is a
-single file you can e-mail to somebody who has nothing but Python, and it
+single file you can email to somebody who has nothing but Python, and it
 will just work.

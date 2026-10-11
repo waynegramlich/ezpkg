@@ -178,7 +178,7 @@ except Exception as x:
     raise SystemExit(f"alt_venv: {s} failed: {x!r}")
 
 # Part 4: Import the packages listed in Part 1.
-import cowsay  # type: ignore[import-not-found]
+import cowsay  # type: ignore[import-not-found]  # For mypy.
 
 # Part 5: The program itself.
 cowsay.cow("AltVEnv works!")

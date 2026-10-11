@@ -60,3 +60,22 @@ As of 2026-10-10: Wayne chose Claude's Conclusion, which replaced his
 `alt_venv.py:37-54`.  Wayne now thinks Author Package Management and
 Alternatives (the `uv` double download) are related; they come after the
 Conclusion.
+
+Later on 2026-10-10, after `ALT_VENV_EXPORT=uv` shipped, Wayne reopened the
+README for a section-by-section pass:
+* **Done:** the introduction (problem, solution, life-cycle: paste the
+  35-line bootstrap, fetch on demand, then email the `.py` or export as
+  `zipapp` or `uv`), the Quick Start, and the Download Prompt (now one
+  paragraph).  `~/.alt_venv/` is introduced at first use.  The "Your Own
+  Program" stub moved into the intro of "Anatomy of an `AltVEnv`
+  Program", which now sits after Alternatives with `###` Parts.
+* `QUICK_START`, `quick_start.py` and the README use
+  `# type: ignore[import-not-found]  # For mypy.`; mypy rejects text
+  appended inside a `type: ignore` comment.
+* **Next:** Author Package Management, which Wayne has not read.  Its
+  HTML freeze note is stale; it should present the `pins`, `zipapp` and
+  `uv` exports and say why `zipapp` is pure Python only.  Then the
+  Alternatives `zipapp` and "Why not just use `uv`?" bullets (say
+  `AltVEnv` exports to both), and Miscellaneous.
+* Claiming the PyPI name and making the Quick Start work wait for the
+  very end of the project, at Wayne's word.
