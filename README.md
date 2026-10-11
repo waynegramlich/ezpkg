@@ -9,14 +9,18 @@ Before uploading AltVEnv to PyPI, all TBD's needs to be fixed. -->
 frustration of developing several Python programs concurrently, where each
 program needed its own Python virtual environment.  When switching development
 between programs, it is really easy to forget to deactivate one before
-activating another, and then run one program against the other's packages.
+activating another, and accidentally run one program against the other's
+packages.
 
-To get started with `AltVEnv`, you paste a 35-line bootstrap at the front of
+To get started with `AltVEnv`, you paste a modest bootstrap at the front of
 your program and go.  After that, `AltVEnv` fetches your packages over the
 net on demand, without a virtual environment or the right to install
 packages.  Get everything working with `AltVEnv` first, then either email
 the single `.py` file to a friend or let `AltVEnv` package it up in `zipapp`
 or `uv` format.
+<!-- Issue: The `zipapp` and `uv` packaging promised above is not documented
+yet; S2 (Packaging) below covers it.  Verify this paragraph against the
+finished document before the `README.md` wrapup. -->
 
 ## Quick Start
 
@@ -99,18 +103,17 @@ cowsay 6.1 was loaded from /home/you/.alt_venv/versions/cowsay-6.1-.../...
 
 Now run it a second time.  There is no question and no download, and it
 starts in a fraction of a second, because `cowsay` is already in
-`~/.alt_venv/`.  It is always safe to delete the `~/.alt_venv/` directory;
-the next run simply fetches again.
+`~/.alt_venv/`.  It is always safe to delete the `~/.alt_venv/` directory,
+since the next run simply fetches it again.
 
-All the machine needs is Python 3.11 or later, plus a network connection the
-first time a program needs a package.
+Python 3.11 or later and a network connection is all that is needed.
 
 ## Download Prompt
 
 When people run `pip` by hand, they know they are downloading packages onto
 their computer.  A program that uses `AltVEnv` downloads them on its own, so
-whoever runs it may not know.  It would be rude to do downloads without asking,
-so `AltVEnv` asks.
+whoever runs it may not know.  It would be rude to do downloads without asking
+at least once, so `AltVEnv` asks.
 
 If you tried the Quick Start, you have already seen the download prompt.
 The very first run of `quick_start.py`, with no `~/.alt_venv` yet, begins
@@ -130,16 +133,75 @@ Successfully installed alt_venv-0.0.1
 go ahead? [y=>Yes/n=>No/a=>Always/?=>Explanation] y
 ```
 
+<!-- Claude: Fix the prompt code to not accept ENTER as a default and re-prompt.
+Delete when done. -->
 The `pip` output is the bootstrap installing `alt_venv`, and appears only on
-a machine's very first run.  The prompt appears whenever a program needs
-packages that are not in `~/.alt_venv/` yet, and nothing is installed until
-it is answered: `y` installs, `n` or Enter installs nothing and stops, `?`
-says where each package came from, and `a` stops asking for good (delete
-`~/.alt_venv/FOREVER_APPROVE` to be asked again).  A program with no
-terminal, such as one started by `cron`, is not asked.
+a machine's very first run.  One of 4 prompts appear:
+* **`n=>No`** - This disables download and immediately exits.
+* **`y=>Yes`** - This allows the download to happen.
+* **`a=>Always`** - This allows this download and all future downloads to occur.
+  This is sticky.  To reset it, remove the `~/.alt_venv/FOREVER_APPROVE` file.
+* **`?=>Explanation`** - This lists all requested downloads and then prompts
+  again.
+Some programs are run with out access to terminal input (e.g. `cron`).  When
+this happens, the download prompt is suppressed and is treated as `Always`.
+
+## Enabling `AltVEnv` for Your Program
+
+If you are starting from scratch, the easiest thing to do is take a copy of
+`quick_start.py` and do the following:
+1. Just rename the program and remove all lines that have `cowsay` in them.
+2. Each time you need a new package, check whether your Python already has
+   it with `python3 -c "import NAME"`.  If that succeeds, import it along with
+   your other imports before the bootstrap.  If it fails with
+   `ModuleNotFoundError`, do the following:
+   1. Add one line containing the package name to the metadata at the program
+      front.
+   2. Add a regular `import` statement for the package immediately after the
+      `AltVEnv` bootstrap code.
+That's it.
+<!-- Issue: Wayne to review the preinstalled check in step 2.  Two catches:
+(a) the module name is not always the package name (`import dateutil` comes
+from `python-dateutil`), and (b) a package preinstalled on the author's
+Python (e.g. a Linux distribution's `python3-requests`) may be missing on
+the machine of whoever runs the program, so third-party packages arguably
+belong in the metadata even when the check succeeds. -->
+
+If you are starting from a preexisting program, do the following:
+* Copy the metadata from the front of `quick_start.py` into the front of
+  your program.  You can remove the line that says `cowsay`.  (See Meta Data
+  section below, for more information.)
+  <!-- Issue: Point the reference above at the metadata section, whose title
+  is not settled yet (currently "Part 1" under "Anatomy"). -->
+* This step is optional, but still highly recommended.  For each `import` of
+  a third-party package (one not in the standard library) that your Python
+  already has, add the package's name to the metadata anyway, since the
+  machines your program runs on may not have it.  The package name is not
+  always the module name: `import dateutil` needs `python-dateutil`.
+  <!-- Issue: Wayne to review the rewritten bullet above.  The original said
+  to copy the name of every `import`, which is wrong for standard library
+  modules and for packages whose module name differs. -->
+* Paste the bootstrap into your program after your last import.
+* Place an `import` statement for each package that is not preinstalled
+  after the `AltVEnv` bootstrap and add it to the meta data.
+That's all.
+
+<!-- Claude: I'd like to review the stuff above.  First. -->
+<!-- Issue: Road map for the rest of the document:
+S1: Anatomy of an `AltVEnv` Program: the reference for what readers just did
+    in "Enabling `AltVEnv` for Your Program".
+S2: Packaging (new section): `zipapp` and `uv`, keeping the intro's promise.
+S3: Author Package Management: approvals, for authors who ship to others.
+S4: Miscellaneous: how `~/.alt_venv` behaves (garbage collection, sharing,
+    versions side by side).
+S5: Alternatives / Why not just use `uv`?  Consider a one-sentence answer
+    in the intro, since skeptics ask early.
+S6: Conclusion: fix "zapapp", the garbled "(pure Python on)", and
+    "Cython packages like `math`". -->
 
 ## Author Package Management
 
+<!-- Claude: I agree with below.  Open an issue and we'll fix it. -->
 <!-- Wayne: a true freeze needs two things, and only the second exists.
 (1) Exact `==` pins in Part 1 for every package, including the ones that
 come along, so that `pip` fetches the same versions every time.  (2) The
@@ -151,6 +213,7 @@ platform catch: approvals are keyed by file name, so a compiled package
 recorded on one Python version or operating system is refused on
 another. -->
 
+<!--Claude: We'll talk about this when we get around to the issue above. -->
 Whoever runs your program cannot tell a genuine package from a tampered or
 look-alike one, but you can.  Run it once as
 `ALT_VENV_APPROVE=write python3 prog.py` to record the exact packages you got
@@ -312,5 +375,7 @@ Everything from here down is yours.
 No more remembering which virtual environment is active.  List your packages
 in Part 1, copy Parts 2 and 3 exactly, and each program quietly gets its own
 packages, with nothing to create or activate.  What you are left with is a
-single file you can email to somebody who has nothing but Python, and it
-will just work.
+single file you can email to somebody who has nothing but Python 3.11
+(or greater), and it will just work.  You can also trivially package it up
+in either `zapapp` (pure Python on) or `uv` (includes Cython packages like
+`math`.)
