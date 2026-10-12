@@ -110,7 +110,7 @@ CULL_DAYS: float = 180.0 * 86400.0
 # How often the private `pip` is checked for a newer release.  Weekly, as
 # `pip` checks itself, because each check asks the index and may fetch
 # 1.8 MB, while `pip` releases come every month or two.  See issue
-# `I.spinu` in `ISSUES.md`.
+# `I.spinu` in `ISSUES/`.
 PIP_INTERVAL: float = 7.0 * 86400.0
 
 # Every bootstrap this project has published, by `bootstrap_fingerprint`,
@@ -1125,7 +1125,7 @@ class AltVEnv:
         is no on every run and the fetch is repeated forever.  `venv4`
         does worse than waste a download: it deletes the `pip` it
         installed with, so its second run has nothing to install with
-        and fails.  This is the `I.cctfd` issue in `ISSUES.md`.
+        and fails.  This is the `I.cctfd` issue in `ISSUES/`.
 
         Rather than edit every case body that people paste, the
         second stage repairs the layout once, the first time it runs.
@@ -2391,7 +2391,7 @@ class AltVEnv:
         missing network, a refusal from the index or a full disk all
         leave the cache as it was, and the next attempt is a whole
         `interval` away, because the stamp is written before trying.
-        See issue `I.spinu` in `ISSUES.md`.
+        See issue `I.spinu` in `ISSUES/`.
 
         Arguments:
         * `interval` (`float`):
@@ -2797,7 +2797,10 @@ class AltVEnv:
         * `RuntimeError`:
           If `pip` fails.  Its standard error is included, because the
           usual cause is no network and the caller deserves to be told
-          that rather than left with an import error.
+          that rather than left with an import error.  Also if a module
+          asked for is already imported from another version, as by an
+          earlier `install` of another version, since this process
+          cannot hold both.
         * `ModuleNotFoundError`:
           If `pip` succeeds but a package still will not import, which
           means its import name was guessed wrongly and wants the pair
@@ -2857,7 +2860,26 @@ class AltVEnv:
                              + ", ".join(sorted(repeated)))
 
         # Everything up to the imports is the same work either form does.
-        self.provide(asking, argv)
+        trees: list[Path] = self.provide(asking, argv)
+
+        # `sys.modules` is keyed by name, so a module already imported
+        # from another version's tree would be handed back in place of
+        # the version just asked for, silently.  One process holds one
+        # version of a module; say so instead.  See Step 6.3.11.
+        name: str
+        for name in names:
+            loaded: ModuleType | None = sys.modules.get(name)
+            where: str | None = getattr(loaded, "__file__", None)
+            fresh: list[Path] = [
+                tree for tree in trees
+                if (tree / name).is_dir() or (tree / f"{name}.py").is_file()]
+            if where and fresh and not any(
+                    Path(where).is_relative_to(tree) for tree in fresh):
+                raise RuntimeError(
+                    f"{name} is already imported from {where}, so this "
+                    f"process cannot also have the version in "
+                    f"{fresh[0].name}: one process holds one version of a "
+                    f"module")
         modules: list[ModuleType] = [importlib.import_module(name)
                                      for name in names]
         return modules[0] if single else modules
@@ -2974,7 +2996,7 @@ class AltVEnv:
         return list(declared)
 
     def provide(self, asking: list[str],
-                argv: Sequence[str] = ()) -> None:
+                argv: Sequence[str] = ()) -> list[Path]:
         """Fetch whatever of `asking` is missing, and make it importable.
 
         The engine both forms of `install` share: it fetches, verifies,
@@ -2989,6 +3011,11 @@ class AltVEnv:
         * `argv` (`Sequence[str]`):
           Extra arguments for `pip install`, as `install` documents.
 
+        Returns:
+        * (`list[Path]`): The version trees put on `sys.path`, which is
+          empty when nothing came from the cache, as when everything was
+          already importable.
+
         Raises:
         * `ValueError`:
           If a requirement reads as an option, or if `pip` exits 2.
@@ -2997,7 +3024,7 @@ class AltVEnv:
         """
         # Nothing asked for is nothing to do, and no `pip` to run.
         if not asking:
-            return
+            return []
 
         # Refuse the one thing `pip` would accept and should not: a
         # leading dash reads as an option, so `install("--index-url=")`
@@ -3019,7 +3046,7 @@ class AltVEnv:
         # shared dependency with a version the installed ones never
         # agreed to.  See `satisfied`.
         if not argv and all(satisfied(one) for one in asking):
-            return
+            return []
 
         # A good moment to sweep: something is about to be fetched, so a
         # little work here is invisible beside a download, and anything
@@ -3060,7 +3087,7 @@ class AltVEnv:
                 # packages is worse than silence.  Measured 2026-09-30,
                 # when it printed `1 requested, 0 downloaded`.
                 if not arrived:
-                    return
+                    return []
 
                 # Say what turned up, then check it against what the
                 # author approved, and only then unpack.  Nothing in a
@@ -3112,6 +3139,7 @@ class AltVEnv:
                 sys.path.insert(0, str(tree))
                 site.addsitedir(str(tree))
         importlib.invalidate_caches()
+        return trees
 
     def litter(self, grace: float = CULL_GRACE) -> list[Path]:
         """Return what is in the cache that nothing can reach.

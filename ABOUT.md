@@ -5,7 +5,7 @@
 This file is the project's background: the problem it solves, its
 goals, the prior art and the first thoughts about it.  It was the
 front of `LOGBOOK.md` until 2026-10-04, when the work moved to
-`TASKS/` and the issues to `ISSUES.md`.
+`TASKS/` and the issues to `ISSUES.md`, and on 2026-10-07 to `ISSUES/`.
 
 ## Problem Statement
 

@@ -1,11 +1,15 @@
 {
-  "state": "Suspended",
+  "state": "Closed",
   "created": "2026-10-05T03:05:12Z",
-  "updated": "2026-10-05T03:05:12Z",
+  "updated": "2026-10-12T22:31:57Z",
   "history": [
     {
       "state": "Suspended",
       "time": "2026-10-05T03:05:12Z"
+    },
+    {
+      "state": "Closed",
+      "time": "2026-10-12T22:31:57Z"
     }
   ],
   "tag": "sit"

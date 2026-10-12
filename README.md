@@ -283,7 +283,7 @@ S4: Conclusion: fix "zapapp", the garbled "(pure Python on)", and
     "Cython packages like `math`" (make it compiled packages like
     `numpy`, as S1 does), and reword "copy Parts 2 and 3" now that the
     bootstrap is pasted as one block.
-S5: Wrapup: check the intro (its packaging promise, see the issue there)
+S5: Wrapup: check the intro (its packaging promise)
     and the whole document against what the code does. -->
 
 ## Releasing a Program

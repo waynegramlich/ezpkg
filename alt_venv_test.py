@@ -150,11 +150,14 @@ CONFIRM: str = "Really never ask again? [y=>Yes/n=>No]"
 # `pip`'s state in the program.  See Step 6.15 and `T.ewar` in `TASKS/`.
 SHIPPING: str = "nopip4"
 
-# Which cases the all-case tests exercise by default: the four that
-# need no `pip`, since the first cull found that only they add anything
-# to coverage (Step 6.16.3).  The other ten are kept, because keeping
-# them costs nothing, and run under `ALT_VENV_TEST=COMPLETE`.
-FAST_CASES: tuple[str, ...] = ("nopip1", "nopip2", "nopip3", "nopip4")
+# Which cases the all-case tests exercise by default.  The first cull
+# found that only the four needing no `pip` add anything to coverage
+# (Step 6.16.3), and the cull of 2026-10-12 that `nopip2` and `nopip3`
+# add nothing beyond `nopip1` and `nopip4`, so those two went too
+# (Wayne).  The other twelve are kept, because keeping them costs
+# nothing, and run under `ALT_VENV_TEST=COMPLETE`; a test that names a
+# case of its own still runs it.
+FAST_CASES: tuple[str, ...] = ("nopip1", "nopip4")
 
 def platform_tag() -> str:
     """Return a compatibility tag this interpreter would accept.
@@ -2896,6 +2899,28 @@ class InstallTest(unittest.TestCase):
 
         # Two requests, so two records, both naming the one tree.
         self.assertEqual(len(list(requests.iterdir())), 2)
+
+    def test_a_second_version_in_one_process_is_refused(self) -> None:
+        """Two calls asking for two versions of one module fail loudly.
+
+        `sys.modules` is keyed by name, so the second call used to hand
+        back the first version without a word.  Asking again for the
+        same version is still fine.  See Step 6.3.11.
+        """
+        # 1.0.0 first, then the same again, then 2.0.0.
+        cache: Path = self.root / "two-versions"
+        self.addCleanup(self.forget, str(cache), "sprocket")
+        venv: alt_venv.AltVEnv = alt_venv.AltVEnv(cache)
+        with unittest.mock.patch.dict(
+                os.environ, {"PIP_INDEX_URL": self.index_url}):
+            first: ModuleType = venv.install("sprocket==1.0.0")
+            again: ModuleType = venv.install("sprocket==1.0.0")
+            with self.assertRaises(RuntimeError) as caught:
+                venv.install("sprocket==2.0.0")
+        self.assertEqual(first.__version__, "1.0.0")
+        self.assertIs(again, first)
+        self.assertIn("sprocket is already imported from", str(caught.exception))
+        self.assertIn("one process holds one version", str(caught.exception))
 
     def test_unpack_survives_losing_the_race(self) -> None:
         """A tree appearing mid-unpack is accepted, not fought over.
@@ -5736,9 +5761,9 @@ class CoverageToolTest(unittest.TestCase):
             Returns:
             * (`tuple[str, int, float]`): As `measure_one` returns.
             """
-            # Only `nopip2` fails, so the verdict has to notice it.
+            # Only `nopip1` fails, so the verdict has to notice it.
             calls.append((name, selection, marked_only))
-            return name, int(name == "nopip2"), 0.0
+            return name, int(name == "nopip1"), 0.0
 
         with (unittest.mock.patch.object(alt_venv_coverage, "measure_one",
                                          fake),
@@ -5772,6 +5797,41 @@ class CoverageToolTest(unittest.TestCase):
         written: str = (self.root / "report.md").read_text()
         self.assertIn("No counts for", written)
         self.assertIn(written.strip(), printed.getvalue())
+
+
+    def test_per_case_measures_a_copy(self) -> None:
+        """`--per-case` copies the project and goes on in the copy.
+
+        So that editing the project during a long run cannot shift the
+        line numbers its report attributes.  See Step 6.16.4.
+        """
+        # The copy is real; only the run in it is pretended.
+        directory: Path = self.root / "per-case"
+        ran: unittest.mock.MagicMock
+        with (unittest.mock.patch.object(
+                  sys, "argv", ["x", "--per-case", str(directory)]),
+              unittest.mock.patch.object(
+                  alt_venv_coverage.subprocess, "run",
+                  return_value=subprocess.CompletedProcess([], 0)) as ran):
+            self.assertEqual(alt_venv_coverage.main(), 0)
+        copy: Path = directory / alt_venv_coverage.SNAPSHOT
+        self.assertTrue((copy / "alt_venv.py").is_file())
+        self.assertTrue((copy / "alt_venv_test.py").is_file())
+        self.assertFalse((copy / ".git").exists())
+        self.assertFalse((copy / "__pycache__").exists())
+        self.assertEqual(ran.call_args.args[0][1:], [
+            str(copy / "alt_venv_coverage.py"), "--per-case",
+            str(directory)])
+
+        # `--compare` on the same directory goes on in the copy too.
+        with (unittest.mock.patch.object(
+                  sys, "argv", ["x", "--compare", str(directory)]),
+              unittest.mock.patch.object(
+                  alt_venv_coverage.subprocess, "run",
+                  return_value=subprocess.CompletedProcess([], 0)) as ran):
+            self.assertEqual(alt_venv_coverage.main(), 0)
+        self.assertEqual(ran.call_args.args[0][1],
+                         str(copy / "alt_venv_coverage.py"))
 
 
 @unittest.skipUnless(os.environ.get("ALT_VENV_REPORT"),

@@ -50,3 +50,9 @@
   only a clean one.
 * `T.fipab` (imports above the bootstrap) is a natural second check in
   the same scan and the same export check.
+
+## 2026-10-12
+
+* No change; still waiting on Wayne's two decisions above.  Note that
+  `check_imports` now runs at export for `zipapp` and `uv` only (`pins`
+  was removed), and the `.pyz` checks `requires-python` itself.

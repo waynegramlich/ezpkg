@@ -273,3 +273,25 @@ S5 Alternatives, S6 Conclusion).
   the docs; earlier notes above that mention `pins` are history.  The
   `uv` export no longer writes `pylock.*.toml` either.  The zipapp
   version check, the network sentence and the `uv` dogfood are done.
+
+## 2026-10-12 end of session: where to pick up
+
+* S1, "Releasing a Program", is drafted and closed in the road map
+  (README lines ~271-287): the email case, one-line format bullets, the
+  `write` step (PowerShell `powershell -Command { $env:...; & python
+  ... }`, tested with PowerShell 7.6.6 on Linux), the network sentence,
+  the `exclude-newer` date sentence, then "Using `zipapp`" (limit
+  first, `.pyz` checks `requires-python`, Windows `py`) and "Using
+  `uv`" (needs `uv` on both ends; script plus `YOUR_PROG-uv.py.lock`;
+  "That is all there is to it.").  Wayne declined: the one-run form,
+  "One catch", a "Single `.py`" subsection, and a flow read by Claude
+  (he will do careful end-to-end reads himself).
+* Next: road map S2, Miscellaneous (`~/.alt_venv` behaviour), then S3
+  Alternatives, S4 Conclusion, S5 Wrapup.  The intro's Issue note was
+  removed.  Later: a bootstrap anatomy section, which will bring
+  `nopip5` (`T.m`), and the rename to perhaps `EZPkg` (`T.rp`) at the
+  very end, before publishing (`T.ffrp`).
+* `alt_venv` is not on PyPI, so the Quick Start cannot work for a new
+  user yet; dogfood runs use `PYTHONPATH` pointing at the project.
+* Working style unchanged: proposals in HTML comments beside the old
+  text with both line ranges; when Wayne says delete, delete.

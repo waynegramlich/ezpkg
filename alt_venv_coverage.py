@@ -14,7 +14,7 @@ is honoured by the suite as usual, so `COMPLETE` measures every
 
 `--per-case <directory>` answers a different question: what does each
 `bootstrap.py` case add?  The cases are those `ALT_VENV_TEST` selects,
-so `nopip1` to `nopip4` unless it says `COMPLETE`.  It makes one
+so `nopip1` and `nopip4` unless it says `COMPLETE`.  It makes one
 baseline run of the whole suite with `ALT_VENV_TEST=NONE`, so that no
 case runs, and then one run per case of only the tests marked
 `runs_cases`, with `ALT_VENV_TEST` naming that case.  Children are
@@ -26,6 +26,8 @@ adds beyond the baseline, the lines only one case reaches, and a greedy
 ordering from the case that ships showing which cases add nothing.
 `--compare <directory>` redoes just the comparison from the saved
 counts, in seconds, which is what makes culling cases cheap to repeat.
+Both work in a copy of the project made under `<directory>/project/`,
+so that editing the project during a run cannot spoil its report.
 See Step 6.16 of `TASKS/`.
 
 Three workarounds here were each found the hard way, and all matter
@@ -84,6 +86,7 @@ import argparse
 import ast
 import concurrent.futures
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -101,6 +104,10 @@ COUNTS: str = "counts.pickle"
 
 # The run with no case selected, and the directory it writes into.
 BASELINE: str = "baseline"
+
+# Where `--per-case` keeps the copy of the project it measures, under
+# its directory; see `take_snapshot`.
+SNAPSHOT: str = "project"
 
 # How many per-case runs go at once unless `--jobs` says otherwise.  Two,
 # because each run is itself a busy tree of processes -- the suite, its
@@ -577,6 +584,28 @@ def compare(directory: Path) -> str:
     return "\n".join(out) + "\n"
 
 
+def take_snapshot(here: Path, copy: Path) -> None:
+    """Copy the project to `copy`, for a per-case run to measure.
+
+    A per-case run reads the tree for a quarter of an hour, and its
+    report is only true if no file changes meanwhile: on 2026-10-01 an
+    edit made during a run shifted line numbers between the baseline and
+    the cases, and the report claimed lines the cases never ran.  A copy
+    cannot be edited by accident.  Caches and version control are left
+    out, and symbolic links stay links.  See Step 6.16.4 in `TASKS/`.
+
+    Arguments:
+    * `here` (`Path`):
+      The project directory, where this file is.
+    * `copy` (`Path`):
+      Where the copy goes; anything already there is replaced.
+    """
+    # Replace, so that a second run never measures a stale copy.
+    shutil.rmtree(copy, ignore_errors=True)
+    shutil.copytree(here, copy, symlinks=True, ignore=shutil.ignore_patterns(
+        ".git", ".hg", "__pycache__", ".mypy_cache", ".ruff_cache"))
+
+
 def measure_one(name: str, selection: str, marked_only: bool,
                 directory: Path) -> tuple[str, int, float]:
     """Measure the suite in a child process, writing under `name`.
@@ -622,7 +651,7 @@ def measure_cases(directory: Path, jobs: int) -> bool:
     """Measure a baseline, then each case separately, `jobs` at a time.
 
     The cases are the ones `ALT_VENV_TEST` selects, as for the suite
-    itself: `nopip1` to `nopip4` by default, and all fourteen under
+    itself: `nopip1` and `nopip4` by default, and all fourteen under
     `COMPLETE`.
 
     The baseline is the whole suite with no case selected, and is the
@@ -669,10 +698,11 @@ def main() -> int:
       lands in the project tree.  `--children` also traces child
       processes, which is the only way to see `bootstrap.py` at all and
       costs several minutes.
-    * With `--per-case`, measure once per `bootstrap.py` case, children
-      included, `--jobs` at a time, and then compare the runs.
+    * With `--per-case`, copy the project into the directory, then
+      measure the copy once per `bootstrap.py` case, children included,
+      `--jobs` at a time, and compare the runs.
     * With `--compare`, only compare runs that `--per-case` already
-      made, which costs seconds.
+      made, which costs seconds, again in the copy.
 
     Returns:
     * (`int`): The exit status: 0 when every test passed.
@@ -698,8 +728,22 @@ def main() -> int:
     coverdir: Path = (Path(arguments.directory) if arguments.directory
                       else Path(tempfile.mkdtemp(prefix="cover-")))
 
+    # `--per-case` measures a copy of the project, and `--compare` reads
+    # the copy back, because the counts name its files and lines; both
+    # go on in the copy's own `alt_venv_coverage.py`.  A directory from
+    # before copies were made is compared in place, as it always was.
+    here: Path = Path(__file__).resolve().parent
+    copy: Path = coverdir.resolve() / SNAPSHOT
+    if arguments.per_case and here != copy:
+        take_snapshot(here, copy)
+    if (arguments.per_case or arguments.compare) and here != copy \
+            and copy.is_dir():
+        return subprocess.run(
+            [sys.executable, str(copy / Path(__file__).name), *sys.argv[1:]],
+            check=False).returncode
+
     # This directory has to be importable for the suite to be found.
-    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    sys.path.insert(0, str(here))
 
     # The per-case modes measure in children and read the results back.
     if arguments.per_case or arguments.compare:
