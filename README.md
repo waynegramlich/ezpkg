@@ -14,8 +14,8 @@ packages.  Get everything working with `AltVEnv` first, then either email
 the single `.py` file to a friend or let `AltVEnv` package it up in `zipapp`
 or `uv` format.
 <!-- Issue: The `zipapp` and `uv` packaging promised above is not documented
-yet; S2 (Packaging) below covers it.  Verify this paragraph against the
-finished document before the `README.md` wrapup. -->
+yet; S1 (Releasing Programs) below covers it.  Verify this paragraph against the
+finished document in the S5 wrapup. -->
 
 ## Quick Start
 
@@ -103,6 +103,9 @@ starts in a fraction of a second, because `cowsay` is already in
 since the next run simply fetches it again.
 
 Python 3.11 or later and a network connection is all that is needed.
+
+The `# type: ignore` comment on `import cowsay` is only for `mypy`; leave
+such comments out of your own programs if you do not use `mypy`.
 
 ## Download Prompt
 
@@ -220,37 +223,128 @@ PyPI and installed, and it is the package's name that goes in
 modules, so one `dependencies` line can cover more than one import.
 
 An import that works only because your own Python happens to have the
-package never fails, so step 4 never catches it.  When you package your
-program (see Packaging below), `AltVEnv` lists every such import, with its
-line number, and refuses to package the program until you add those
-packages to `dependencies` too.
+package never fails, so step 4 never catches it.  When you release your
+program (see [Releasing Programs](#releasing-programs) below), `AltVEnv`
+lists every such import, with its line number, and refuses to make the
+release until you add those packages to `dependencies` too.
 
-<!-- Issue: Road map for the rest of the document:
-S1: Anatomy of an `AltVEnv` Program: the reference for what readers just did
-    in "Enabling `AltVEnv` for Your Program".
-S2: Packaging (new section): `zipapp` and `uv`, keeping the intro's promise.
-    Say that `ALT_VENV_EXPORT=pins` is the check for a program that is
-    emailed as a single `.py` file, and give "Enabling"'s "see Packaging
-    below" reference the section's final title.
-S3: Author Package Management: approvals, for authors who ship to others.
-    Mention the platform catch: approvals are keyed by wheel file name, so
-    a compiled package approved on one Python version or operating system
-    is refused on another.
-S4: Miscellaneous: how `~/.alt_venv` behaves (garbage collection, sharing,
+### Choosing Versions
+
+The metadata at the top of the bootstrap is a standard
+[inline script metadata](
+https://packaging.python.org/en/latest/specifications/inline-script-metadata/)
+block, the same one that tools such as `uv` and `pipx` read.  It holds two
+settings:
+
+* `requires-python` is the oldest Python the program will run on.  If the
+  program is started on an older one, `AltVEnv` stops with a message saying
+  so, rather than letting it fail somewhere obscure.  `AltVEnv` itself needs
+  3.11 or later.
+* `dependencies` lists the packages the program needs, one string each.
+  Changing this list is usually the only change a program needs.
+
+Each string is handed to `pip` exactly as written, so it can say which
+versions are acceptable:
+
+```
+# dependencies = [
+#   "requests",                    any version at all
+#   "requests<3",                  anything before 3
+#   "requests>=2.28,<3",           a range
+#   "requests~=2.32.0",            2.32.anything, but not 2.33
+#   "requests!=2.31.0",            any version except this one
+#   "requests===2.32.3",           that version and no other
+#   "requests[socks]",             with an optional extra
+#   "pywin32; sys_platform == 'win32'",  only on Windows
+# ]
+```
+
+A comma after the last string is allowed but not required.  The full syntax
+is in the [dependency specifiers](
+https://packaging.python.org/en/latest/specifications/dependency-specifiers/)
+specification.  `pip` resolves the whole list at once, so it notices when
+two packages disagree about a third, which is very hard to get right by
+hand.
+
+<!-- Issue: Road map for the rest of the document, in the order of work:
+S1: Releasing Programs (replaces Author Package Management): "Steps in
+    Common" is drafted; write "As a Single `.py` File", "Using `zipapp`"
+    and "Using `uv`", each with the same four parts: the command, the
+    files it writes, how the recipient runs the result, and its limits.
+    Unsuspend `T.ewar` when done.
+S2: Miscellaneous: how `~/.alt_venv` behaves (garbage collection, sharing,
     versions side by side).
-S5: Alternatives / Why not just use `uv`?  Consider a one-sentence answer
+S3: Alternatives / Why not just use `uv`?  Consider a one-sentence answer
     in the intro, since skeptics ask early.
-S6: Conclusion: fix "zapapp", the garbled "(pure Python on)", and
-    "Cython packages like `math`". -->
+S4: Conclusion: fix "zapapp", the garbled "(pure Python on)", and
+    "Cython packages like `math`", and reword "copy Parts 2 and 3" now
+    that the bootstrap is pasted as one block.
+S5: Wrapup: check the intro (its packaging promise, see the issue there)
+    and the whole document against what the code does. -->
 
-## Author Package Management
+## Releasing Programs
 
-Whoever runs your program cannot tell a genuine package from a tampered or
-look-alike one, but you can.  Run it once as
-`ALT_VENV_APPROVE=write python3 prog.py` to record the exact packages you got
-in `prog.altvenv`, and ship that file beside it.  Nobody is asked after that:
-anything that does not match is refused before it is installed.  A new
-release of a package is refused too, until you record it again.
+Once your program works, releasing it means putting it in a form that
+other people can run on their own machines.  There are several forms, and
+more will be added over time.  They all start with the same steps.
+
+### Steps in Common
+
+1. **Record the packages you approve.**  Run your program once like this:
+   ```
+   ALT_VENV_APPROVE=write python3 prog.py
+   ```
+   This writes `prog.altvenv` beside `prog.py`, recording the exact
+   package files your program got (every package `pip` brought along
+   included), each with its SHA-256.  Every release form starts from this
+   file and refuses to work without it.  Run it again whenever you change
+   `dependencies`.
+2. **Keep `prog.altvenv` with your program.**  Whoever runs your program
+   cannot tell a genuine package from a tampered or look-alike one, but you
+   can.  With the file beside the program, nobody is shown the download
+   prompt: what matches the file is installed without a question, and
+   anything that does not match is refused before it is installed.  A new
+   release of a package is refused too, until you record it again.  If you
+   keep your program in version control, commit `prog.altvenv` with it.
+3. **Make the release.**  Run your program with `ALT_VENV_EXPORT` set to
+   the form you want (each one is described below), for example:
+   ```
+   ALT_VENV_EXPORT=zipapp python3 prog.py
+   ```
+   Your program does not run; the release is written instead.  First,
+   though, `AltVEnv` checks every `import` in your program, and if any of
+   them comes from a package that `dependencies` does not list, it says
+   which, with line numbers, and makes no release until you add them.
+   This catches a package that your own Python happens to have, which
+   works for you but would fail for everybody else.
+
+Steps 1 and 3 can be done in one run:
+`ALT_VENV_APPROVE=write ALT_VENV_EXPORT=zipapp python3 prog.py`.
+
+One catch: a package that contains compiled code comes as a different file
+for each operating system and Python version.  `prog.altvenv` records the
+files from the machine it was written on, so such a package is refused on
+any other kind of machine.  There is no way yet to approve more than one
+machine's files.  Packages written purely in Python, which are most of
+them, come as one file that suits every machine, so they are not affected.
+
+### As a Single `.py` File
+
+<!-- Issue: To be written (S1).  `ALT_VENV_EXPORT=pins`: prints Part 1's
+`dependencies` with every package pinned, to paste in before emailing the
+`.py`; send `prog.altvenv` along for verification. -->
+
+### Using `zipapp`
+
+<!-- Issue: To be written (S1).  `ALT_VENV_EXPORT=zipapp[:PATH]` writes
+`prog.pyz`; runs with `python3 prog.pyz`, no network, no `~/.alt_venv`;
+pure-Python packages only for now. -->
+
+### Using `uv`
+
+<!-- Issue: To be written (S1).  `ALT_VENV_EXPORT=uv[:PATH]` writes
+`prog-uv.py` and its two lock files for `uv run`; compiled packages are
+fine here, since `uv` supplies every platform's files. -->
 
 ## Miscellaneous
 
@@ -314,63 +408,12 @@ somebody who has Python and nothing else, and whom you would rather not ask
 to install a tool before trying it.  Because both read the same metadata
 block, Part 1 of a program is the same either way.
 
-## Anatomy of an `AltVEnv` Program
+## How `AltVEnv` Actually Works
 
-`quick_start.py` is also a template for your own programs.  Open it in your
-editor and read along: after the first run there is a copy in
-`~/.alt_venv/quick_start.py`, or use the one in the
-[Quick Start](#quick-start).  It has five parts, each starting with a
-`# Part` comment, and every program that uses `AltVEnv` has the same five.
-Copy it, then change the packages in Part 1, the imports in Part 4, and the
-program in Part 5.  Leave Parts 2 and 3 exactly as they are.
+<!-- Issue: Moved here from the old Anatomy section; expected to be
+rewritten completely. -->
 
-### Part 1: The packages this program needs
-
-This is a standard [inline script metadata](
-https://packaging.python.org/en/latest/specifications/inline-script-metadata/)
-block, the same one that tools such as `uv` and `pipx` read.  It holds two
-settings:
-
-* `requires-python` is the oldest Python the program will run on.  If the
-  program is started on an older one, `AltVEnv` stops with a message saying
-  so, rather than letting it fail somewhere obscure.  `AltVEnv` itself needs
-  3.11 or later.
-* `dependencies` lists the packages the program needs, one string each.
-  Changing this list is usually the only change a program needs.
-
-Each string is handed to `pip` exactly as written, so it can say which
-versions are acceptable:
-
-```
-# dependencies = [
-#   "requests",                    any version at all
-#   "requests<3",                  anything before 3
-#   "requests>=2.28,<3",           a range
-#   "requests~=2.32.0",            2.32.anything, but not 2.33
-#   "requests!=2.31.0",            any version except this one
-#   "requests===2.32.3",           that version and no other
-#   "requests[socks]",             with an optional extra
-#   "pywin32; sys_platform == 'win32'",  only on Windows
-# ]
-```
-
-A comma after the last string is allowed but not required.  The full syntax
-is in the [dependency specifiers](
-https://packaging.python.org/en/latest/specifications/dependency-specifiers/)
-specification.  `pip` resolves the whole list at once, so it notices when
-two packages disagree about a third, which is very hard to get right by
-hand.
-
-### Part 2: AltVEnv required imports are immediately below
-
-Seven imports, all from the standard library, so there is nothing to
-install.  The bootstrap needs them, so they come before it.  Leave them
-as they are, and put all of your own imports in Part 4, even one that
-repeats an import here, which does no harm.
-
-### Part 3: The AltVEnv bootstrap
-
-Never edit it.  Re-indenting it or changing its
+Never edit the bootstrap.  Re-indenting it or changing its
 comments does no harm, but changing its code makes it a different
 bootstrap.  To see whether a program carries the current one, run it with
 `ALT_VENV_BOOTSTRAP=check` set, and it says so on standard error.
@@ -389,18 +432,6 @@ first time any program runs it on a machine, it fetches `alt_venv`:
 Later runs skip the previous three steps.  Every run, the first one included,
 then just uses the `AltVEnv` package to download any further packages and
 perform housekeeping in the `~/.alt_venv/` directory.
-
-### Part 4: Your imports, all after the bootstrap
-
-All of your own `import` statements come after the bootstrap, because the
-bootstrap is what makes the packages importable.  Import each package by its module
-name, which is not always the name in Part 1: `python-dateutil` is imported
-as `dateutil`.  Leave out the `# type: ignore` comments if you do not use
-`mypy`.
-
-### Part 5: The program itself
-
-Everything from here down is yours.
 
 ## Conclusion
 

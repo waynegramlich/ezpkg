@@ -15,6 +15,7 @@
 @../ISSUES/1_The_bootstrap_trusts_only_system_certificates/Details.md
 @../ISSUES/2_Windows_and_macOS_are_untried/Details.md
 @../ISSUES/3_Reviewer_thoughts_have_two_formats/Details.md
+@../ISSUES/19_How_to_deal_with_compiled_packages/Details.md
 @6.19_Check_the_imports_before_exporting/Summary.md
 @6.8_Number_not_used/Summary.md
 @../ISSUES/5_Vendor_the_packages_into_the_repository/Summary.md

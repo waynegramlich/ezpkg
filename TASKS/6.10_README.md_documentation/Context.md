@@ -182,3 +182,48 @@ Open, deferred or waiting on Wayne:
   reference; S3 must mention the platform catch of approvals.
 * Comments left in `README.md`: the intro's packaging promise issue and
   the road map.
+
+## 2026-10-11: Road map relabelled S1-S7 in the order of work
+
+S1 Author Package Management (approvals), S2 Packaging, S3
+Miscellaneous, S4 Alternatives, S5 Conclusion, S6 Anatomy (last, since
+S1 and S2 may change the parts), S7 Wrapup.  Earlier entries above use
+the old labels (old S1 Anatomy, S2 Packaging, S3 Approvals, S4 Misc,
+S5 Alternatives, S6 Conclusion).
+
+## 2026-10-11: Releasing Programs drafted; Anatomy removed
+
+* New `## Releasing Programs` replaces Author Package Management:
+  "Steps in Common" drafted (approve with `ALT_VENV_APPROVE=write`, keep
+  `prog.altvenv`, export with `ALT_VENV_EXPORT`, the import check, the
+  compiled-package platform catch); "As a Single `.py` File", "Using
+  `zipapp`", "Using `uv`" are headings with Issue notes.  Finding:
+  `write` replaces `prog.altvenv`, so a compiled package cannot be
+  approved for more than one platform.
+* Anatomy deleted at Wayne's word.  Kept: its Part 1 text as "###
+  Choosing Versions" at the end of Enabling; its Part 3 text as "##
+  How `AltVEnv` Actually Works" before the Conclusion (Wayne expects a
+  full rewrite); the `mypy` note after the Quick Start.
+  `test_the_quick_start_is_current` no longer wants `### Part N`
+  headings, only Parts 1-5 in order in `quick_start.py`.
+* Road map now S1 Releasing, S2 Miscellaneous, S3 Alternatives, S4
+  Conclusion, S5 Wrapup.
+
+## 2026-10-11 end of session: where to pick up
+
+* Next: road map S1, the three "Releasing Programs" subsections ("As a
+  Single `.py` File", "Using `zipapp`", "Using `uv`"), each with the
+  same four parts: the command, the files it writes, how the recipient
+  runs the result, its limits.  Their `<!-- Issue: -->` notes say what
+  goes in each.  Compiled packages decide between `zipapp` and `uv`:
+  see `I.htdwcp`.  Unsuspend `T.ewar` when S1 is done.
+* Wayne's working style for README text: put Claude's proposal in an
+  HTML comment beside the text it would replace, and give the line
+  numbers of both chunks, so he can compare before choosing.
+* Deferred as cosmetic (Wayne): the long Part 2 heading/comment
+  "AltVEnv required imports are immediately below".
+* "How `AltVEnv` Actually Works" (before the Conclusion) is a holding
+  place; Wayne expects to rewrite it completely.
+* Related open tasks born from this README work: `T.siofr` (scan the
+  imports on ordinary runs), `T.trcb` (test the Enabling copy of the
+  bootstrap), `T.fipab` (flag imports above the bootstrap).

@@ -5017,9 +5017,8 @@ class BootstrapCheckTest(unittest.TestCase):
         The Quick Start asks a person to copy the program whole, so the
         copy in `README.md`, the file beside it, and `QUICK_START`, which
         the cache receives, must not drift apart, and the bootstrap in
-        all of them must be the one that ships.  The read-along that
-        follows the Quick Start points at the program's `# Part` comments
-        by name, so those must exist and have headings to match.
+        all of them must be the one that ships.  The program's `# Part`
+        comments must also run 1 to 5 in order.
         """
         # The file is the authority, and the page must carry it verbatim.
         here: Path = Path(__file__).resolve().parent
@@ -5030,16 +5029,11 @@ class BootstrapCheckTest(unittest.TestCase):
         # The copy the cache receives is the same program.
         self.assertEqual(alt_venv.QUICK_START, program)
 
-        # The parts are numbered in order, and the README's read-along
-        # has a heading for each, named up to the comment's first period.
+        # The parts are numbered in order.
         landmarks: list[str] = [line[2:] for line in program.splitlines()
                                 if line.startswith("# Part ")]
         self.assertEqual([landmark.split(":")[0] for landmark in landmarks],
                          [f"Part {n}" for n in range(1, 6)])
-        landmark: str
-        for landmark in landmarks:
-            with self.subTest(landmark=landmark):
-                self.assertIn(f"\n### {landmark.split('.')[0]}\n", readme)
 
         # Found the way a running program's would be.
         block: str | None = alt_venv.find_bootstrap(program)

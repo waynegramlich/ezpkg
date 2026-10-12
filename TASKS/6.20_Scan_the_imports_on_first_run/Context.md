@@ -37,3 +37,16 @@
   cache README in `AltVEnv.__init__`'s docstring must list it.
 * Open for Wayne: remember a scan that found problems (warn once per
   change), or only a clean one (warn every run until fixed)?
+
+## 2026-10-11 end of session
+
+* The README now teaches the bootstrap-first rule (all imports after
+  the bootstrap), so this scan runs before any of the program's own
+  imports and can report every problem before Python stops at the
+  first `ModuleNotFoundError`.
+* Still open for Wayne: fingerprint the import names (Claude's
+  recommendation) or the file's bytes; remember a scan that found
+  problems (Claude's recommendation: yes, warn once per change) or
+  only a clean one.
+* `T.fipab` (imports above the bootstrap) is a natural second check in
+  the same scan and the same export check.
