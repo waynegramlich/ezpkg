@@ -167,3 +167,18 @@ Open, deferred or waiting on Wayne:
 * Not yet done: nothing tests the Enabling section's copy of the
   bootstrap against `quick_start.py`.  The Part 2 heading is long
   (Wayne: cosmetic, later).
+
+## 2026-10-11: Stale README comments flushed
+
+* Guiding principle, moved here from a comment at the top of
+  `README.md`: the README is a short advertisement, followed by an
+  instruction manual.
+* Deleted as resolved: the TBD reminder (none left), Wayne's old
+  "Enabling" attempt and its review issue, Wayne's "review the stuff
+  above first" note (W1 done), and the freeze discussion in Author
+  Package Management (built as `ALT_VENV_EXPORT=pins` in `T.ewar`).
+* Folded into the road map: S2 must name `ALT_VENV_EXPORT=pins` as the
+  check for an emailed `.py` and settle the "see Packaging below"
+  reference; S3 must mention the platform catch of approvals.
+* Comments left in `README.md`: the intro's packaging promise issue and
+  the road map.

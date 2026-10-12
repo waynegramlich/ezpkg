@@ -1,8 +1,3 @@
-<!-- Claude:
-Before uploading AltVEnv to PyPI, all TBD's needs to be fixed. -->
-<!-- Claude:
-`README.md` is a short advertisement, followed by an instruction manual. -->
-
 # `AltVEnv`: Alternative to Virtual Environments
 
 `AltVEnv` (short for Alternative to Virtual Environments) grew out of the
@@ -230,52 +225,17 @@ program (see Packaging below), `AltVEnv` lists every such import, with its
 line number, and refuses to package the program until you add those
 packages to `dependencies` too.
 
-<!-- Wayne's old attempt at this section...
-If you are starting from scratch, the easiest thing to do is take a copy of
-`quick_start.py` and do the following:
-1. Rename the program and remove all lines that have `cowsay` in them.
-2. Each time you need a package, add its `import` statement immediately after
-   the bootstrap, and run the program.  If the import fails with
-   `ModuleNotFoundError`, add the package's name to `dependencies` in the
-   metadata at the front of the program, and run it again.
-
-That's it.
-
-If you are starting from a preexisting program, do the following:
-* Copy the metadata from the front of `quick_start.py` into the front of
-  your program.  You can remove the line that says `cowsay`.  (See Meta Data
-  section below, for more information.)
-  [Issue: Point the reference above at the metadata section, whose title
-  is not settled yet (currently "Part 1" under "Anatomy").]
-* Paste the bootstrap into your program after your existing imports.
-* Move each import that is not from the standard library to immediately
-  after the bootstrap, and add its package's name to `dependencies` in the
-  metadata.  If you are not sure whether an import is from the standard
-  library, move it anyway; that does no harm.
-* Run the program.  If an import fails with `ModuleNotFoundError`, add its
-  package's name to `dependencies` and run it again.
-
-That's all.
-
-In both cases, the package name is not always the name you import:
-`import dateutil` needs `python-dateutil`.  Do not worry about a package that
-your own Python happens to have already.  When you package your program
-(see Packaging below), `AltVEnv` lists every import that the metadata does not
-cover, with its line number, and refuses to package the program until the
-metadata does.
--->
-<!-- Issue: Wayne to review the rewritten section above.  It relies on the
-export-time import check (`T.cibe`) instead of asking whether a package is
-preinstalled.  S2 (Packaging) must say that `ALT_VENV_EXPORT=pins` is the
-check for a program that is emailed as a single `.py` file, and give the
-"Packaging" reference above its final section title. -->
-
-<!-- Claude: I'd like to review the stuff above.  First. -->
 <!-- Issue: Road map for the rest of the document:
 S1: Anatomy of an `AltVEnv` Program: the reference for what readers just did
     in "Enabling `AltVEnv` for Your Program".
 S2: Packaging (new section): `zipapp` and `uv`, keeping the intro's promise.
+    Say that `ALT_VENV_EXPORT=pins` is the check for a program that is
+    emailed as a single `.py` file, and give "Enabling"'s "see Packaging
+    below" reference the section's final title.
 S3: Author Package Management: approvals, for authors who ship to others.
+    Mention the platform catch: approvals are keyed by wheel file name, so
+    a compiled package approved on one Python version or operating system
+    is refused on another.
 S4: Miscellaneous: how `~/.alt_venv` behaves (garbage collection, sharing,
     versions side by side).
 S5: Alternatives / Why not just use `uv`?  Consider a one-sentence answer
@@ -285,19 +245,6 @@ S6: Conclusion: fix "zapapp", the garbled "(pure Python on)", and
 
 ## Author Package Management
 
-<!-- Claude: I agree with below.  Open an issue and we'll fix it. -->
-<!-- Wayne: a true freeze needs two things, and only the second exists.
-(1) Exact `==` pins in Part 1 for every package, including the ones that
-come along, so that `pip` fetches the same versions every time.  (2) The
-approvals file, so that those exact files are verified and nothing else
-is accepted.  An idea for (1): `ALT_VENV_APPROVE=write` could also print
-the `==` pins for everything it recorded, ready to paste into Part 1.
-Approvals are also an audit of what actually arrived.  Watch the
-platform catch: approvals are keyed by file name, so a compiled package
-recorded on one Python version or operating system is refused on
-another. -->
-
-<!--Claude: We'll talk about this when we get around to the issue above. -->
 Whoever runs your program cannot tell a genuine package from a tampered or
 look-alike one, but you can.  Run it once as
 `ALT_VENV_APPROVE=write python3 prog.py` to record the exact packages you got
