@@ -3433,11 +3433,26 @@ class InstallTest(unittest.TestCase):
         pending: Path = program.parent / "cache" / "pending"
         self.assertEqual(list(pending.iterdir()), [])
 
-    def test_an_empty_answer_declines(self) -> None:
-        """Only an explicit yes goes ahead, so the default is no."""
-        # A bare newline is the distracted answer, and it must be safe.
+    def test_an_empty_answer_asks_again(self) -> None:
+        """A bare newline is no answer at all, so there is no default.
+
+        A distracted Enter neither installs nor declines; it is a typo
+        like any other, and enough of them in a row decline, as
+        `ATTEMPTS` typos always have.
+        """
+        # Enter, then yes: asked twice, and installed.
         program: Path = self.program("asked_enter", "widget")
-        seen: str = self.answer_on_a_terminal(program, b"\n")
+        seen: str = self.answer_on_a_terminal(program, b"\ny\n")
+        self.assertEqual(seen.count(PROMPT), 2, seen)
+        self.assertIn("Please answer y, n, a for always, or ? for more.",
+                      seen)
+        self.assertIn("1.2.3", seen)
+
+        # Enter every time: asked until the patience runs out.
+        program = self.program("asked_enter_only", "widget")
+        seen = self.answer_on_a_terminal(
+            program, b"\n" * alt_venv.ATTEMPTS)
+        self.assertEqual(seen.count(PROMPT), alt_venv.ATTEMPTS, seen)
         self.assertIn("declined", seen)
 
     def test_an_unrecognised_answer_asks_again(self) -> None:

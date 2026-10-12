@@ -8,12 +8,11 @@
 @6.17_A_fetch_from_the_real_PyPI/Details.md
 @6.18_Export_what_the_approvals_record/Details.md
 @6.18_Export_what_the_approvals_record/Context.md
-@6.19_Check_the_imports_before_exporting/Details.md
-@6.19_Check_the_imports_before_exporting/Context.md
 @7_Separate_the_issue_tracker/Details.md
 @../ISSUES/1_The_bootstrap_trusts_only_system_certificates/Details.md
 @../ISSUES/2_Windows_and_macOS_are_untried/Details.md
 @../ISSUES/3_Reviewer_thoughts_have_two_formats/Details.md
+@6.19_Check_the_imports_before_exporting/Summary.md
 @6.8_Number_not_used/Summary.md
 @../ISSUES/5_Vendor_the_packages_into_the_repository/Summary.md
 @6.11_Garbage_collection/Details.md

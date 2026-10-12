@@ -133,8 +133,6 @@ Successfully installed alt_venv-0.0.1
 go ahead? [y=>Yes/n=>No/a=>Always/?=>Explanation] y
 ```
 
-<!-- Claude: Fix the prompt code to not accept ENTER as a default and re-prompt.
-Delete when done. -->
 The `pip` output is the bootstrap installing `alt_venv`, and appears only on
 a machine's very first run.  One of 4 prompts appear:
 * **`n=>No`** - This disables download and immediately exits.
@@ -143,29 +141,43 @@ a machine's very first run.  One of 4 prompts appear:
   This is sticky.  To reset it, remove the `~/.alt_venv/FOREVER_APPROVE` file.
 * **`?=>Explanation`** - This lists all requested downloads and then prompts
   again.
+
+There is no default answer: pressing Enter alone just prompts again.
 Some programs are run with out access to terminal input (e.g. `cron`).  When
 this happens, the download prompt is suppressed and is treated as `Always`.
 
 ## Enabling `AltVEnv` for Your Program
 
+<!-- Issue: Wayne to consider Claude's recommendation: put the bootstrap in
+front of all of the program's imports.
+* Rule for the reader: every import goes after the bootstrap.  The one
+  exception is `from __future__ import ...`, which Python requires first.
+  The bootstrap's own imports (Part 2) must still precede it; moving them
+  inside the bootstrap would change its fingerprint and is not worth it.
+* Gain: no sorting of imports into standard library and third-party.  A new
+  program writes every import after the bootstrap; a preexisting program
+  pastes the bootstrap just above its first import and moves nothing.  Then
+  run, add a `dependencies` line for each `ModuleNotFoundError`, repeat.
+* Gain: the export check can flag any import above the bootstrap (other than
+  `__future__` and Part 2) without classifying it.
+* No gain: a package the author's own Python already has never fails, so it
+  is never declared.  The export-time check (`T.cibe`) is still the net.
+* Cost: linters flag every import after the bootstrap (E402); the README
+  should mention `# noqa: E402`.
+* Cost: Python stops at the first missing import, one per run.  Running the
+  `ast` scan (today via `ALT_VENV_EXPORT=pins`) lists them all at once.
+  Under discussion: running that scan automatically on a program's first
+  run, and remembering that it was done. -->
+
 If you are starting from scratch, the easiest thing to do is take a copy of
 `quick_start.py` and do the following:
-1. Just rename the program and remove all lines that have `cowsay` in them.
-2. Each time you need a new package, check whether your Python already has
-   it with `python3 -c "import NAME"`.  If that succeeds, import it along with
-   your other imports before the bootstrap.  If it fails with
-   `ModuleNotFoundError`, do the following:
-   1. Add one line containing the package name to the metadata at the program
-      front.
-   2. Add a regular `import` statement for the package immediately after the
-      `AltVEnv` bootstrap code.
+1. Rename the program and remove all lines that have `cowsay` in them.
+2. Each time you need a package, add its `import` statement immediately after
+   the bootstrap, and run the program.  If the import fails with
+   `ModuleNotFoundError`, add the package's name to `dependencies` in the
+   metadata at the front of the program, and run it again.
+
 That's it.
-<!-- Issue: Wayne to review the preinstalled check in step 2.  Two catches:
-(a) the module name is not always the package name (`import dateutil` comes
-from `python-dateutil`), and (b) a package preinstalled on the author's
-Python (e.g. a Linux distribution's `python3-requests`) may be missing on
-the machine of whoever runs the program, so third-party packages arguably
-belong in the metadata even when the check succeeds. -->
 
 If you are starting from a preexisting program, do the following:
 * Copy the metadata from the front of `quick_start.py` into the front of
@@ -173,18 +185,27 @@ If you are starting from a preexisting program, do the following:
   section below, for more information.)
   <!-- Issue: Point the reference above at the metadata section, whose title
   is not settled yet (currently "Part 1" under "Anatomy"). -->
-* This step is optional, but still highly recommended.  For each `import` of
-  a third-party package (one not in the standard library) that your Python
-  already has, add the package's name to the metadata anyway, since the
-  machines your program runs on may not have it.  The package name is not
-  always the module name: `import dateutil` needs `python-dateutil`.
-  <!-- Issue: Wayne to review the rewritten bullet above.  The original said
-  to copy the name of every `import`, which is wrong for standard library
-  modules and for packages whose module name differs. -->
-* Paste the bootstrap into your program after your last import.
-* Place an `import` statement for each package that is not preinstalled
-  after the `AltVEnv` bootstrap and add it to the meta data.
+* Paste the bootstrap into your program after your existing imports.
+* Move each import that is not from the standard library to immediately
+  after the bootstrap, and add its package's name to `dependencies` in the
+  metadata.  If you are not sure whether an import is from the standard
+  library, move it anyway; that does no harm.
+* Run the program.  If an import fails with `ModuleNotFoundError`, add its
+  package's name to `dependencies` and run it again.
+
 That's all.
+
+In both cases, the package name is not always the name you import:
+`import dateutil` needs `python-dateutil`.  Do not worry about a package that
+your own Python happens to have already.  When you package your program
+(see Packaging below), `AltVEnv` lists every import that the metadata does not
+cover, with its line number, and refuses to package the program until the
+metadata does.
+<!-- Issue: Wayne to review the rewritten section above.  It relies on the
+export-time import check (`T.cibe`) instead of asking whether a package is
+preinstalled.  S2 (Packaging) must say that `ALT_VENV_EXPORT=pins` is the
+check for a program that is emailed as a single `.py` file, and give the
+"Packaging" reference above its final section title. -->
 
 <!-- Claude: I'd like to review the stuff above.  First. -->
 <!-- Issue: Road map for the rest of the document:

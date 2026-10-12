@@ -1207,12 +1207,12 @@ class AltVEnv:
         Called when `ALT_VENV_EXPORT` is set, after the packages have
         been provided and checked, and the program exits straight after
         without running its own code.  Every form first checks that Part
-        1 covers what the program imports; see `check_imports`.  `pins` prints the `dependencies`
-        lines for Part 1, ready to paste over the old ones.  `zipapp`
-        writes `prog.pyz` beside the program, and `zipapp:PATH` writes
-        it at `PATH`; see `build_zipapp`.  `uv` writes `prog-uv.py` and
-        its two lock files, and `uv:PATH` names the script; see
-        `build_uv`.
+        1 covers what the program imports; see `check_imports`.  `pins`
+        prints the `dependencies` lines for Part 1, ready to paste over
+        the old ones.  `zipapp` writes `prog.pyz` beside the program,
+        and `zipapp:PATH` writes it at `PATH`; see `build_zipapp`.
+        `uv` writes `prog-uv.py` and its two lock files, and `uv:PATH`
+        names the script; see `build_uv`.
 
         Arguments:
         * `form` (`str`):
@@ -1658,8 +1658,8 @@ class AltVEnv:
         because a person who has never seen this question before should
         not have to guess what a letter means.  Case does not matter.
 
-        `y` or `yes` goes ahead once; `n`, `no` or a bare newline
-        declines; `?` describes each wheel and asks again; `a` or
+        `y` or `yes` goes ahead once; `n` or `no` declines; `?`
+        describes each wheel and asks again; `a` or
         `always` stops the question being asked at all, and is the one
         answer that asks for confirmation first, because it is the only
         one that outlives this run.  Declining that confirmation returns
@@ -1667,7 +1667,10 @@ class AltVEnv:
         an attempt so that the pair cannot loop for ever.
 
         Anything else is taken for a typo and the question is put again,
-        up to `ATTEMPTS` typos.  Asking for the detail is not a typo and
+        up to `ATTEMPTS` typos.  A bare newline is one of them: there is
+        no default, because a distracted Enter should neither install
+        nor quietly decline, so it is asked again like any other
+        non-answer.  Asking for the detail is not a typo and
         does not count, so curiosity is never punished.  A terminal that
         has gone away reads as empty, which
         declines at once rather than being asked again forever.
@@ -1692,10 +1695,10 @@ class AltVEnv:
         if opened is None:
             return True
 
-        # `y` goes ahead, `n` or an empty line declines, `?` says more
-        # and asks again, and anything else is a typo worth asking about
-        # again.  Only typos are counted, so that reading the detail can
-        # never use up the patience meant for mistakes.
+        # `y` goes ahead, `n` declines, `?` says more and asks again,
+        # and anything else, an empty line included, is a typo worth
+        # asking about again.  Only typos are counted, so that reading
+        # the detail can never use up the patience meant for mistakes.
         answer: str
         confirm: str
         typos: int = 0
@@ -1718,7 +1721,7 @@ class AltVEnv:
                 answer = answer.strip().lower()
                 if answer in ("y", "yes"):
                     return True
-                if answer in ("", "n", "no"):
+                if answer in ("n", "no"):
                     return False
                 if answer in ("a", "always"):
                     # The only answer that outlives this run, so it is

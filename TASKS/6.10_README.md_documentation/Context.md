@@ -79,3 +79,70 @@ README for a section-by-section pass:
   `AltVEnv` exports to both), and Miscellaneous.
 * Claiming the PyPI name and making the Quick Start work wait for the
   very end of the project, at Wayne's word.
+
+## 2026-10-11: State saved for Wayne's return this evening
+
+Wayne reordered `README.md` lines 1-176 himself (committed as "Reworking
+the README.md.").  Plan: W1 = review the top part (through "Enabling
+`AltVEnv` for Your Program"); W2 = the rest, following the road map
+`S1`-`S6` that sits in an `<!-- Issue: -->` comment right after
+"Enabling" (S1 Anatomy, S2 Packaging (new: `zipapp`/`uv`, and
+`ALT_VENV_EXPORT=pins` as the check for an emailed `.py`), S3 Author
+Package Management, S4 Miscellaneous, S5 Alternatives / Why not `uv`,
+S6 Conclusion fixes).
+
+Convention: open items in `README.md` are `<!-- Issue: ... -->`
+comments (Wayne's "mini-issue" scheme), found with `grep -n 'Issue:'`.
+They name no line numbers, since those shift.
+
+Done in W1 so far:
+* L15 "35-line" became "modest" (approved).
+* "Enabling `AltVEnv` for Your Program" was rewritten around the
+  export-time import check, `T.cibe` (built and closed today): every
+  added import goes right after the bootstrap; a `ModuleNotFoundError`
+  means add the package to `dependencies`; packaging lists what the
+  metadata misses.  An `Issue:` comment asks Wayne to review it.  The
+  "is it preinstalled on every OS?" question was dropped as having no
+  stable answer.
+* Download Prompt: Enter no longer declines; it is a typo and the
+  question is asked again (`AltVEnv.consent`, test
+  `test_an_empty_answer_asks_again`).  README says "There is no default
+  answer".  The `Claude:` note about it was deleted.
+
+Open, deferred or waiting on Wayne:
+* Waiting: the no-terminal sentence says "treated as `Always`", but the
+  code treats it as a one-time yes and writes no `FOREVER_APPROVE`.
+  Claude proposed "treated as `Yes`" (and fixing "with out").  Wayne has
+  not answered.
+* Deferred by Wayne: intro paragraph promising `zipapp`/`uv` packaging
+  (verify before the README wrapup; S2 covers it).
+* "See Meta Data section below" must point at the metadata section once
+  its title is settled.
+* Still in W1, not yet reviewed: anything else in lines 1-176; the
+  `<!-- Claude: I'd like to review the stuff above.  First. -->` note
+  remains.
+* `test_the_quick_start_is_current` fails (5 subtests) because it wants
+  `#### Part N` headings and the README now has `### Part N: ...`.  Fix
+  with S1 (Anatomy).  Otherwise the quick suite (`ALT_VENV_TEST=NONE`)
+  passes: 236 tests.
+* Idea, not filed: the export check could also flag a declared
+  third-party import placed before the bootstrap (works for the author,
+  fails for the recipient before the bootstrap runs).
+* Uncommitted in git since Wayne's last commit: the README Enabling
+  rewrite, the Download Prompt change, and the `consent` code and test
+  change.
+
+## 2026-10-11 evening: bootstrap first, and a first-run import scan
+
+* Wayne approved the simplified import strategy in "Enabling".
+* Claude's recommendation to put the bootstrap in front of all of the
+  program's imports (only `__future__` and Part 2 precede it) is parked
+  in an `<!-- Issue: -->` comment under the "Enabling" heading for
+  Wayne to review.  Not yet applied to the text or `quick_start.py`.
+* Agreed to open a task: run the `check_imports` scan on a program's
+  first run, warn only (exports still refuse), at the end of `install()`
+  so declared packages are findable, and remember it in `~/.alt_venv`
+  keyed on a fingerprint of the imports, `dependencies` and approvals,
+  so it reruns only when those change.  Timing on Wayne's machine:
+  `packages_distributions()` 167 ms (385 modules), `ast.parse` of
+  `alt_venv.py` 21 ms.

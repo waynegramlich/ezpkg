@@ -1,7 +1,7 @@
 {
-  "state": "Open",
+  "state": "Closed",
   "created": "2026-10-11T17:53:07Z",
-  "updated": "2026-10-11T17:53:11Z",
+  "updated": "2026-10-11T18:04:46Z",
   "history": [
     {
       "state": "Pending",
@@ -10,6 +10,10 @@
     {
       "state": "Open",
       "time": "2026-10-11T17:53:11Z"
+    },
+    {
+      "state": "Closed",
+      "time": "2026-10-11T18:04:46Z"
     }
   ],
   "tag": "cibe"
