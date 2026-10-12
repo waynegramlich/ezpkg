@@ -4720,25 +4720,6 @@ class InstallTest(unittest.TestCase):
         self.assertEqual(done.returncode, 0, done.stderr[-400:])
         self.assertEqual(done.stdout.strip(), "1.0.0")
 
-    def test_export_pins_everything_approved(self) -> None:
-        """`ALT_VENV_EXPORT=pins` prints Part 1 pinned, and stops.
-
-        `needy` brings `widget` along, so the pins include a package
-        nobody declared, which is what makes them a freeze.  Approving
-        and exporting in one run is the documented way to do it.
-        """
-        # The program's own line must not run once the pins are out.
-        program: Path = self.declaring_program(
-            "pinned", 'dependencies = ["needy"]', "print('ran')")
-        done: subprocess.CompletedProcess[str] = self.run_program(
-            program, ALT_VENV_APPROVE="write", ALT_VENV_EXPORT="pins")
-        self.assertEqual(done.returncode, 0, done.stderr[-400:])
-        self.assertEqual(done.stdout.splitlines(), [
-            "# dependencies = [",
-            '#   "needy==1.0.0",',
-            '#   "widget==1.2.3",',
-            "# ]"])
-
     def bootstrapped_program(self, name: str, block: str, tail: str
                              ) -> tuple[Path, Path]:
         """Write a program carrying the real pasted bootstrap, and a HOME.
@@ -4816,7 +4797,7 @@ class InstallTest(unittest.TestCase):
         program: Path
         home: Path
         program, home = self.bootstrapped_program(
-            "zipped", 'dependencies = ["needy"]',
+            "zipped", 'requires-python = ">=3.11"\n# dependencies = ["needy"]',
             "import needy\nimport widget\n"
             "print(needy.__file__)\nprint(widget.__file__)")
         built: subprocess.CompletedProcess[str] = self.run_program(
@@ -4830,6 +4811,17 @@ class InstallTest(unittest.TestCase):
                               if name.startswith(MODULE)])
             main: str = opened.read("__main__.py").decode()
         self.assertIsNone(alt_venv.find_bootstrap(main))
+
+        # The bootstrap's place checks the Python version instead, and
+        # an older Python is told which it needs.
+        guard: str = next(line for line in main.splitlines()
+                          if "version_info < (3, 11)" in line)
+        with (unittest.mock.patch.object(sys, "version_info", (3, 10, 0)),
+              self.assertRaises(SystemExit) as refused):
+            exec(guard, {})  # noqa: S102  # The archive's own line.
+        self.assertIn("prog.pyz needs Python 3.11 or newer, not 3.",
+                      str(refused.exception))
+        exec(guard, {})  # noqa: S102  # This Python passes.
 
         # Run it with an empty HOME and nowhere to fetch from.
         empty: Path = self.root / "zipped" / "empty"
@@ -4912,11 +4904,12 @@ class InstallTest(unittest.TestCase):
 
     @unittest.skipIf(alt_venv.find_uv() is None, "uv is not installed")
     def test_export_uv_writes_a_script_and_its_locks(self) -> None:
-        """`ALT_VENV_EXPORT=uv` writes three files that `uv run` uses.
+        """`ALT_VENV_EXPORT=uv` writes the two files that `uv run` uses.
 
         Built in one run with the approvals, from a program carrying the
         real bootstrap.  The script is pinned, has no bootstrap and says
-        `no-build`; both locks name `widget`, which came along.  Run with
+        `no-build`; the lock names `widget`, which came along, and no
+        PEP 751 `pylock.toml` is written beside it.  Run with
         `uv run` and an empty HOME, every package comes from `uv`, and
         nothing of `alt_venv` is made.
         """
@@ -4933,10 +4926,10 @@ class InstallTest(unittest.TestCase):
         self.assertEqual(built.returncode, 0, built.stderr[-400:])
         script: Path = program.with_name("prog-uv.py")
         lock: Path = program.with_name("prog-uv.py.lock")
-        pylock: Path = program.with_name("pylock.prog-uv.toml")
         self.assertEqual(built.stdout.splitlines(),
                          [f"alt_venv: wrote {path}"
-                          for path in (script, lock, pylock)])
+                          for path in (script, lock)])
+        self.assertFalse(program.with_name("pylock.prog-uv.toml").exists())
         text: str = script.read_text()
         self.assertIsNone(alt_venv.find_bootstrap(text))
         metadata: dict[str, Any] | None = alt_venv.script_metadata(text)
@@ -4946,7 +4939,6 @@ class InstallTest(unittest.TestCase):
                          ["needy", "widget"])
         self.assertIs(metadata["tool"]["uv"]["no-build"], True)
         self.assertIn('name = "widget"', lock.read_text())
-        self.assertIn('name = "widget"', pylock.read_text())
 
         # Run it the way a `uv` user would, from an empty HOME.
         empty: Path = self.root / "locked" / "empty"
@@ -4966,12 +4958,15 @@ class InstallTest(unittest.TestCase):
         self.assertFalse((empty / ".alt_venv").exists())
 
     def test_export_needs_approvals(self) -> None:
-        """Without an approvals file there is nothing to pin from."""
+        """Without an approvals file there is nothing to bundle from."""
         # `skip` leaves no file behind, so the export has to refuse.
-        program: Path = self.declaring_program(
+        program: Path
+        home: Path
+        program, home = self.bootstrapped_program(
             "unpinned", 'dependencies = ["widget"]', "print('ran')")
         done: subprocess.CompletedProcess[str] = self.run_program(
-            program, ALT_VENV_APPROVE="skip", ALT_VENV_EXPORT="pins")
+            program, HOME=str(home), ALT_VENV_APPROVE="skip",
+            ALT_VENV_EXPORT="zipapp")
         self.assertNotEqual(done.returncode, 0)
         self.assertIn("ALT_VENV_APPROVE=write", done.stderr)
         self.assertNotIn("ran", done.stdout)
@@ -5001,10 +4996,10 @@ class InstallTest(unittest.TestCase):
             "Metadata-Version: 2.1\nName: lurker\nVersion: 1.0\n")
         (info / "top_level.txt").write_text("lurker\n")
 
-        # Nothing pinned, nothing run, and both problems named.
+        # Nothing written, nothing run, and both problems named.
         done: subprocess.CompletedProcess[str] = self.run_program(
             program, PYTHONPATH=str(system), ALT_VENV_APPROVE="write",
-            ALT_VENV_EXPORT="pins")
+            ALT_VENV_EXPORT="zipapp")
         self.assertNotEqual(done.returncode, 0)
         self.assertEqual(done.stdout, "")
 
@@ -5053,8 +5048,12 @@ class InstallTest(unittest.TestCase):
         # In process: the refusal comes before anything is read.
         venv: alt_venv.AltVEnv = alt_venv.AltVEnv(self.root / "form")
         with self.assertRaises(ValueError) as caught:
-            venv.export("pinz")
-        self.assertIn("use pins, zipapp or uv", str(caught.exception))
+            venv.export("zipap")
+        self.assertIn("use zipapp or uv", str(caught.exception))
+
+        # `pins` is gone; the date in Part 1 does its job.
+        with self.assertRaises(ValueError):
+            venv.export("pins")
 
     def test_pins_refuse_two_versions_of_one_package(self) -> None:
         """No single `==` can say two versions, so none is guessed."""

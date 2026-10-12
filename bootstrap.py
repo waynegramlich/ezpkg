@@ -120,7 +120,7 @@ user would type.  The real `~/.alt_venv` is never touched.
 | nopip3 | no venv, PyPI | 4       | 28    | 31    | 3.05 s | 0.14 s | 3538   |
 |        | pip           |         |       |       |        |        |        |
 |        | subprocess    |         |       |       |        |        |        |
-| nopip4 | as nopip3,    | 4       | 32    | 35    | --     | --     | --     |
+| nopip4 | as nopip3,    | 4       | 32    | 35    | 3.37 s | 0.14 s | 3538   |
 |        | importable    |         |       |       |        |        |        |
 |        | first         |         |       |       |        |        |        |
 +--------+---------------+---------+-------+-------+--------+--------+--------+
@@ -289,6 +289,17 @@ harness runs every case with `python -P`, so that this directory, which
 holds `alt_venv.py`, is not on the child's `sys.path`; otherwise
 `nopip4` would import the working copy and measure nothing.  See
 `T.ewar` and `I.apiia`.
+
+`nopip4`'s row was measured on 2026-10-12, beside a fresh `nopip3` run
+in the same session so that the network was the same for both: `nopip3`
+3.57 s cold and 0.17 s warm, `nopip4` 3.37 s and 0.14 s, the same within
+the 15% that single runs vary by, as one failed import should be.  The
+size is identical, 3538 KB.  Both rows, like every row, fetch the
+default `coverage`, and so both end in a failure the timings do not
+include: their last stage, `fetch packages`, calls `m.AltVEnv()`, which
+`coverage` does not have.  Aiming them at `alt_venv` itself with
+`BOOTSTRAP_PACKAGE` needs `alt_venv` on an index, and it is not yet on
+PyPI.
 
 MIT No Attribution
 

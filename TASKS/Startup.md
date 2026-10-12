@@ -6,7 +6,6 @@
 @6.13_Messages/Details.md
 @6.16_Test_suite_cleanup/Details.md
 @6.17_A_fetch_from_the_real_PyPI/Details.md
-@6.18_Export_what_the_approvals_record/Details.md
 @6.20_Scan_the_imports_on_first_run/Details.md
 @6.20_Scan_the_imports_on_first_run/Context.md
 @6.21_Test_the_README_copy_of_the_bootstrap/Details.md
@@ -16,6 +15,7 @@
 @../ISSUES/2_Windows_and_macOS_are_untried/Details.md
 @../ISSUES/3_Reviewer_thoughts_have_two_formats/Details.md
 @../ISSUES/19_How_to_deal_with_compiled_packages/Details.md
+@6.18_Export_what_the_approvals_record/Summary.md
 @6.23_Replay_the_approvals_file_as_a_lock/Summary.md
 @6.24_Stamp_a_resolution_date_into_the_script_block/Summary.md
 @6.19_Check_the_imports_before_exporting/Summary.md

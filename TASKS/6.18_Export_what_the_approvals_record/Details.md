@@ -10,10 +10,12 @@ running the program:
 
 * `pins`: prints Part 1's `dependencies` with every package pinned to
   an exact `==` version, ready to paste back in (a "freeze").
+  Removed 2026-10-12: the `exclude-newer` date that `write` puts in
+  Part 1 does its job for a `.py` sent on its own (`T.srdisb`).
 * `zipapp`: writes `prog.pyz`, the program and its packages in one
   file that runs with `python3 prog.pyz`, with no network and no
   `~/.alt_venv`.  Pure-Python packages only, for now.
-* `uv`: writes `prog-uv.py` and its lock files, for people who use
+* `uv`: writes `prog-uv.py` and its lock file, for people who use
   `uv run` instead.
 
 Also done as part of this: the bootstrap (`nopip4`) and `AltVEnv` skip

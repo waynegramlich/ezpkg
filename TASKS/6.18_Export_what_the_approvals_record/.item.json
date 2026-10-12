@@ -1,7 +1,7 @@
 {
-  "state": "Suspended",
+  "state": "Closed",
   "created": "2026-10-10T18:29:44Z",
-  "updated": "2026-10-12T03:40:16Z",
+  "updated": "2026-10-12T22:09:37Z",
   "history": [
     {
       "state": "Pending",
@@ -14,6 +14,14 @@
     {
       "state": "Suspended",
       "time": "2026-10-12T03:40:16Z"
+    },
+    {
+      "state": "Open",
+      "time": "2026-10-12T22:01:34Z"
+    },
+    {
+      "state": "Closed",
+      "time": "2026-10-12T22:09:37Z"
     }
   ],
   "tag": "ewar"

@@ -11,6 +11,7 @@ fetches afresh (never from a cached request record), so it means
 record key (requirements plus lock plus date) for both `provide` and
 the `zipapp` export, fixing an export that missed a locked run's
 record.  A lock that `dependencies` moved past fails with a hint to
-regenerate; a non-wheel line in the file is named.  `pins` remains for
-a `.py` sent on its own.  Related: `T.ewar` (exports), `T.srdisb` (the
+regenerate; a non-wheel line in the file is named.  `ALT_VENV_EXPORT=pins`
+was later removed: the `exclude-newer` date of `T.srdisb` serves a
+`.py` sent on its own.  Related: `T.ewar` (exports), `T.srdisb` (the
 date in Part 1), `T.rd` (README promises this).

@@ -1,6 +1,6 @@
 # Summary of `T.cibe` Check the imports before exporting
 
-Every `ALT_VENV_EXPORT` form (`pins`, `zipapp`, `uv`) now checks the
+Every `ALT_VENV_EXPORT` form (`zipapp`, `uv`; `pins` since removed) checks the
 program's imports before writing anything (`AltVEnv.check_imports`,
 using `program_imports`, which reads the source with `ast`).  An import
 that works only because the author's own Python happens to have the

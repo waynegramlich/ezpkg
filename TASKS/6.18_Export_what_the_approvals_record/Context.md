@@ -99,3 +99,17 @@ The steps, one task (Wayne collapsed the 6.18.1-4 children on
 Wayne suspended this until the exports are documented in `README.md`
 (road map S2, Packaging, in `T.rd`).  The code is done; the leftover is
 measuring `nopip4`'s row in `bootstrap.py`.
+
+## 2026-10-12: reopened and finished
+
+* `nopip4`'s row in `bootstrap.py` measured beside `nopip3` in one
+  session: `nopip3` 3.57 s / 0.17 s, `nopip4` 3.37 s / 0.14 s, both
+  3538 KB.  Like every row, with the default `coverage`, so both end in
+  a `fetch packages` failure (`coverage` has no `AltVEnv`) after the
+  timed work; documented in `bootstrap.py`.  `BOOTSTRAP_PACKAGE=alt_venv`
+  cannot be used against PyPI: `alt_venv` is not published (404).
+* Since this task: `pins` export removed (the `exclude-newer` date of
+  `T.srdisb` replaces it), the `uv` export writes only `prog-uv.py` and
+  `prog-uv.py.lock` (no `pylock`), and the `.pyz` checks Part 1's
+  `requires-python` in place of the bootstrap.  README "Using `zipapp`"
+  and "Using `uv`" document the exports; both dogfooded against PyPI.

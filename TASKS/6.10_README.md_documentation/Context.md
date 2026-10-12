@@ -265,3 +265,11 @@ S5 Alternatives, S6 Conclusion).
   The approvals file has a `# Resolved:` date line.
 * Wayne declined: suggesting the `.altvenv` go along with an emailed
   `.py`, and caveats about compiled packages on other machines.
+
+## 2026-10-12: `ALT_VENV_EXPORT=pins` removed
+
+* Wayne: `pins` is no longer needed, since the `exclude-newer` date in
+  Part 1 covers the emailed `.py`.  Removed from `export`, its tests and
+  the docs; earlier notes above that mention `pins` are history.  The
+  `uv` export no longer writes `pylock.*.toml` either.  The zipapp
+  version check, the network sentence and the `uv` dogfood are done.

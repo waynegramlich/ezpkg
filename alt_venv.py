@@ -582,23 +582,26 @@ def bootstrap_node(text: str) -> ast.Try | None:
     return None
 
 
-def strip_bootstrap(text: str, why: str = "a zipapp carries its packages."
-                    ) -> str | None:
+def strip_bootstrap(text: str, why: str = "a zipapp carries its packages.",
+                    statement: str = "pass") -> str | None:
     """Return a program's text with its pasted bootstrap taken out.
 
     For a `zipapp`, which carries the program's packages and not
     `alt_venv`, or a `uv` script, whose packages `uv` installs: there
     the bootstrap has nothing to do, and left in it would find no
-    `alt_venv` and go to the network for one.  The `try`
-    becomes a `pass` at the same indentation, so a bootstrap nested in
-    a function or an `if` leaves that block still valid.  The imports of
+    `alt_venv` and go to the network for one.  The `try` becomes one
+    statement at the same indentation, `pass` unless the caller has a
+    use for the line, so a bootstrap nested in a function or an `if`
+    leaves that block still valid.  The imports of
     Part 2 stay; they are the standard library, and harmless.
 
     Arguments:
     * `text` (`str`):
       The program's source.
     * `why` (`str`):
-      The comment on the `pass`, saying where the packages come from.
+      The comment on the statement, saying where the packages come from.
+    * `statement` (`str`):
+      The one-line statement that takes the bootstrap's place.
 
     Returns:
     * (`str | None`): The program without its bootstrap, or `None` when
@@ -611,7 +614,7 @@ def strip_bootstrap(text: str, why: str = "a zipapp carries its packages."
     lines: list[str] = text.splitlines(keepends=True)
     ending: str = "\r\n" if lines[found.lineno - 1].endswith("\r\n") else "\n"
     replacement: str = (" " * found.col_offset
-                        + f"pass  # The bootstrap: {why}" + ending)
+                        + f"{statement}  # The bootstrap: {why}" + ending)
     return "".join(lines[:found.lineno - 1] + [replacement]
                    + lines[found.end_lineno:])
 
@@ -1298,10 +1301,12 @@ class AltVEnv:
 
         The approvals already name every wheel the program needs, the
         ones that came along included, and a wheel's file name carries
-        its distribution and version.  Pinning all of them in Part 1
-        makes `pip` fetch the same versions every time, and the
-        approvals then check that those are the same files: together, a
-        freeze.  See `T.ewar` in `TASKS/`.
+        its distribution and version.  Pinned, they make `pip` fetch the
+        same versions every time, and the approvals then check that
+        those are the same files: together, a freeze.  `locked` hands
+        them to `pip` as constraints, and `build_uv` writes them into
+        the `uv` script's Part 1.  See `T.ewar` and `T.rafal` in
+        `TASKS/`.
 
         Returns:
         * (`list[str]`): Requirements such as `widget==1.2.3`, sorted.
@@ -1505,17 +1510,20 @@ class AltVEnv:
         Called when `ALT_VENV_EXPORT` is set, after the packages have
         been provided and checked, and the program exits straight after
         without running its own code.  Every form first checks that Part
-        1 covers what the program imports; see `check_imports`.  `pins`
-        prints the `dependencies` lines for Part 1, ready to paste over
-        the old ones.  `zipapp` writes `prog.pyz` beside the program,
+        1 covers what the program imports; see `check_imports`.
+        `zipapp` writes `prog.pyz` beside the program,
         and `zipapp:PATH` writes it at `PATH`; see `build_zipapp`.
-        `uv` writes `prog-uv.py` and its two lock files, and `uv:PATH`
+        `uv` writes `prog-uv.py` and its lock file, and `uv:PATH`
         names the script; see `build_uv`.
+
+        There was once a `pins` form, printing Part 1 with every package
+        pinned, for a `.py` sent on its own.  The `exclude-newer` date
+        that `write` puts in Part 1 does that job now, with no step to
+        remember (Wayne, 2026-10-12).
 
         Arguments:
         * `form` (`str`):
-          What to write: `pins`, `zipapp`, `zipapp:PATH`, `uv` or
-          `uv:PATH`.  The kind is read in any case; the path is taken as
+          What to write: `zipapp`, `zipapp:PATH`, `uv` or `uv:PATH`.  The kind is read in any case; the path is taken as
           written.
         * `asking` (`Sequence[str]`):
           The requirements just provided, which `build_zipapp` bundles.
@@ -1524,7 +1532,7 @@ class AltVEnv:
         * `ValueError`:
           If `form` is not one this knows.
         * `RuntimeError`:
-          If `check_imports`, `pins`, `build_zipapp` or `build_uv` does;
+          If `check_imports`, `build_zipapp` or `build_uv` does;
           see there.
         """
         # The kind, then for a file an optional place to put it.  A
@@ -1533,26 +1541,16 @@ class AltVEnv:
         target: str
         kind, _, target = form.partition(":")
         kind = kind.lower()
-        if kind not in ("pins", "zipapp", "uv") or (kind == "pins"
-                                                    and target):
+        if kind not in ("zipapp", "uv"):
             raise ValueError(
-                f"ALT_VENV_EXPORT is {form!r}; use pins, zipapp or uv")
+                f"ALT_VENV_EXPORT is {form!r}; use zipapp or uv")
 
         # Whatever leaves this machine must not lean on what is on it.
         self.check_imports(asking)
         if kind == "zipapp":
             self.build_zipapp(asking, Path(target) if target else None)
-            return
-        if kind == "uv":
+        else:
             self.build_uv(Path(target) if target else None)
-            return
-
-        # Comment lines, because Part 1 is a PEP 723 block.
-        print("# dependencies = [")
-        pin: str
-        for pin in self.pins():
-            print(f'#   "{pin}",')
-        print("# ]")
 
     def check_imports(self, asking: Sequence[str]) -> None:
         """Refuse an export whose imports Part 1 does not cover.
@@ -1655,7 +1653,9 @@ class AltVEnv:
         never runs.  The program goes in as `__main__.py` with its
         pasted bootstrap taken out (`strip_bootstrap`), because the
         packages the bootstrap would have fetched are already inside,
-        and its own imports find them there.  A program with no
+        and its own imports find them there.  In the bootstrap's place
+        goes the one thing it did that still matters: a check that the
+        Python running the archive meets Part 1's `requires-python`.  A program with no
         bootstrap to take out is refused, since it must use `alt_venv`
         some other way and would fail without it.
 
@@ -1689,7 +1689,30 @@ class AltVEnv:
         target = target or program.with_suffix(".pyz")
         raw: bytes = program.read_bytes()
         encoding: str = tokenize.detect_encoding(io.BytesIO(raw).readline)[0]
-        stripped: str | None = strip_bootstrap(raw.decode(encoding))
+        text: str = raw.decode(encoding)
+
+        # The bootstrap checked the Python version; the archive has no
+        # bootstrap, so its line checks instead, when Part 1 gives a
+        # floor `python_floor` can read.  `__import__` because the
+        # program's own `import sys` is not guaranteed.  A program whose
+        # syntax is newer than the Python running it still fails to
+        # compile before this line runs, as it would have anyway.
+        statement: str = "pass"
+        try:
+            declared: dict[str, Any] = script_metadata(text) or {}
+        except ValueError:
+            declared = {}
+        wanted: object = declared.get("requires-python")
+        floor: tuple[int, ...] | None = (
+            python_floor(wanted) if isinstance(wanted, str) else None)
+        if floor is not None:
+            statement = (
+                f"if __import__('sys').version_info < {floor}: "
+                f"raise SystemExit('{target.name} needs Python "
+                f"{'.'.join(map(str, floor))} or newer, not ' "
+                f"+ __import__('platform').python_version())")
+        stripped: str | None = strip_bootstrap(
+            text, "a zipapp carries its packages.", statement)
         if stripped is None:
             raise RuntimeError(
                 "a zipapp leaves alt_venv out, so the program needs the "
@@ -1749,15 +1772,17 @@ class AltVEnv:
         return target
 
     def build_uv(self, target: Path | None = None) -> Path:
-        """Write the program as a `uv` script, with its two lock files.
+        """Write the program as a `uv` script, with its lock file.
 
-        Three files, beside the program unless `target` says otherwise:
+        Two files, beside the program unless `target` says otherwise:
         `prog-uv.py`, the program with Part 1 pinned to what was approved
         and its bootstrap taken out (`pin_dependencies`,
-        `strip_bootstrap`); `prog-uv.py.lock`, which `uv run prog-uv.py`
-        uses by itself; and `pylock.prog-uv.toml`, the PEP 751 lock that
-        other installers read.  Unlike a `zipapp`, compiled packages are
-        fine: the lock lists every platform's wheels.
+        `strip_bootstrap`); and `prog-uv.py.lock`, which `uv run
+        prog-uv.py` finds by its name and uses.  Unlike a `zipapp`,
+        compiled packages are fine: the lock lists every platform's
+        wheels.  The same lock in PEP 751's `pylock.toml` format is not
+        written: `uv run` ignores it, and nobody this release is for
+        needs it (Wayne, 2026-10-12).
 
         `uv` writes the locks, because it resolves for every platform and
         records where each wheel is downloaded from, which the approvals
@@ -1802,11 +1827,7 @@ class AltVEnv:
         print(f"alt_venv: wrote {target}")
 
         # `uv` locks it; without `uv`, say how to finish elsewhere.
-        pylock: Path = target.with_name(f"pylock.{target.stem}.toml")
-        commands: list[list[str]] = [
-            ["lock", "--script", str(target)],
-            ["export", "--script", str(target), "--format", "pylock.toml",
-             "--quiet", "-o", str(pylock)]]
+        commands: list[list[str]] = [["lock", "--script", str(target)]]
         uv: str | None = find_uv()
         if uv is None:
             print("alt_venv: uv is not installed; to finish, run:")
@@ -1837,7 +1858,6 @@ class AltVEnv:
                 "uv's lock disagrees with the approvals: "
                 + "; ".join(problems))
         print(f"alt_venv: wrote {lock}")
-        print(f"alt_venv: wrote {pylock}")
         return target
 
     def summary(self, wheel: Path) -> str:
@@ -2728,8 +2748,8 @@ class AltVEnv:
 
         `ALT_VENV_EXPORT`, in the no-argument form, writes what the
         approvals record in another form and then exits instead of
-        returning, so the program's own code never runs.  `pins` prints
-        Part 1's `dependencies` with every package pinned; see `export`.
+        returning, so the program's own code never runs: `zipapp` or
+        `uv`, as `export` describes.
 
         A requirement is spelled the way `pip` spells it, so a version
         constraint needs no special support:

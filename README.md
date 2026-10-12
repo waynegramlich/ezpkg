@@ -13,9 +13,6 @@ net on demand, without a virtual environment or the right to install
 packages.  Get everything working with `AltVEnv` first, then either email
 the single `.py` file to a friend or let `AltVEnv` package it up in `zipapp`
 or `uv` format.
-<!-- Issue: The `zipapp` and `uv` packaging promised above is not documented
-yet; S1 (Releasing Programs) below covers it.  Verify this paragraph against the
-finished document in the S5 wrapup. -->
 
 ## Quick Start
 
@@ -271,18 +268,21 @@ two packages disagree about a third, which is very hard to get right by
 hand.
 
 <!-- Issue: Road map for the rest of the document, in the order of work:
-S1: Releasing Programs (replaces Author Package Management): "Steps in
-    Common" is drafted; write "As a Single `.py` File", "Using `zipapp`"
-    and "Using `uv`", each with the same four parts: the command, the
-    files it writes, how the recipient runs the result, and its limits.
-    Unsuspend `T.ewar` when done.
+S1: Releasing a Program.  Done 2026-10-12: the network sentence for
+    `write`; the `zipapp` and `uv` releases dogfooded with
+    `quick_start.py` against PyPI; every PowerShell line run with
+    PowerShell 7.6.6 on Linux, leaving Windows PowerShell 5.1, `python`
+    and `py` on real Windows to Wayne's friends (`I.2`); the one-run
+    form left out by Wayne; the flow read left to Wayne's own
+    end-to-end reads; `nopip4`'s row measured (`T.ewar`).
 S2: Miscellaneous: how `~/.alt_venv` behaves (garbage collection, sharing,
     versions side by side).
 S3: Alternatives / Why not just use `uv`?  Consider a one-sentence answer
     in the intro, since skeptics ask early.
 S4: Conclusion: fix "zapapp", the garbled "(pure Python on)", and
-    "Cython packages like `math`", and reword "copy Parts 2 and 3" now
-    that the bootstrap is pasted as one block.
+    "Cython packages like `math`" (make it compiled packages like
+    `numpy`, as S1 does), and reword "copy Parts 2 and 3" now that the
+    bootstrap is pasted as one block.
 S5: Wrapup: check the intro (its packaging promise, see the issue there)
     and the whole document against what the code does. -->
 
@@ -298,27 +298,28 @@ If you want to use another packaging solution, please read on.
 
 The currently supported package formats are:
 
-* `zipapp`:
-  This packages the program up into a single file that includes all
-  required packages.  This works with "pure" Python programs
-  and does not work with "impure" packages that contain compiled code
-  (e.g. `numpy`).
-  <!-- Claude:  We have the wheels, so we can determine if a package is pure or
-  not. We need to inform the user about impure packages somehow. -->
-
-* `uv`:
-  This package manager can handle both pure and impure Python packages, but it
-  requires the end user to install `uv` on their machine first.
+* `zipapp`: one file holding the program and its packages; no compiled code.
+* `uv`: a script and its lock file, run with `uv`; compiled code is fine.
 
 The first step is to record information about every package currently in
 use by running `YOUR_PROG.py` as follows:
 * Linux/macOS: `ALT_VENV_APPROVE=write python3 YOUR_PROG.py`
 * Windows (PowerShell):
-  `$env:ALT_VENV_APPROVE='write'; python YOUR_PROG.py; Remove-Item Env:ALT_VENV_APPROVE`
+  `powershell -Command { $env:ALT_VENV_APPROVE="write"; & python YOUR_PROG.py }`
+
+This run needs the network: it always asks the package index for the
+newest versions that `dependencies` allows, even when your machine
+already has the packages.
 
 This writes out `YOUR_PROG.altvenv` beside `YOUR_PROG.py`, which records all
 needed information.  It is prudent to add `YOUR_PROG.altvenv` to your version
 control system (e.g. `git` or `hg`).
+
+The same run also offers to add a date to Part 1, as `exclude-newer =
+"<date>"` under `[tool.uv]`, asking first and naming the line.  With it,
+a copy of `YOUR_PROG.py` emailed on its own fetches only the packages that
+were available on that date, rather than whatever is newest when your
+friend runs it.
 
 `YOUR_PROG.altvenv` contains detailed information about each package that
 is needed.  With this file in your version control, you can exactly
@@ -327,48 +328,56 @@ new package introduces a bug, you can determine that it is a problem in
 a package rather than in your code.  This file is the foundation for making
 releases in other formats (e.g. `zipapp` and `uv`).
 
-<!-- Claude: I want to get the text above worked out before diving into
-the zipapp and uv stuff further. -->
-
-### Make your Release
-
-4. **Make the release.**  Run your program with `ALT_VENV_EXPORT` set to
-   the form you want (each one is described below), for example:
-   ```
-   ALT_VENV_EXPORT=zipapp python3 prog.py
-   ```
-   Your program does not run; the release is written instead.  First,
-   though, `AltVEnv` checks every `import` in your program, and if any of
-   them comes from a package that `dependencies` does not list, it says
-   which, with line numbers, and makes no release until you add them.
-   This catches a package that your own Python happens to have, which
-   works for you but would fail for everybody else.
-
-
-One catch: a package that contains compiled code comes as a different file
-for each operating system and Python version.  `prog.altvenv` records the
-files from the machine it was written on, so such a package is refused on
-any other kind of machine.  There is no way yet to approve more than one
-machine's files.  Packages written purely in Python, which are most of
-them, come as one file that suits every machine, so they are not affected.
-
-### As a Single `.py` File
-
-<!-- Issue: To be written (S1).  `ALT_VENV_EXPORT=pins`: prints Part 1's
-`dependencies` with every package pinned, to paste in before emailing the
-`.py`; send `prog.altvenv` along for verification. -->
-
 ### Using `zipapp`
 
-<!-- Issue: To be written (S1).  `ALT_VENV_EXPORT=zipapp[:PATH]` writes
-`prog.pyz`; runs with `python3 prog.pyz`, no network, no `~/.alt_venv`;
-pure-Python packages only for now. -->
+A `zipapp` cannot carry a package that contains compiled code, such as
+`numpy`, or one that needs a `.pth` file.  `AltVEnv` names any such
+package and writes no release; use `uv` instead.
+
+Make the release by running your program like this:
+* Linux/macOS: `ALT_VENV_EXPORT=zipapp python3 YOUR_PROG.py`
+* Windows (PowerShell):
+  `powershell -Command { $env:ALT_VENV_EXPORT="zipapp"; & python YOUR_PROG.py }`
+
+Your program does not run.  Instead, `AltVEnv` checks that every package
+your program imports is listed in `dependencies` (naming the line of any
+that is not), and then writes `YOUR_PROG.pyz` beside `YOUR_PROG.py`.
+`ALT_VENV_EXPORT=zipapp:SOMEWHERE.pyz` writes it elsewhere.
+
+`YOUR_PROG.pyz` is one file holding your program and every package it
+uses.  Send it to your friend, who runs it with:
+* Linux/macOS: `python3 YOUR_PROG.pyz`, or just `./YOUR_PROG.pyz`
+* Windows: `py YOUR_PROG.pyz`
+
+It needs no network and leaves nothing behind on your friend's machine.
+If their Python is older than your `requires-python`, it says so and
+stops.
 
 ### Using `uv`
 
-<!-- Issue: To be written (S1).  `ALT_VENV_EXPORT=uv[:PATH]` writes
-`prog-uv.py` and its two lock files for `uv run`; compiled packages are
-fine here, since `uv` supplies every platform's files. -->
+`uv` can handle compiled packages, such as `numpy`.  You need to ensure that
+[`uv`](https://docs.astral.sh/uv/) is installed on both your computer and
+your recipients' computers.
+
+Make the release by running your program like this:
+* Linux/macOS: `ALT_VENV_EXPORT=uv python3 YOUR_PROG.py`
+* Windows (PowerShell):
+  `powershell -Command { $env:ALT_VENV_EXPORT="uv"; & python YOUR_PROG.py }`
+
+Your program does not run.  Instead, `AltVEnv` checks that every package
+your program imports is listed in `dependencies` (naming the line of any
+that is not), and then writes `YOUR_PROG-uv.py` beside `YOUR_PROG.py`,
+with its lock file, `YOUR_PROG-uv.py.lock`, beside it.
+`ALT_VENV_EXPORT=uv:SOMEWHERE.py` writes them elsewhere, named after
+`SOMEWHERE.py`.
+
+`YOUR_PROG-uv.py` is your program with its packages pinned to the versions
+you approved and the bootstrap taken out.  Send it to your friend with its
+lock file, `YOUR_PROG-uv.py.lock`.  Your friend puts both files in the same
+directory and runs:
+* Linux/macOS/Windows: `uv run YOUR_PROG-uv.py`
+
+That is all there is to it.
 
 ## Miscellaneous
 
