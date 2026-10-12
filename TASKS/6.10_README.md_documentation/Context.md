@@ -146,3 +146,24 @@ Open, deferred or waiting on Wayne:
   so it reruns only when those change.  Timing on Wayne's machine:
   `packages_distributions()` 167 ms (385 modules), `ast.parse` of
   `alt_venv.py` 21 ms.
+
+## 2026-10-11 late evening: "Enabling" rewritten around one rule
+
+* The reader's whole job: paste the bootstrap block at the very top
+  (Wayne widened "the bootstrap" to mean `#!`, metadata, docstring
+  placeholder, a `__future__` placeholder comment, Part 2's 7 imports
+  and Part 3); put all imports after it; add a `dependencies` line each
+  time a `ModuleNotFoundError` appears.  Plus a module-vs-package
+  paragraph and the packaging catch-all (`T.cibe`).  Verified by running
+  a pasted copy: fails with `dependencies = []`, runs once `cowsay` is
+  added.  Wayne's old attempt is kept in an HTML comment below it.
+* `quick_start.py`, the README's Quick Start copy and `QUICK_START` got
+  Wayne's new Part 2/3 comments and "Part 4: Your imports, all after the
+  bootstrap."; the Anatomy headings and Part 2/4 paragraphs follow.
+  `test_the_quick_start_is_current` now wants `### Part N` and passes;
+  the quick suite is green (236 tests).
+* Download Prompt: the no-terminal case now says `Yes` for that run only
+  (no `FOREVER_APPROVE`), matching `consent`.
+* Not yet done: nothing tests the Enabling section's copy of the
+  bootstrap against `quick_start.py`.  The Part 2 heading is long
+  (Wayne: cosmetic, later).

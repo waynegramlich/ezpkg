@@ -1,0 +1,16 @@
+{
+  "state": "Open",
+  "created": "2026-10-12T01:53:26Z",
+  "updated": "2026-10-12T01:53:29Z",
+  "history": [
+    {
+      "state": "Pending",
+      "time": "2026-10-12T01:53:26Z"
+    },
+    {
+      "state": "Open",
+      "time": "2026-10-12T01:53:29Z"
+    }
+  ],
+  "tag": "siofr"
+}

@@ -93,3 +93,9 @@ The steps, one task (Wayne collapsed the 6.18.1-4 children on
    from an empty HOME loads all 7 from `uv`'s environment and creates
    no `~/.alt_venv`.  `no-build` still lets a lock list an sdist; it
    only stops `uv` building one.
+
+## 2026-10-11: Suspended
+
+Wayne suspended this until the exports are documented in `README.md`
+(road map S2, Packaging, in `T.rd`).  The code is done; the leftover is
+measuring `nopip4`'s row in `bootstrap.py`.

@@ -36,7 +36,7 @@ Save this program as `quick_start.py`, and run it with
 # ///
 """Try `AltVEnv`: fetch the `cowsay` package on first use, then run."""
 
-# Part 2: The standard library imports that the bootstrap uses.
+# Part 2: AltVEnv required imports are immediately below.
 import hashlib
 import importlib
 import json
@@ -44,8 +44,9 @@ import pathlib
 import subprocess
 import sys
 import urllib.request as req
+# All other imports are added after the AltVEnv bootstrap.
 
-# Part 3: The bootstrap.  Copy it exactly, and never edit it.
+# Part 3: The AltVEnv bootstrap.  Never edit it.
 try:
     s = "find home"; t = pathlib.Path.home()/".alt_venv"; w = t/"pip.whl"
     m = None
@@ -74,7 +75,7 @@ try:
 except Exception as x:
     raise SystemExit(f"alt_venv: {s} failed: {x!r}")
 
-# Part 4: Import the packages listed in Part 1.
+# Part 4: Your imports, all after the bootstrap.
 import cowsay  # type: ignore[import-not-found]  # For mypy.
 
 # Part 5: The program itself.
@@ -143,32 +144,93 @@ a machine's very first run.  One of 4 prompts appear:
   again.
 
 There is no default answer: pressing Enter alone just prompts again.
-Some programs are run with out access to terminal input (e.g. `cron`).  When
-this happens, the download prompt is suppressed and is treated as `Always`.
+Some programs are run without access to terminal input (e.g. `cron`).  When
+this happens, the download prompt is skipped and the answer is taken to be
+`Yes`, for that run only: no `FOREVER_APPROVE` file is written, so a later
+run from a terminal still asks.
 
 ## Enabling `AltVEnv` for Your Program
 
-<!-- Issue: Wayne to consider Claude's recommendation: put the bootstrap in
-front of all of the program's imports.
-* Rule for the reader: every import goes after the bootstrap.  The one
-  exception is `from __future__ import ...`, which Python requires first.
-  The bootstrap's own imports (Part 2) must still precede it; moving them
-  inside the bootstrap would change its fingerprint and is not worth it.
-* Gain: no sorting of imports into standard library and third-party.  A new
-  program writes every import after the bootstrap; a preexisting program
-  pastes the bootstrap just above its first import and moves nothing.  Then
-  run, add a `dependencies` line for each `ModuleNotFoundError`, repeat.
-* Gain: the export check can flag any import above the bootstrap (other than
-  `__future__` and Part 2) without classifying it.
-* No gain: a package the author's own Python already has never fails, so it
-  is never declared.  The export-time check (`T.cibe`) is still the net.
-* Cost: linters flag every import after the bootstrap (E402); the README
-  should mention `# noqa: E402`.
-* Cost: Python stops at the first missing import, one per run.  Running the
-  `ast` scan (today via `ALT_VENV_EXPORT=pins`) lists them all at once.
-  Under discussion: running that scan automatically on a program's first
-  run, and remembering that it was done. -->
+Immediately below is the `AltVEnv` bootstrap:
 
+```python
+#!/usr/bin/env python3
+# Part 1: The packages this program needs.
+# /// script
+# requires-python = ">=3.11"
+# dependencies = []
+# ///
+"""TOP_LEVEL_DOCSTRING"""
+# Any `from __future__ import ...` goes here.
+
+# Part 2: AltVEnv required imports are immediately below.
+import hashlib
+import importlib
+import json
+import pathlib
+import subprocess
+import sys
+import urllib.request as req
+# All other imports are added after the AltVEnv bootstrap.
+
+# Part 3: The AltVEnv bootstrap.  Never edit it.
+try:
+    s = "find home"; t = pathlib.Path.home()/".alt_venv"; w = t/"pip.whl"
+    m = None
+    try: m = importlib.import_module("alt_venv")  # Already importable?
+    except ImportError: pass
+    if m is None and not (t/"alt_venv").is_dir():  # Not installed yet.
+        s = "choose pip"; v = sys.version_info[1]
+        d = json.load(req.urlopen("https://pypi.org/pypi/pip/json", None, 30))
+        e = max((e for f in d["releases"].values() for e in f  # Newest pip
+                 if e["url"][-4:] == ".whl" and not e["yanked"]
+                 and (q := e["requires_python"] or "")[:4] == ">=3."
+                 and "," not in q and int(q.split(".")[1]) <= v),
+                key=lambda e: e["upload_time"])  # whose floor we meet.
+        s = "download pip"; r = req.urlopen(e["url"], None, 60).read()
+        if hashlib.sha256(r).hexdigest() != e["digests"]["sha256"]:
+            raise ValueError(f"{e['filename']} fails its SHA-256 check")
+        t.mkdir(parents=True, exist_ok=True); p = t/"pip.part"
+        p.write_bytes(r); p.replace(w)  # The rename is atomic.
+        s = "install alt_venv"; subprocess.run([
+            sys.executable, w/"pip", "install", "--no-input", "-t", t,
+            "--disable-pip-version-check", "alt_venv"], check=True)
+    if m is None:
+        s = "import alt_venv"; sys.path.insert(0, str(t))
+        importlib.invalidate_caches(); m = importlib.import_module("alt_venv")
+    s = "fetch packages"; m.AltVEnv().install(bootstrap="nopip4")
+except Exception as x:
+    raise SystemExit(f"alt_venv: {s} failed: {x!r}")
+
+# Your imports go here, followed by the rest of your program.
+```
+
+To use `AltVEnv` in your own program, new or preexisting:
+1. Paste the bootstrap above at the very top of your program.  If your
+   program already starts with a `#!` line, delete your copy of it.
+2. Replace `"""TOP_LEVEL_DOCSTRING"""` with your program's own docstring
+   (moving it up from below, if it has one), or delete it.
+3. Put all of your imports after the bootstrap, even ones from the standard
+   library, such as `import os`.
+4. Run your program.  Each time an import fails with `ModuleNotFoundError`,
+   add the missing package to `dependencies`, and run it again.
+
+That's it.
+
+A *module* is what you `import`; a *package* is what is downloaded from
+PyPI and installed, and it is the package's name that goes in
+`dependencies`.  Usually the two names are the same, but not always:
+`import dateutil` comes from the `python-dateutil` package, and
+`import yaml` from `PyYAML`.  One package can also provide several
+modules, so one `dependencies` line can cover more than one import.
+
+An import that works only because your own Python happens to have the
+package never fails, so step 4 never catches it.  When you package your
+program (see Packaging below), `AltVEnv` lists every such import, with its
+line number, and refuses to package the program until you add those
+packages to `dependencies` too.
+
+<!-- Wayne's old attempt at this section...
 If you are starting from scratch, the easiest thing to do is take a copy of
 `quick_start.py` and do the following:
 1. Rename the program and remove all lines that have `cowsay` in them.
@@ -183,8 +245,8 @@ If you are starting from a preexisting program, do the following:
 * Copy the metadata from the front of `quick_start.py` into the front of
   your program.  You can remove the line that says `cowsay`.  (See Meta Data
   section below, for more information.)
-  <!-- Issue: Point the reference above at the metadata section, whose title
-  is not settled yet (currently "Part 1" under "Anatomy"). -->
+  [Issue: Point the reference above at the metadata section, whose title
+  is not settled yet (currently "Part 1" under "Anatomy").]
 * Paste the bootstrap into your program after your existing imports.
 * Move each import that is not from the standard library to immediately
   after the bootstrap, and add its package's name to `dependencies` in the
@@ -201,6 +263,7 @@ your own Python happens to have already.  When you package your program
 (see Packaging below), `AltVEnv` lists every import that the metadata does not
 cover, with its line number, and refuses to package the program until the
 metadata does.
+-->
 <!-- Issue: Wayne to review the rewritten section above.  It relies on the
 export-time import check (`T.cibe`) instead of asking whether a package is
 preinstalled.  S2 (Packaging) must say that `ALT_VENV_EXPORT=pins` is the
@@ -351,15 +414,16 @@ specification.  `pip` resolves the whole list at once, so it notices when
 two packages disagree about a third, which is very hard to get right by
 hand.
 
-### Part 2: The standard library imports that the bootstrap uses
+### Part 2: AltVEnv required imports are immediately below
 
 Seven imports, all from the standard library, so there is nothing to
-install.  Put them among your own imports, in alphabetical order, and if
-your program already imports some of them, keep one copy of each.
+install.  The bootstrap needs them, so they come before it.  Leave them
+as they are, and put all of your own imports in Part 4, even one that
+repeats an import here, which does no harm.
 
-### Part 3: The bootstrap
+### Part 3: The AltVEnv bootstrap
 
-Copy it exactly, and never edit it.  Re-indenting it or changing its
+Never edit it.  Re-indenting it or changing its
 comments does no harm, but changing its code makes it a different
 bootstrap.  To see whether a program carries the current one, run it with
 `ALT_VENV_BOOTSTRAP=check` set, and it says so on standard error.
@@ -379,10 +443,10 @@ Later runs skip the previous three steps.  Every run, the first one included,
 then just uses the `AltVEnv` package to download any further packages and
 perform housekeeping in the `~/.alt_venv/` directory.
 
-### Part 4: Import the packages listed in Part 1
+### Part 4: Your imports, all after the bootstrap
 
-Your own `import` statements come after the bootstrap, because the bootstrap
-is what makes the packages importable.  Import each package by its module
+All of your own `import` statements come after the bootstrap, because the
+bootstrap is what makes the packages importable.  Import each package by its module
 name, which is not always the name in Part 1: `python-dateutil` is imported
 as `dateutil`.  Leave out the `# type: ignore` comments if you do not use
 `mypy`.

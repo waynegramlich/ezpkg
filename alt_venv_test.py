@@ -5039,7 +5039,7 @@ class BootstrapCheckTest(unittest.TestCase):
         landmark: str
         for landmark in landmarks:
             with self.subTest(landmark=landmark):
-                self.assertIn(f"\n#### {landmark.split('.')[0]}\n", readme)
+                self.assertIn(f"\n### {landmark.split('.')[0]}\n", readme)
 
         # Found the way a running program's would be.
         block: str | None = alt_venv.find_bootstrap(program)

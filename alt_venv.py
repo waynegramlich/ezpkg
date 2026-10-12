@@ -140,7 +140,7 @@ QUICK_START: str = '''#!/usr/bin/env python3
 \x23 ///
 """Try `AltVEnv`: fetch the `cowsay` package on first use, then run."""
 
-# Part 2: The standard library imports that the bootstrap uses.
+# Part 2: AltVEnv required imports are immediately below.
 import hashlib
 import importlib
 import json
@@ -148,8 +148,9 @@ import pathlib
 import subprocess
 import sys
 import urllib.request as req
+# All other imports are added after the AltVEnv bootstrap.
 
-# Part 3: The bootstrap.  Copy it exactly, and never edit it.
+# Part 3: The AltVEnv bootstrap.  Never edit it.
 try:
     s = "find home"; t = pathlib.Path.home()/".alt_venv"; w = t/"pip.whl"
     m = None
@@ -178,7 +179,7 @@ try:
 except Exception as x:
     raise SystemExit(f"alt_venv: {s} failed: {x!r}")
 
-# Part 4: Import the packages listed in Part 1.
+# Part 4: Your imports, all after the bootstrap.
 import cowsay  # type: ignore[import-not-found]  # For mypy.
 
 # Part 5: The program itself.
