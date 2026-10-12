@@ -253,3 +253,15 @@ S5 Alternatives, S6 Conclusion).
   later.
 * Heading rename: the road map, the intro's Issue note and the S1
   notes above still say "Releasing Programs".
+
+## 2026-10-12: back from `T.rafal` and `T.srdisb` (both closed)
+
+* The "exactly recreate" promise in Wayne's `.altvenv` paragraph is now
+  true: the approvals lock the versions, and `write` always fetches
+  afresh ("upgrade and record").
+* New for the README to cover: `write` offers (with a y/n prompt naming
+  the line) to add `# [tool.uv]` / `# exclude-newer = "<date>"` to
+  Part 1, so an emailed `.py` fetches what was newest on that date.
+  The approvals file has a `# Resolved:` date line.
+* Wayne declined: suggesting the `.altvenv` go along with an emailed
+  `.py`, and caveats about compiled packages on other machines.

@@ -69,6 +69,7 @@ import tempfile
 import textwrap
 import threading
 import time
+import tomllib
 import trace
 import unittest
 import unittest.mock
@@ -663,6 +664,35 @@ def requires_python(wheel: Path) -> str | None:
 _PIP_WHEEL: tuple[str, bytes] | None = None
 
 
+def dating_pip() -> Path | None:
+    """Return a `pip` wheel that knows `--uploaded-prior-to`, if any.
+
+    The option arrived in `pip` 26, and the suite's own `pip_wheel` is
+    whatever `pip` is installed here, often older, and the suite never
+    reaches the network to fetch another.  So the copy that the real
+    `~/.alt_venv` keeps is borrowed when it is new enough, and the tests
+    that need one skip when it is not.
+
+    Returns:
+    * (`Path | None`): A wheel to copy into a test cache as `pip.whl`,
+      or `None` when there is none that filters by date.
+    """
+    # The newest refreshed copy first, as `AltVEnv.pip` chooses.
+    home: Path = Path.home() / ".alt_venv"
+    candidates: list[Path] = sorted(home.glob("pip-*.whl"),
+                                    key=lambda one: one.stat().st_mtime)
+    candidate: Path
+    for candidate in [*reversed(candidates), home / "pip.whl"]:
+        if not candidate.is_file():
+            continue
+        helped: subprocess.CompletedProcess[str] = subprocess.run(
+            [sys.executable, str(candidate / "pip"), "download", "--help"],
+            capture_output=True, text=True, check=False)
+        if "--uploaded-prior-to" in helped.stdout:
+            return candidate
+    return None
+
+
 def pip_wheel() -> tuple[str, bytes]:
     """Return a runnable `pip` wheel built from the one installed here.
 
@@ -785,6 +815,10 @@ def build_index(wheels: list[Path],
     return root
 
 
+# The PEP 691 content type for a JSON project page.
+SIMPLE_JSON: str = "application/vnd.pypi.simple.v1+json"
+
+
 class _IndexServer(http.server.ThreadingHTTPServer):
     """A `ThreadingHTTPServer` that can be told to serve badly.
 
@@ -813,6 +847,11 @@ class _IndexServer(http.server.ThreadingHTTPServer):
 
     # Assigned per instance by `serve_index`, never shared between them.
     faults: dict[str, str]
+
+    # Whether a project page may be answered as PEP 691 JSON carrying
+    # PEP 700 upload times, which is what `--uploaded-prior-to` needs.
+    # Off by default, so that the index is plain HTML, which has none.
+    upload_times: bool
 
     # `http` or `https`, so that `send_json` can build a URL that works.
     scheme: str
@@ -867,12 +906,55 @@ class _IndexHandler(http.server.SimpleHTTPRequestHandler):
         if fault is not None and self.send_fault(fault):
             return
 
-        # `/pypi/<project>/json` is the only synthesized path.
+        # `/pypi/<project>/json` is synthesized, and so is a project page
+        # in JSON when upload times are on and the client asks for it.
         parts: list[str] = self.path.strip("/").split("/")
         if len(parts) == 3 and parts[0] == "pypi" and parts[2] == "json":
             self.send_json(parts[1])
             return
+        if (cast(_IndexServer, self.server).upload_times and len(parts) == 1
+                and self.path.endswith("/")
+                and SIMPLE_JSON in self.headers.get("Accept", "")):
+            self.send_simple_json(parts[0])
+            return
         super().do_GET()
+
+    def send_simple_json(self, project: str) -> None:
+        """Answer a project page as PEP 691 JSON, with upload times.
+
+        Each wheel's upload time is its file's modification time, as in
+        `send_json`, so a test dates a release with `os.utime`.
+
+        Arguments:
+        * `project` (`str`):
+          The project name as the request spelled it.
+        """
+        # The wheels, which are the whole of the answer.
+        normalized: str = re.sub(r"[-_.]+", "-", project).lower()
+        wheels: list[Path] = sorted(
+            (Path(self.directory) / normalized).glob("*.whl"))
+        if not wheels:
+            self.send_error(404, f"no project {normalized}")
+            return
+        body: bytes = json.dumps({
+            "meta": {"api-version": "1.1"},
+            "name": normalized,
+            "versions": sorted({wheel.name.split("-")[1]
+                                for wheel in wheels}),
+            "files": [
+                {"filename": wheel.name, "url": wheel.name,
+                 "hashes": {"sha256": hashlib.sha256(
+                     wheel.read_bytes()).hexdigest()},
+                 "size": wheel.stat().st_size,
+                 "upload-time": datetime.datetime.fromtimestamp(
+                     wheel.stat().st_mtime, datetime.UTC).strftime(
+                         "%Y-%m-%dT%H:%M:%S.%fZ")}
+                for wheel in wheels]}).encode()
+        self.send_response(200)
+        self.send_header("Content-Type", SIMPLE_JSON)
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
 
     def fault(self) -> str | None:
         """Return the fault configured for this request, if any.
@@ -1082,6 +1164,7 @@ def serve_index(root: Path,
         _IndexHandler, directory=str(root))
     server: _IndexServer = _IndexServer(("127.0.0.1", 0), handler)
     server.faults = {}
+    server.upload_times = False
     server.scheme = "http"
 
     # Wrap the listening socket before anything is accepted on it.
@@ -3164,6 +3247,10 @@ class InstallTest(unittest.TestCase):
         self.assertTrue(rows[0].startswith("widget-1.2.3-py3-none-any.whl "))
         self.assertEqual(len(rows[0].split()[1]), 64)
 
+        # And dated, since the list is what `pip` chose that day.
+        self.assertRegex(record.read_text(),
+                         r"(?m)^# Resolved: \d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$")
+
     def test_matching_approvals_are_silent(self) -> None:
         """A recipient whose approvals match is not bothered at all."""
         # Record once, then run again from an empty cache.
@@ -3183,11 +3270,13 @@ class InstallTest(unittest.TestCase):
         because the author, who could tell one package from another, said
         once what was allowed.
         """
-        # Approve 1.2.3, then ask for 2.0.0 without reapproving.
-        program: Path = self.program("refused", "sprocket==1.0.0")
+        # Approve `widget`, then ask for `sprocket` without reapproving.
+        # The lock says nothing about `sprocket`, so it is fetched, and
+        # the check is what stops it.
+        program: Path = self.program("refused", "widget")
         self.assertEqual(
             self.run_program(program, ALT_VENV_APPROVE="write").returncode, 0)
-        program.write_text(program.read_text().replace("1.0.0", "2.0.0"))
+        program.write_text(program.read_text().replace("widget", "sprocket"))
         done: subprocess.CompletedProcess[str] = self.run_program(program)
         self.assertNotEqual(done.returncode, 0)
         self.assertIn("is not approved", done.stderr)
@@ -3196,7 +3285,218 @@ class InstallTest(unittest.TestCase):
         # And nothing was unpacked, because the refusal comes first.
         trees: list[Path] = list((program.parent / "cache"
                                   / "versions").iterdir())
-        self.assertTrue(all("2.0.0" not in tree.name for tree in trees), trees)
+        self.assertTrue(all("sprocket" not in tree.name for tree in trees),
+                        trees)
+
+    def test_the_approvals_lock_the_versions(self) -> None:
+        """A recorded version is fetched even when a newer one exists.
+
+        The approvals record `sprocket` 1.0.0; the program then asks for
+        any `sprocket`, and the index has 2.0.0.  Without the lock, `pip`
+        would fetch 2.0.0 and the check would refuse it.  See `T.rafal`.
+        """
+        # Record 1.0.0, then loosen the requirement and start cold.
+        program: Path = self.program("locking", "sprocket==1.0.0")
+        self.assertEqual(
+            self.run_program(program, ALT_VENV_APPROVE="write").returncode, 0)
+        program.write_text(program.read_text().replace("==1.0.0", ""))
+        shutil.rmtree(program.parent / "cache")
+        done: subprocess.CompletedProcess[str] = self.run_program(program)
+        self.assertEqual(done.returncode, 0, done.stderr[-300:])
+        self.assertEqual(done.stdout.strip(), "1.0.0")
+
+    def test_the_lock_is_not_answered_by_an_unlocked_record(self) -> None:
+        """A warm cache from an unlocked run does not bypass the lock.
+
+        `skip` fetches `sprocket` 2.0.0 and remembers the request; the
+        ordinary run that follows must still get the recorded 1.0.0.
+        """
+        # Record 1.0.0, loosen, then warm the cache with 2.0.0.
+        program: Path = self.program("warm_lock", "sprocket==1.0.0")
+        self.assertEqual(
+            self.run_program(program, ALT_VENV_APPROVE="write").returncode, 0)
+        program.write_text(program.read_text().replace("==1.0.0", ""))
+        skipped: subprocess.CompletedProcess[str] = self.run_program(
+            program, ALT_VENV_APPROVE="skip")
+        self.assertEqual(skipped.stdout.strip(), "2.0.0", skipped.stderr)
+        done: subprocess.CompletedProcess[str] = self.run_program(program)
+        self.assertEqual(done.returncode, 0, done.stderr[-300:])
+        self.assertEqual(done.stdout.strip(), "1.0.0")
+
+    def test_write_upgrades_past_the_lock(self) -> None:
+        """`write` resolves afresh, so it is how packages are upgraded."""
+        # Record 1.0.0, loosen, and record again from a cold cache.
+        program: Path = self.program("upgrade", "sprocket==1.0.0")
+        self.assertEqual(
+            self.run_program(program, ALT_VENV_APPROVE="write").returncode, 0)
+        program.write_text(program.read_text().replace("==1.0.0", ""))
+        shutil.rmtree(program.parent / "cache")
+        done: subprocess.CompletedProcess[str] = self.run_program(
+            program, ALT_VENV_APPROVE="write")
+        self.assertEqual(done.returncode, 0, done.stderr[-300:])
+        self.assertEqual(done.stdout.strip(), "2.0.0")
+        self.assertIn("sprocket-2.0.0",
+                      program.with_suffix(".altvenv").read_text())
+
+    def test_a_lock_dependencies_moved_past_names_the_file(self) -> None:
+        """A requirement the lock cannot meet says what to regenerate."""
+        # Record 1.0.0, then demand 2.0.0 without reapproving.
+        program: Path = self.program("moved", "sprocket==1.0.0")
+        self.assertEqual(
+            self.run_program(program, ALT_VENV_APPROVE="write").returncode, 0)
+        program.write_text(program.read_text().replace("1.0.0", "2.0.0"))
+        done: subprocess.CompletedProcess[str] = self.run_program(program)
+        self.assertNotEqual(done.returncode, 0)
+        self.assertIn("may be the conflict", done.stderr)
+        self.assertIn("prog.altvenv", done.stderr)
+
+    def test_write_stamps_the_date_into_the_block(self) -> None:
+        """`write` asks, then puts the date in Part 1 as `exclude-newer`.
+
+        The same date as the approvals' `# Resolved:` line, so the `.py`
+        carries it when it travels alone.  The question names the line,
+        because the file is the author's.  See `T.srdisb`.
+        """
+        # Asked on a terminal, naming the line, and answered yes.
+        program: Path = self.declaring_program(
+            "stamped", 'dependencies = ["widget"]',
+            "import widget\nprint(widget.__version__)")
+        seen: str = self.answer_on_a_terminal(program, b"y\n",
+                                              ALT_VENV_APPROVE="write")
+        lines: list[str] = program.read_text().splitlines()
+        at: int = next(index for index, line in enumerate(lines, 1)
+                       if line.startswith("# exclude-newer = "))
+        self.assertIn("could I add `exclude-newer = ", seen)
+        self.assertIn(f"at line {at} of prog.py?", seen)
+        self.assertIn("resolution date", seen)
+        metadata: dict[str, Any] | None = alt_venv.script_metadata(
+            program.read_text())
+        assert metadata is not None
+        when: str = metadata["tool"]["uv"]["exclude-newer"]
+        self.assertIn(f"# Resolved: {when}\n",
+                      program.with_suffix(".altvenv").read_text())
+        self.assertEqual(metadata["dependencies"], ["widget"])
+
+        # The program still runs, under its lock, where the date is not
+        # even tried: the lock already says exactly which versions.
+        shutil.rmtree(program.parent / "cache")
+        again: subprocess.CompletedProcess[str] = self.run_program(program)
+        self.assertEqual(again.stdout.strip(), "1.2.3", again.stderr[-300:])
+        self.assertNotIn("exclude-newer", again.stderr)
+
+    def test_write_leaves_the_program_alone_unless_told(self) -> None:
+        """No terminal, or a no, leaves the program exactly as it was.
+
+        Either way the approvals are still written, and the author is
+        told how to add the date by hand.
+        """
+        # No terminal at all: nobody to agree, so no edit.
+        program: Path = self.declaring_program(
+            "unstamped", 'dependencies = ["widget"]',
+            "import widget\nprint(widget.__version__)")
+        before: str = program.read_text()
+        done: subprocess.CompletedProcess[str] = self.run_program(
+            program, ALT_VENV_APPROVE="write")
+        self.assertEqual(done.returncode, 0, done.stderr[-300:])
+        self.assertEqual(program.read_text(), before)
+        self.assertIn("left as it was", done.stderr)
+        self.assertIn("by hand", done.stderr)
+        self.assertTrue(program.with_suffix(".altvenv").is_file())
+
+        # A terminal that answers no.
+        seen: str = self.answer_on_a_terminal(program, b"n\n",
+                                              ALT_VENV_APPROVE="write")
+        self.assertIn("could I add", seen)
+        self.assertEqual(program.read_text(), before)
+
+    def dated_sprocket(self) -> None:
+        """Date `sprocket` 1.0.0 to 2020 and 2.0.0 to 2024 on the index.
+
+        And have the index publish upload times, all undone after the
+        test, since the index is shared by the whole class.
+        """
+        # The file times are the upload times; see `send_simple_json`.
+        wheel: Path
+        for wheel in (self.index / "sprocket").glob("*.whl"):
+            held: os.stat_result = wheel.stat()
+            self.addCleanup(os.utime, wheel,
+                            (held.st_atime, held.st_mtime))
+            year: int = 2020 if "-1.0.0-" in wheel.name else 2024
+            stamp: float = datetime.datetime(
+                year, 1, 1, tzinfo=datetime.UTC).timestamp()
+            os.utime(wheel, (stamp, stamp))
+        self.server.upload_times = True
+        self.addCleanup(setattr, self.server, "upload_times", False)
+
+    def give_pip(self, program: Path, wheel: Path) -> None:
+        """Make `wheel` the `pip` that a program's cache runs.
+
+        `last_pip` is written too, so `refresh_pip` does not swap it for
+        the older `pip` the local index offers: against PyPI the index's
+        is the newest, but here it is the one installed.
+
+        Arguments:
+        * `program` (`Path`):
+          A program from `declaring_program`.
+        * `wheel` (`Path`):
+          The `pip` wheel, as `dating_pip` returns it.
+        """
+        # The cache is beside the program, as `declaring_program` puts it.
+        cache: Path = program.parent / "cache"
+        cache.mkdir(exist_ok=True)
+        shutil.copyfile(wheel, cache / "pip.whl")
+        (cache / "last_pip").write_text("")
+
+    @unittest.skipIf(dating_pip() is None,
+                     "no pip here filters by upload date")
+    def test_the_date_keeps_to_older_releases(self) -> None:
+        """A program sent without approvals gets what was newest then.
+
+        `sprocket` 2.0.0 is on the index, but uploaded after the date in
+        Part 1, so 1.0.0 is fetched.
+        """
+        # No approvals, only a date between the two releases, and a
+        # `pip` that can apply it.
+        self.dated_sprocket()
+        program: Path = self.declaring_program(
+            "dated", 'dependencies = ["sprocket"]\n[tool.uv]\n'
+                     'exclude-newer = "2022-01-01T00:00:00Z"',
+            "import sprocket\nprint(sprocket.__version__)")
+        dating: Path | None = dating_pip()
+        assert dating is not None
+        self.give_pip(program, dating)
+        done: subprocess.CompletedProcess[str] = self.run_program(program)
+        self.assertEqual(done.returncode, 0, done.stderr[-300:])
+        self.assertEqual(done.stdout.strip(), "1.0.0", done.stderr)
+
+    def test_an_index_without_upload_times_ignores_the_date(self) -> None:
+        """No upload times means no date, said once, rather than failure.
+
+        Twice: with the installed `pip`, which may not know the option at
+        all, and with one that does, against an index of plain HTML,
+        which carries no upload times.
+        """
+        # Each `pip` in a cache of its own.
+        dating: Path | None = dating_pip()
+        label: str
+        wheel: Path | None
+        for label, wheel in (("installed", None), ("dating", dating)):
+            if label == "dating" and wheel is None:
+                continue
+            with self.subTest(pip=label):
+                program: Path = self.declaring_program(
+                    f"undated_{label}",
+                    'dependencies = ["sprocket"]\n[tool.uv]\n'
+                    'exclude-newer = "2022-01-01T00:00:00Z"',
+                    "import sprocket\nprint(sprocket.__version__)")
+                if wheel is not None:
+                    self.give_pip(program, wheel)
+                done: subprocess.CompletedProcess[str] = self.run_program(
+                    program)
+                self.assertEqual(done.returncode, 0, done.stderr[-300:])
+                self.assertEqual(done.stdout.strip(), "2.0.0")
+                self.assertIn("fetching without the program's exclude-newer",
+                              done.stderr)
 
     def test_an_altered_wheel_is_refused(self) -> None:
         """An approval that no longer matches the artifact is refused."""
@@ -3225,22 +3525,23 @@ class InstallTest(unittest.TestCase):
         self.assertEqual(done.returncode, 0, done.stderr[-300:])
         self.assertEqual(done.stdout.strip(), "2.0.0")
 
-    def test_approvals_can_be_written_from_a_warm_cache(self) -> None:
-        """An author need not empty the cache to regenerate them.
+    def test_approvals_are_written_afresh_from_a_warm_cache(self) -> None:
+        """`write` fetches even when the cache could answer.
 
-        A warm cache fetches nothing, so the approval path would never
-        run; the request record names the wheels it used so that `write`
-        still has something to record.
+        An author recording approvals is choosing again, and the
+        remembered answer may be weeks old, so `write` asks the index
+        rather than the cache.  See `T.rafal`.
         """
         # Populate the cache first, with no approvals at all.
         program: Path = self.program("warm", "widget")
         self.assertEqual(self.run_program(program).returncode, 0)
         self.assertFalse(program.with_suffix(".altvenv").exists())
 
-        # Now record, from a cache that fetches nothing.
+        # Now record: what arrived is listed, so it was fetched.
         done: subprocess.CompletedProcess[str] = self.run_program(
             program, ALT_VENV_APPROVE="write")
         self.assertEqual(done.returncode, 0, done.stderr[-300:])
+        self.assertIn("1 requested, 1 downloaded", done.stderr)
         self.assertIn("approvals written to", done.stderr)
         rows: list[str] = [line for line in
                            program.with_suffix(".altvenv").read_text(
@@ -3810,6 +4111,30 @@ class InstallTest(unittest.TestCase):
             self.assertFalse(venv.consent([], ["widget"]))
         self.assertIn(PROMPT, spoken.getvalue())
         self.assertEqual(spoken.getvalue().count("go ahead?"), 1)
+
+    def test_ask_wants_a_yes_and_a_terminal(self) -> None:
+        """Only `y` or `yes` is a yes; a typo is asked again, once each.
+
+        No terminal, and a terminal gone away, are both no, since the
+        question is about editing a file nobody present agreed to.
+        """
+        # Answers in turn, each on its own pretend terminal.
+        venv: alt_venv.AltVEnv = alt_venv.AltVEnv(self.root / "asking")
+        typed: str
+        expected: bool
+        for typed, expected in (("y\n", True), ("YES\n", True),
+                                ("n\n", False), ("x\ny\n", True),
+                                ("x\nx\nx\ny\n", False), ("", False)):
+            with self.subTest(typed=typed):
+                spoken: _KeptStringIO = _KeptStringIO()
+                with unittest.mock.patch.object(
+                        alt_venv.AltVEnv, "terminal",
+                        return_value=(spoken, _KeptStringIO(typed))):
+                    self.assertIs(venv.ask("Edit?"), expected)
+                self.assertIn("Edit? [y=>Yes/n=>No] ", spoken.getvalue())
+        with unittest.mock.patch.object(alt_venv.AltVEnv, "terminal",
+                                        return_value=None):
+            self.assertFalse(venv.ask("Edit?"))
 
     def test_verify_without_approvals_checks_nothing(self) -> None:
         """`verify` on its own is silent when there is no approvals file.
@@ -4449,6 +4774,35 @@ class InstallTest(unittest.TestCase):
             + bootstrap.pasted(SHIPPING) + tail + "\n")
         return program, home
 
+    def test_export_zipapp_after_approving_in_another_run(self) -> None:
+        """An export finds what an ordinary, locked run fetched.
+
+        `provide` files the record under the lock and `export` must look
+        it up the same way, or a release made in a run of its own, after
+        the approvals were written in an earlier one, finds nothing to
+        bundle.  See `request_for`.
+        """
+        # Approve in one run, export in another.
+        program: Path
+        home: Path
+        program, home = self.bootstrapped_program(
+            "zipped_later", 'dependencies = ["needy"]',
+            "import needy\nprint(needy.__file__)")
+        approved: subprocess.CompletedProcess[str] = self.run_program(
+            program, HOME=str(home), ALT_VENV_APPROVE="write")
+        self.assertEqual(approved.returncode, 0, approved.stderr[-400:])
+
+        # Forget what `write` filed, as a fresh clone's cache would not
+        # have it, so only the locked run's record can answer.
+        records: list[Path] = list(home.glob("**/requests/*.json"))
+        self.assertTrue(records)
+        for record in records:
+            record.unlink()
+        built: subprocess.CompletedProcess[str] = self.run_program(
+            program, HOME=str(home), ALT_VENV_EXPORT="zipapp")
+        self.assertEqual(built.returncode, 0, built.stderr[-400:])
+        self.assertTrue(program.with_suffix(".pyz").is_file())
+
     def test_export_zipapp_runs_without_a_network(self) -> None:
         """`ALT_VENV_EXPORT=zipapp` writes a `.pyz` that needs nothing.
 
@@ -4523,7 +4877,8 @@ class InstallTest(unittest.TestCase):
         cases: list[tuple[list[str], dict[str, str], bool, str]] = [
             ([native], {native: "0" * 64}, False, "compiled"),
             ([pure], {}, False, "no approvals"),
-            ([pure], {"other.whl": "0" * 64}, False, "not approved"),
+            ([pure], {"other-1.0-py3-none-any.whl": "0" * 64}, False,
+             "not approved"),
             ([pure], {pure: "0" * 64}, True, ".pth file"),
         ]
         wheels: list[str]
@@ -4652,9 +5007,13 @@ class InstallTest(unittest.TestCase):
             ALT_VENV_EXPORT="pins")
         self.assertNotEqual(done.returncode, 0)
         self.assertEqual(done.stdout, "")
-        self.assertIn("line 13: `lurker` comes from lurker, which Part 1 "
-                      "does not declare", done.stderr)
-        self.assertIn("line 14: `gadgetlib` is not importable",
+
+        # Lines as the file now stands, since `write` dated Part 1 first.
+        lines: list[str] = program.read_text().splitlines()
+        lurker: int = lines.index("import lurker") + 1
+        self.assertIn(f"line {lurker}: `lurker` comes from lurker, which "
+                      "Part 1 does not declare", done.stderr)
+        self.assertIn(f"line {lurker + 1}: `gadgetlib` is not importable",
                       done.stderr)
         self.assertIn("2 import(s) in prog.py", done.stderr)
         self.assertNotIn("`helper`", done.stderr)
@@ -4709,6 +5068,17 @@ class InstallTest(unittest.TestCase):
               self.assertRaises(RuntimeError) as caught):
             venv.pins()
         self.assertIn("sprocket", str(caught.exception))
+
+    def test_pins_refuse_what_is_not_a_wheel(self) -> None:
+        """A hand-edited line is named, not a `ValueError` on every run."""
+        # `locked` pins on every ordinary run, so this is what they see.
+        venv: alt_venv.AltVEnv = alt_venv.AltVEnv(self.root / "nonwheel")
+        with (unittest.mock.patch.object(venv, "approved",
+                                         return_value={"other.whl": "0" * 64}),
+              self.assertRaises(RuntimeError) as caught):
+            venv.pins()
+        self.assertIn("other.whl", str(caught.exception))
+        self.assertIn("is not a wheel name", str(caught.exception))
 
     def test_a_declaration_needs_no_import_name(self) -> None:
         """A distribution named apart from its module just works.
@@ -5738,7 +6108,7 @@ class MetadataTest(unittest.TestCase):
         """Part 1 is pinned, `no-build` added, and the rest kept.
 
         A `]` inside a requirement's extras must not end the array, and
-        a block that already has a `[tool.uv]` table keeps it as written.
+        a block that already has a `[tool.uv]` table keeps what it says.
         """
         # Extras, a comment and a trailing key around the array.
         text: str = ("#!/usr/bin/env python3\n# /// script\n"
@@ -5756,18 +6126,78 @@ class MetadataTest(unittest.TestCase):
         self.assertTrue(pinned.startswith("#!/usr/bin/env python3\n"))
         self.assertTrue(pinned.endswith("# ///\nprint('ran')\n"))
 
-        # An author's own `[tool.uv]` is left alone.
+        # An author's own `[tool.uv]` gains `no-build` beside its keys,
+        # unless it already says, either way.
         own: str = text.replace("[tool.other]", "[tool.uv]")
         kept: str | None = alt_venv.pin_dependencies(own, pins)
         assert kept is not None
         self.assertEqual(alt_venv.script_metadata(kept),
                          {"requires-python": ">=3.11", "dependencies": pins,
-                          "tool": {"uv": {"x": 1}}})
+                          "tool": {"uv": {"x": 1, "no-build": True}}})
+        building: str = own.replace("# x = 1", "# no-build = false")
+        built: str | None = alt_venv.pin_dependencies(building, pins)
+        assert built is not None
+        self.assertEqual(alt_venv.script_metadata(built),
+                         {"requires-python": ">=3.11", "dependencies": pins,
+                          "tool": {"uv": {"no-build": False}}})
 
         # Nothing to pin: no block, or a block without `dependencies`.
         self.assertIsNone(alt_venv.pin_dependencies("print('ran')\n", pins))
         self.assertIsNone(alt_venv.pin_dependencies(
             '# /// script\n# requires-python = ">=3.11"\n# ///\n', pins))
+
+    def test_uv_setting_changes_one_key(self) -> None:
+        """A key is replaced, added under the header, or a table added."""
+        # Replaced in place, added under an existing header, or a table.
+        table: str = 'dependencies = []\n\n[tool.uv]\nexclude-newer = "old"\n'
+        self.assertEqual(alt_venv.uv_setting(table, "exclude-newer", '"new"'),
+                         table.replace("old", "new"))
+        self.assertEqual(alt_venv.uv_setting(table, "no-build", "true"),
+                         table.replace("[tool.uv]\n",
+                                       "[tool.uv]\nno-build = true\n"))
+        self.assertEqual(
+            alt_venv.uv_setting("dependencies = []\n", "no-build", "true"),
+            "dependencies = []\n\n[tool.uv]\nno-build = true")
+
+        # A later table is not mistaken for this one.
+        later: str = '[tool.uv]\nx = 1\n[tool.other]\nexclude-newer = 1\n'
+        updated: str | None = alt_venv.uv_setting(
+            later, "exclude-newer", '"new"')
+        assert updated is not None
+        self.assertEqual(tomllib.loads(updated)["tool"], {
+            "uv": {"x": 1, "exclude-newer": "new"},
+            "other": {"exclude-newer": 1}})
+
+        # Dotted keys, or a value over several lines, are not guessed at.
+        self.assertIsNone(alt_venv.uv_setting(
+            "tool.uv.x = 1\n", "no-build", "true"))
+        self.assertIsNone(alt_venv.uv_setting(
+            "[tool.uv]\nexclude-newer = [\n 1,\n]\n", "exclude-newer", '"x"'))
+
+    def test_stamp_keeps_encoding_and_line_endings(self) -> None:
+        """A latin-1 program with CRLF lines is dated and otherwise kept."""
+        # Latin-1, CRLF, and a byte that is not valid UTF-8.
+        where: Path = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        venv: alt_venv.AltVEnv = alt_venv.AltVEnv(where / "cache")
+        program: Path = where / "prog.py"
+        source: str = ("# -*- coding: latin-1 -*-\r\n# /// script\r\n"
+                       "# dependencies = []\r\n# ///\r\nprint('caf\u00e9')\r\n")
+        program.write_bytes(source.encode("latin-1"))
+        with (unittest.mock.patch.object(alt_venv, "main_path",
+                                         return_value=program),
+              unittest.mock.patch.object(venv, "ask", return_value=True)):
+            said: str = venv.stamp("2026-10-12T19:05:41Z")
+        self.assertIn("written to", said)
+        raw: bytes = program.read_bytes()
+        self.assertIn(b"caf\xe9", raw)
+        self.assertNotIn(b"\n", raw.replace(b"\r\n", b""))
+        self.assertIn(b'# exclude-newer = "2026-10-12T19:05:41Z"\r\n', raw)
+
+        # No block is no date and nothing said.
+        program.write_text("print('no block')\n")
+        with unittest.mock.patch.object(alt_venv, "main_path",
+                                        return_value=program):
+            self.assertEqual(venv.stamp("2026-10-12T19:05:41Z"), "")
 
     def test_lock_mismatches_checks_the_approved_wheels(self) -> None:
         """A wheel missing from the lock, or listed differently, is named.

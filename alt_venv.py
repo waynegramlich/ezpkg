@@ -58,6 +58,7 @@ SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 # Every import below is in the standard library, and none of them comes
 # from a package a distribution can leave out.
 import ast
+import datetime
 import hashlib
 import importlib
 import importlib.metadata
@@ -615,14 +616,131 @@ def strip_bootstrap(text: str, why: str = "a zipapp carries its packages."
                    + lines[found.end_lineno:])
 
 
+def script_toml(text: str) -> tuple[re.Match[str], str] | None:
+    """Return a program's `script` block and its TOML, uncommented.
+
+    Arguments:
+    * `text` (`str`):
+      The program's source.
+
+    Returns:
+    * (`tuple[re.Match[str], str] | None`): Where the block is, for
+      `with_script_toml`, and its TOML without the comment markers, or
+      `None` when the program has no `script` block.
+    """
+    # The first `script` block; `script_metadata` refuses two.
+    found: re.Match[str] | None = next(
+        (match for match in BLOCK.finditer(text)
+         if match.group("type") == "script"), None)
+    if found is None:
+        return None
+    return found, "\n".join(
+        line[2:] if line.startswith("# ") else line[1:]
+        for line in found.group("content").splitlines())
+
+
+def with_script_toml(text: str, found: re.Match[str], toml: str) -> str:
+    """Return a program's text with its `script` block's TOML replaced.
+
+    Arguments:
+    * `text` (`str`):
+      The program's source, as `script_toml` read it.
+    * `found` (`re.Match[str]`):
+      The block, as `script_toml` returned it.
+    * `toml` (`str`):
+      The new TOML, without comment markers.
+
+    Returns:
+    * (`str`): The program with the new block and nothing else changed.
+    """
+    # Commented back, `#` alone for a blank line, as the PEP spells it.
+    content: str = "".join(f"# {line}\n" if line else "#\n"
+                           for line in toml.splitlines())
+    return (text[:found.start("content")] + content
+            + text[found.end("content"):])
+
+
+def uv_setting(toml: str, key: str, value: str | None) -> str | None:
+    """Return a block's TOML with one key of `[tool.uv]` set or removed.
+
+    The line is edited in place when the key is already there, added
+    under the `[tool.uv]` header when the table is, and a table is
+    added at the end when neither is.  Removing deletes the line and
+    leaves the table, even an empty one.  The result is parsed and compared
+    with the original, and anything but the one key changing -- a
+    `[tool.uv]` spelled as dotted keys, say, or a value running over
+    several lines -- gives `None` rather than a damaged block.
+
+    Arguments:
+    * `toml` (`str`):
+      The block's TOML, as `script_toml` returns it.
+    * `key` (`str`):
+      A bare key, such as `exclude-newer`.
+    * `value` (`str | None`):
+      Its value as TOML spells it, such as `"2026-10-12T19:05:41Z"`
+      with its quotes, or `true`; `None` removes the key.
+
+    Returns:
+    * (`str | None`): The new TOML, or `None` when this cannot set the
+      key safely.
+    """
+    # What the block says now, and what it should say afterwards.
+    setting: str = f"{key} = {value}"
+    try:
+        expected: dict[str, Any] = tomllib.loads(toml)
+        if value is None:
+            expected.get("tool", {}).get("uv", {}).pop(key, None)
+        else:
+            expected.setdefault("tool", {}).setdefault("uv", {})[key] = (
+                tomllib.loads(setting)[key])
+    except (tomllib.TOMLDecodeError, AttributeError):
+        return None
+
+    # The table runs from its header to the next header, or the end.
+    lines: list[str] = toml.split("\n")
+    header: int | None = next(
+        (index for index, line in enumerate(lines)
+         if re.fullmatch(r"\s*\[tool\.uv\]\s*(#.*)?", line)), None)
+    if header is None and value is not None:
+        while lines and not lines[-1].strip():
+            lines.pop()
+        lines += ["", "[tool.uv]", setting]
+    elif header is not None:
+        end: int = next((index for index in range(header + 1, len(lines))
+                         if lines[index].lstrip().startswith("[")),
+                        len(lines))
+        existing: int | None = next(
+            (index for index in range(header + 1, end)
+             if re.match(rf"\s*{re.escape(key)}\s*=", lines[index])), None)
+        if value is None:
+            if existing is not None:
+                del lines[existing]
+        elif existing is None:
+            lines.insert(header + 1, setting)
+        else:
+            lines[existing] = setting
+
+    # Only the one key may have changed.
+    result: str = "\n".join(lines)
+    try:
+        if tomllib.loads(result) != expected:
+            return None
+    except tomllib.TOMLDecodeError:
+        return None
+    return result
+
+
 def pin_dependencies(text: str, pins: Sequence[str]) -> str | None:
     """Return a program's text with Part 1 pinned for `uv`.
 
     The `dependencies` array in the PEP 723 block is replaced by `pins`,
-    and unless the block already has a `[tool.uv]` table, one is added
-    saying `no-build = true`: `uv` then installs wheels only, as
+    and unless the block's `[tool.uv]` table already says otherwise,
+    `no-build = true` is added to it: `uv` then installs wheels only, as
     `alt_venv` does with `--only-binary`, and never needs a compiler.
-    Everything else in the block, and outside it, stays as written.
+    `exclude-newer` is taken out: the pins and `uv`'s lock already say
+    exactly which versions, and `uv` with a date refuses any file whose
+    index gives no upload time.  Everything else in the block, and
+    outside it, stays as written.
 
     Arguments:
     * `text` (`str`):
@@ -635,14 +753,12 @@ def pin_dependencies(text: str, pins: Sequence[str]) -> str | None:
       has no block, or no `dependencies` this can find and replace.
     """
     # The block's TOML, without its comment markers.
-    found: re.Match[str] | None = next(
-        (match for match in BLOCK.finditer(text)
-         if match.group("type") == "script"), None)
-    if found is None:
+    block: tuple[re.Match[str], str] | None = script_toml(text)
+    if block is None:
         return None
-    toml: str = "\n".join(
-        line[2:] if line.startswith("# ") else line[1:]
-        for line in found.group("content").splitlines())
+    found: re.Match[str]
+    toml: str
+    found, toml = block
 
     # The array runs to the `]` that closes it, skipping over strings,
     # which may hold a `]` of their own, as in `widget[extra]`.
@@ -676,16 +792,18 @@ def pin_dependencies(text: str, pins: Sequence[str]) -> str | None:
         metadata: dict[str, Any] = tomllib.loads(toml)
     except tomllib.TOMLDecodeError:
         return None
-    if "uv" not in metadata.get("tool", {}):
-        toml += "\n[tool.uv]\nno-build = true"
+    if "no-build" not in metadata.get("tool", {}).get("uv", {}):
+        built: str | None = uv_setting(toml, "no-build", "true")
+        if built is None:
+            return None
+        toml = built
+    undated: str | None = uv_setting(toml, "exclude-newer", None)
+    if undated is None:
+        return None
+    toml = undated
     if tomllib.loads(toml).get("dependencies") != list(pins):
         return None
-
-    # Commented back, `#` alone for a blank line, as the PEP spells it.
-    content: str = "".join(f"# {line}\n" if line else "#\n"
-                           for line in toml.splitlines())
-    return (text[:found.start("content")] + content
-            + text[found.end("content"):])
+    return with_script_toml(text, found, toml)
 
 
 # The names an `if` test uses when it picks an import by platform, as in
@@ -1128,13 +1246,15 @@ class AltVEnv:
                 found[fields[0]] = fields[1]
         return found
 
-    def approve(self, wheels: Sequence[Path]) -> Path | None:
+    def approve(self, wheels: Sequence[Path],
+                resolved: str = "") -> Path | None:
         """Record the wheels that arrived as approved.
 
         Called when `ALT_VENV_APPROVE` is `write`, which is how an
         author regenerates the file after changing what the program
         needs.  Sorted by name, so that a change shows up as a small
-        diff in whatever the program is committed to.
+        diff in whatever the program is committed to, and dated, since
+        the list is what `pip` chose on that day.
 
         It records what arrived without judging it, because judging it is
         the author's part.  An author who runs this while pointed at an
@@ -1147,6 +1267,9 @@ class AltVEnv:
         Arguments:
         * `wheels` (`Sequence[Path]`):
           The wheels to record.
+        * `resolved` (`str`):
+          When `pip` chose them, as `stamp` also writes it.  Empty means
+          now.
 
         Returns:
         * (`Path | None`): The file written, or `None` when this program
@@ -1158,9 +1281,15 @@ class AltVEnv:
             return None
         rows: list[str] = sorted(f"{wheel.name} {self.digest(wheel)}"
                                  for wheel in wheels)
+        # The date says when `pip` chose these, which is what the list
+        # is true of: the same request tomorrow may resolve differently.
+        # A comment, so `approved` reads the file as it always has.
+        resolved = resolved or time.strftime("%Y-%m-%dT%H:%M:%SZ",
+                                             time.gmtime())
         record.write_text(
             "# Wheels this program has approved, by SHA-256.  Regenerate\n"
             "# with ALT_VENV_APPROVE=write after changing what it needs.\n"
+            f"# Resolved: {resolved}\n"
             + "".join(f"{row}\n" for row in rows))
         return record
 
@@ -1179,8 +1308,9 @@ class AltVEnv:
 
         Raises:
         * `RuntimeError`:
-          If there is no approvals file to pin from, or it approves two
-          versions of one distribution, which no single pin can say.
+          If there is no approvals file to pin from, if it names
+          something that is not a wheel, or if it approves two versions
+          of one distribution, which no single pin can say.
         """
         # A wheel is `{name}-{version}-...`, and the name has no hyphen.
         approved: dict[str, str] | None = self.approved()
@@ -1191,6 +1321,12 @@ class AltVEnv:
         versions: dict[str, set[str]] = {}
         wheel: str
         for wheel in approved:
+            # Only a hand edit makes anything else, and since `locked`
+            # pins on every run, it must say which file and line.
+            if not wheel.endswith(".whl") or wheel.count("-") < 4:
+                raise RuntimeError(
+                    f"{wheel} in {self.approvals()} is not a wheel name; "
+                    f"regenerate it with ALT_VENV_APPROVE=write")
             name, version = wheel.split("-")[:2]
             versions.setdefault(name, set()).add(version)
         mixed: list[str] = sorted(name for name, found in versions.items()
@@ -1201,6 +1337,167 @@ class AltVEnv:
                 + ", ".join(mixed))
         return sorted(f"{name}=={found.pop()}"
                       for name, found in versions.items())
+
+    def locked(self) -> list[str]:
+        """Return the versions a fetch must keep to, as constraints.
+
+        The approvals are a lock as well as a check.  Without this, `pip`
+        resolves `dependencies` afresh on every fetch and picks the
+        newest of everything, so a new release of a package is refused
+        by `verify` rather than replaced by the version the author
+        recorded.  Handed to `pip` as constraints, the recorded versions
+        are what gets fetched, and `verify` then checks they are the
+        same files.  Constraints rather than requirements, so a package
+        the program no longer asks for is not fetched just because it
+        is recorded.
+
+        `write` and `skip` get no lock, because both are an author
+        choosing again: `write` resolves afresh and records the result,
+        which is how a program's packages are upgraded.  See `T.rafal`
+        in `TASKS/`.
+
+        Returns:
+        * (`list[str]`): Constraints such as `widget==1.2.3`, sorted, or
+          an empty list when nothing is locked.
+
+        Raises:
+        * `RuntimeError`:
+          Through `pins`, if the approvals name two versions of one
+          distribution.
+        """
+        # Only an ordinary run, and only with something approved.
+        mode: str = os.environ.get("ALT_VENV_APPROVE", "").lower()
+        if mode in ("write", "skip") or not self.approved():
+            return []
+        return self.pins()
+
+    def cutoff(self) -> str:
+        """Return the upload date a fetch must keep before, if any.
+
+        The date is `exclude-newer` in Part 1's `[tool.uv]` table, which
+        is where `uv run` reads it too, so one line serves both.  It is
+        for a program sent on its own, without its approvals: it gets the
+        packages that were newest when its author recorded them, rather
+        than whatever is newest the day it is run.  `write` stamps it;
+        see `stamp`.
+
+        With approvals there is no date, because the lock already says
+        exactly which versions.  `write` and `skip` get none either, for
+        the reason `locked` gives.  See `T.srdisb` in `TASKS/`.
+
+        Returns:
+        * (`str`): The date as `pip`'s `--uploaded-prior-to` takes it, or
+          an empty string for none.
+        """
+        # Only an ordinary run without approvals.
+        mode: str = os.environ.get("ALT_VENV_APPROVE", "").lower()
+        if mode in ("write", "skip") or self.approved():
+            return ""
+
+        # A block that will not parse is reported elsewhere, by the
+        # code that needs it; here it simply has no date.
+        try:
+            declared: dict[str, Any] = self.declaration()
+        except ValueError:
+            return ""
+        tool: object = declared.get("tool", {})
+        uv: object = tool.get("uv", {}) if isinstance(tool, dict) else {}
+        when: object = uv.get("exclude-newer") if isinstance(uv, dict) else None
+
+        # TOML lets the date go unquoted, and then it arrives as one.
+        if isinstance(when, datetime.date):
+            return when.isoformat()
+        return when if isinstance(when, str) else ""
+
+    def stamp(self, resolved: str) -> str:
+        """Write the resolution date into the program's Part 1.
+
+        As `exclude-newer` in the `[tool.uv]` table, so that the date
+        travels inside the `.py` even when the approvals do not; see
+        `cutoff`.  The author is asked first, naming the line, because
+        this edits a file they wrote; with no terminal to ask on, the
+        file is left alone.  Nothing else in the program changes.  Its encoding,
+        byte order mark and line endings are kept, since a program is
+        not obliged to be UTF-8 with `\\n`.
+
+        Arguments:
+        * `resolved` (`str`):
+          The date, as `approve` wrote it.
+
+        Returns:
+        * (`str`): A line for standard error, or an empty string when
+          there is nothing to say, as for a program with no `script`
+          block, which has nowhere to put a date.
+        """
+        # The bytes, so that the encoding can be kept on the way back.
+        where: Path | None = main_path()
+        if where is None:
+            return ""
+        try:
+            raw: bytes = where.read_bytes()
+        except OSError:
+            return ""
+        encoding: str = tokenize.detect_encoding(io.BytesIO(raw).readline)[0]
+        text: str = raw.decode(encoding)
+        crlf: bool = "\r\n" in text
+        text = text.replace("\r\n", "\n")
+
+        # No block, no date and nothing to say.
+        block: tuple[re.Match[str], str] | None = script_toml(text)
+        if block is None:
+            return ""
+        found: re.Match[str]
+        toml: str
+        found, toml = block
+        setting: str = f'exclude-newer = "{resolved}"'
+        by_hand: str = (f"add `# {setting}` under `# [tool.uv]` in its "
+                        f"script block by hand")
+        dated: str | None = uv_setting(toml, "exclude-newer", f'"{resolved}"')
+        if dated is None:
+            return f"could not write the resolution date into {where}; {by_hand}"
+        if dated == toml:
+            return ""
+
+        # Ask, naming the line the setting will be on afterwards.
+        edited: str = with_script_toml(text, found, dated)
+        line: int = edited.splitlines().index(f"# {setting}") + 1
+        verb: str = ("change" if "exclude-newer" in (
+            tomllib.loads(toml).get("tool", {}).get("uv", {})) else "add")
+        if not self.ask(f"alt_venv: could I {verb} `{setting}` at line "
+                        f"{line} of {where.name}?"):
+            return f"{where} left as it was; to date it, {by_hand}"
+        text = edited
+        if crlf:
+            text = text.replace("\n", "\r\n")
+        where.write_bytes(text.encode(encoding))
+        return f"resolution date {resolved} written to {where}"
+
+    def request_for(self, asking: Sequence[str]) -> str:
+        """Return the key a request's record is filed under.
+
+        What was asked, sorted, the lock and the date, since the same
+        requirements under another lock or date resolve to other
+        versions.
+        ` -c ` cannot occur inside a requirement, which never starts with
+        a dash.  One method, so that `provide`, which files the record,
+        and `export`, which reads it back, cannot disagree.
+
+        Arguments:
+        * `asking` (`Sequence[str]`):
+          Requirement strings as `pip` spells them.
+
+        Returns:
+        * (`str`): The key, for `remember`.
+        """
+        # Without a lock or a date the key is what it always was.
+        request: str = " ".join(sorted(asking))
+        locked: list[str] = self.locked()
+        if locked:
+            request += " -c " + " ".join(locked)
+        before: str = self.cutoff()
+        if before:
+            request += " --uploaded-prior-to " + before
+        return request
 
     def export(self, form: str, asking: Sequence[str] = ()) -> None:
         """Write what the approvals record in another tool's form.
@@ -1405,7 +1702,7 @@ class AltVEnv:
                 "no approvals to bundle from; run once with "
                 "ALT_VENV_APPROVE=write first")
         remembered: tuple[list[str], list[str]] | None = (
-            self.remember(" ".join(sorted(asking))) if asking
+            self.remember(self.request_for(asking)) if asking
             else ([], []))
         if remembered is None:
             raise RuntimeError(
@@ -1767,6 +2064,46 @@ class AltVEnv:
                     "Please answer y, n, a for always, or ? for more.\n")
         return False
 
+    def ask(self, question: str) -> bool:
+        """Ask a yes-or-no question on the terminal, and say which.
+
+        For the author's own decisions, such as letting `stamp` edit the
+        program.  Unlike `consent`, no terminal means no: the question
+        is about changing a file somebody wrote, and nobody present to
+        agree is not agreement.  Anything but `y`, `yes`, `n` or `no` is
+        asked again, up to `ATTEMPTS` times; a terminal that has gone
+        away reads as empty, which is no.
+
+        Arguments:
+        * `question` (`str`):
+          The question, without the answers, which this adds.
+
+        Returns:
+        * (`bool`): True only for a yes.
+        """
+        # No terminal, nobody to say yes.
+        opened: tuple[IO[str], IO[str]] | None = self.terminal()
+        if opened is None:
+            return False
+        writer: IO[str]
+        reader: IO[str]
+        writer, reader = opened
+        answer: str
+        with writer, reader:
+            for _attempt in range(ATTEMPTS):
+                writer.write(f"{question} [y=>Yes/n=>No] ")
+                writer.flush()
+                answer = reader.readline()
+                if not answer:
+                    return False
+                answer = answer.strip().lower()
+                if answer in ("y", "yes"):
+                    return True
+                if answer in ("n", "no"):
+                    return False
+                writer.write("Please answer y or n.\n")
+        return False
+
     def forever(self) -> Path:
         """Return the file that says never to ask on this machine again.
 
@@ -1823,12 +2160,17 @@ class AltVEnv:
         if mode == "write":
             # A program with no file has nowhere to keep approvals, and
             # saying "written to None" would claim otherwise.
-            written: Path | None = self.approve(wheels)
+            resolved: str = time.strftime("%Y-%m-%dT%H:%M:%SZ",
+                                          time.gmtime())
+            written: Path | None = self.approve(wheels, resolved)
             if written is None:
                 print("nowhere to write approvals: this program has no "
                       "file of its own", file=sys.stderr)
             else:
                 print(f"approvals written to {written}", file=sys.stderr)
+            stamped: str = self.stamp(resolved)
+            if stamped:
+                print(stamped, file=sys.stderr)
             return
         if mode == "skip":
             return
@@ -2088,7 +2430,9 @@ class AltVEnv:
         return added
 
     def download(self, requirements: Sequence[str],
-                 argv: Sequence[str] = ()) -> list[Path]:
+                 argv: Sequence[str] = (),
+                 constraints: Sequence[str] = (),
+                 before: str = "") -> list[Path]:
         """Fetch wheels into the holding area without installing them.
 
         `pip download` is used rather than `pip install`, so that
@@ -2108,6 +2452,14 @@ class AltVEnv:
           Requirements as `pip` spells them.
         * `argv` (`Sequence[str]`):
           Extra arguments for `pip download`.
+        * `constraints` (`Sequence[str]`):
+          Versions to keep to, such as `widget==1.2.3`, as `locked`
+          returns them.  Empty means none.
+        * `before` (`str`):
+          Fetch only what was uploaded before this date, as `cutoff`
+          returns it.  Empty means no date.  An index that does not
+          publish upload times, or a `pip` too old to filter by them,
+          fetches without it and says so, rather than failing.
 
         Returns:
         * (`list[Path]`): The wheels that arrived, in sorted order.
@@ -2123,6 +2475,16 @@ class AltVEnv:
         # A directory per call, so concurrent downloads stay apart.
         pending: Path = self.paths()[0]
         holding: Path = Path(tempfile.mkdtemp(dir=pending))
+
+        # `pip` takes constraints only from a file.  It goes in the
+        # holding directory, which is removed with the wheels, and is
+        # never mistaken for one, since only `*.whl` is collected.
+        lock: list[str] = []
+        if constraints:
+            listed: Path = holding / "constraints.txt"
+            listed.write_text("".join(f"{one}\n" for one in constraints))
+            lock = ["--constraint", str(listed)]
+        dated: list[str] = ["--uploaded-prior-to", before] if before else []
 
         # Not `--quiet`, and only one retry, and the two go together.
         # Measured 2026-09-28 against a server with an untrusted
@@ -2140,18 +2502,41 @@ class AltVEnv:
         done: subprocess.CompletedProcess[str] = subprocess.run(
             [*self.pip(), "download", "--retries", "1",
              "--no-input", "--disable-pip-version-check",
-             "--only-binary", ":all:", *argv, "--dest", str(holding),
+             "--only-binary", ":all:", *lock, *dated, *argv,
+             "--dest", str(holding),
              *requirements],
             capture_output=True, text=True, check=False)
+
+        # `pip` refuses outright when the index gives no upload times,
+        # and an old `pip` does not know the option.  The date is a
+        # nicety for a program sent on its own, not a guarantee, so
+        # fetch without it rather than fail.  Measured 2026-10-12 with
+        # `pip` 26.2.1, which says "does not provide upload-time
+        # metadata".
+        undated: bool = before != "" and done.returncode != 0 and (
+            "does not provide upload-time metadata" in done.stderr
+            or "no such option: --uploaded-prior-to" in done.stderr)
+        if undated:
+            shutil.rmtree(holding, ignore_errors=True)
+            print(f"alt_venv: fetching without the program's exclude-newer "
+                  f"date {before}, which this index or pip cannot apply",
+                  file=sys.stderr)
+            return self.download(requirements, argv, constraints)
         if done.returncode == 2:
             raise ValueError(
                 f"pip rejected the command line: "
                 f"{done.stderr.strip() or 'pip gave no reason'}")
+        # A lock that `dependencies` has moved past fails here, as a
+        # conflict `pip` cannot resolve, so say which file to regenerate.
         if done.returncode != 0:
+            stale: str = (
+                f"; if `dependencies` changed, the versions locked in "
+                f"{self.approvals()} may be the conflict: regenerate it "
+                f"with ALT_VENV_APPROVE=write" if constraints else "")
             raise RuntimeError(
                 f"could not fetch {', '.join(requirements)} into "
                 f"{holding}: "
-                f"{done.stderr.strip() or 'pip gave no reason'}")
+                f"{done.stderr.strip() or 'pip gave no reason'}{stale}")
         return sorted(holding.glob("*.whl"))
 
     def unpack(self, wheel: Path) -> Path:
@@ -2338,6 +2723,8 @@ class AltVEnv:
         file.  `skip` checks nothing, which is for an author still
         deciding what the program needs.  A program with no approvals
         file is told what arrived and not asked about it; see Step 6.6.
+        Unset, the approvals also lock: the versions they record are
+        the ones fetched, whatever is newer; see `locked`.
 
         `ALT_VENV_EXPORT`, in the no-argument form, writes what the
         approvals record in another form and then exits instead of
@@ -2626,13 +3013,23 @@ class AltVEnv:
         # A request answered before is answered from the cache, keyed by
         # what was asked rather than by what it resolved to; see Step
         # 6.3.4.  No version expression is compared, so no PEP 440
-        # parser is needed and none can disagree with `pip`.
-        request: str = " ".join(sorted(asking))
+        # parser is needed and none can disagree with `pip`.  The lock
+        # is part of what was asked; see `request_for`.
+        #
+        # Except under `write`, which always fetches: an author recording
+        # approvals is choosing again, and a remembered answer may be
+        # weeks old.  See `T.rafal` in `TASKS/`.
+        locked: list[str] = self.locked()
+        before: str = self.cutoff()
+        request: str = self.request_for(asking)
+        writing: bool = (
+            os.environ.get("ALT_VENV_APPROVE", "").lower() == "write")
         remembered: tuple[list[str], list[str]] | None = (
-            self.remember(request))
+            None if writing else self.remember(request))
         trees: list[Path]
         if remembered is None:
-            arrived: list[Path] = self.download(asking, argv)
+            arrived: list[Path] = self.download(asking, argv, locked,
+                                                before)
             holding: Path
             try:
                 # Nothing arriving is a real answer, not a failure: every
@@ -2662,17 +3059,12 @@ class AltVEnv:
                 for holding in {wheel.parent for wheel in arrived}:
                     shutil.rmtree(holding, ignore_errors=True)
         else:
-            trees = [self.paths()[2] / key for key in remembered[0]]
-
             # A warm cache fetches nothing, so there is nothing new to
             # approve or refuse.  Verification belongs to the moment of
             # fetching: somebody who can rewrite the cache can rewrite
             # the program too, so that is not the threat this defends
-            # against.  But an author regenerating the approvals must
-            # not have to empty the cache first, so `write` still works.
-            if os.environ.get("ALT_VENV_APPROVE", "").lower() == "write":
-                kept: Path = self.paths()[1]
-                self.gate([kept / name for name in remembered[1]])
+            # against.
+            trees = [self.paths()[2] / key for key in remembered[0]]
 
         # Only the unpacked trees go on the path, never the holding
         # area.  That one rule is the whole of the jail; see 6.3.1.
@@ -2710,15 +3102,11 @@ class AltVEnv:
         path.  A tree in `versions/` that no request record names is
         unreachable too: `install` finds trees through those records, so
         a tree nothing names will never be found again.  And a wheel in
-        `wheels/` that no record names is in the same position, since the
-        only thing that ever looks at a kept wheel is
-        `ALT_VENV_APPROVE=write` working from a record.
+        `wheels/` that no record names is in the same position.
 
-        A live record protects its wheels, which is what keeps that
-        author flow working: an author can still regenerate approvals
-        from a warm cache without emptying it first.  A record that has
-        aged out takes its wheels with it, which is what stops `wheels/`
-        being the one directory that grows for ever.
+        A live record protects its wheels.  A record that has aged out
+        takes its wheels with it, which is what stops `wheels/` being
+        the one directory that grows for ever.
 
         Both wait out `grace` first, and that is about concurrency, not
         tidiness: another program's download is sitting in `pending/`
@@ -2902,14 +3290,13 @@ class AltVEnv:
 
         Arguments:
         * `request` (`str`):
-          The requirements, sorted and joined, as `install` builds them.
+          The key `request_for` builds.
         * `trees` (`list[str] | None`):
           The version directory names to record.  `None`, the default,
           reads instead of writing.
         * `wheels` (`list[str] | None`):
           The wheel filenames those trees came from, recorded so that
-          `ALT_VENV_APPROVE=write` can regenerate the approvals from a
-          warm cache instead of demanding an empty one.
+          `export` can check them against the approvals.
 
         Returns:
         * (`tuple[list[str], list[str]] | None`): The trees and the
