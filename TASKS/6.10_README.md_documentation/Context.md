@@ -227,3 +227,29 @@ S5 Alternatives, S6 Conclusion).
 * Related open tasks born from this README work: `T.siofr` (scan the
   imports on ordinary runs), `T.trcb` (test the Enabling copy of the
   bootstrap), `T.fipab` (flag imports above the bootstrap).
+
+## 2026-10-12: suspended for `T.rafal`
+
+* "Releasing Programs" is now "Releasing a Program", rewritten by
+  Wayne: email the single `.py` first (friend gets the download
+  prompt), then the `zipapp` (pure only, e.g. not `numpy`) and `uv`
+  bullets, then recording with `ALT_VENV_APPROVE=write` (Linux/macOS
+  and a PowerShell line; Wayne's friends will test Windows before
+  release).  Typos and grammar fixed above the fence.
+* The fence is `### Make your Release`: text above it is settled,
+  text below it (the leftover `4.` step, "One catch" about compiled
+  packages) is not yet reworked.  An HTML comment above the fence says
+  to settle the text before diving into `zipapp` and `uv`.
+* Wayne's paragraph on what `YOUR_PROG.altvenv` is for says it lets
+  you "exactly recreate the packages", so a bug from a new package can
+  be told apart from one in your code.  The code could not do that
+  (it only refuses changes; `pins` is separate), which is why
+  `T.rafal` exists.  Recheck the paragraph once `T.rafal` is done;
+  `pins` is then only for the email-the-`.py` case.
+* Wayne kept version control in the paragraph on purpose: it is how
+  these problems get debugged.  The typosquatting point
+  (`requests`/`reqeusts`) was dropped as too obscure for the README.
+* Download Prompt section: Wayne's comment says it needs shortening
+  later.
+* Heading rename: the road map, the intro's Issue note and the S1
+  notes above still say "Releasing Programs".

@@ -109,6 +109,10 @@ such comments out of your own programs if you do not use `mypy`.
 
 ## Download Prompt
 
+<!-- Claude: General comment about this section.  It needs to be shorter.
+We'll come back a deal with it later.
+-->
+
 When people run `pip` by hand, they know they are downloading packages onto
 their computer.  A program that uses `AltVEnv` downloads them on its own, so
 whoever runs it may not know.  It would be rude to do downloads without asking
@@ -282,31 +286,53 @@ S4: Conclusion: fix "zapapp", the garbled "(pure Python on)", and
 S5: Wrapup: check the intro (its packaging promise, see the issue there)
     and the whole document against what the code does. -->
 
-## Releasing Programs
+## Releasing a Program
 
-Once your program works, releasing it means putting it in a form that
-other people can run on their own machines.  There are several forms, and
-more will be added over time.  They all start with the same steps.
+Once your program starts to work, you may want to share it with a friend.  If
+it fits into a single Python file, you can literally email it to them.  Your
+friend saves the file and runs it, and the `AltVEnv` bootstrap takes care of
+the rest.  (They will have to get through the `AltVEnv` download prompt
+first.)  For a friend, it is super easy and convenient.
 
-### Steps in Common
+If you want to use another packaging solution, please read on.
 
-1. **Record the packages you approve.**  Run your program once like this:
-   ```
-   ALT_VENV_APPROVE=write python3 prog.py
-   ```
-   This writes `prog.altvenv` beside `prog.py`, recording the exact
-   package files your program got (every package `pip` brought along
-   included), each with its SHA-256.  Every release form starts from this
-   file and refuses to work without it.  Run it again whenever you change
-   `dependencies`.
-2. **Keep `prog.altvenv` with your program.**  Whoever runs your program
-   cannot tell a genuine package from a tampered or look-alike one, but you
-   can.  With the file beside the program, nobody is shown the download
-   prompt: what matches the file is installed without a question, and
-   anything that does not match is refused before it is installed.  A new
-   release of a package is refused too, until you record it again.  If you
-   keep your program in version control, commit `prog.altvenv` with it.
-3. **Make the release.**  Run your program with `ALT_VENV_EXPORT` set to
+The currently supported package formats are:
+
+* `zipapp`:
+  This packages the program up into a single file that includes all
+  required packages.  This works with "pure" Python programs
+  and does not work with "impure" packages that contain compiled code
+  (e.g. `numpy`).
+  <!-- Claude:  We have the wheels, so we can determine if a package is pure or
+  not. We need to inform the user about impure packages somehow. -->
+
+* `uv`:
+  This package manager can handle both pure and impure Python packages, but it
+  requires the end user to install `uv` on their machine first.
+
+The first step is to record information about every package currently in
+use by running `YOUR_PROG.py` as follows:
+* Linux/macOS: `ALT_VENV_APPROVE=write python3 YOUR_PROG.py`
+* Windows (PowerShell):
+  `$env:ALT_VENV_APPROVE='write'; python YOUR_PROG.py; Remove-Item Env:ALT_VENV_APPROVE`
+
+This writes out `YOUR_PROG.altvenv` beside `YOUR_PROG.py`, which records all
+needed information.  It is prudent to add `YOUR_PROG.altvenv` to your version
+control system (e.g. `git` or `hg`).
+
+`YOUR_PROG.altvenv` contains detailed information about each package that
+is needed.  With this file in your version control, you can exactly
+recreate the packages that were used at the time of creation.  Thus, when a
+new package introduces a bug, you can determine that it is a problem in
+a package rather than in your code.  This file is the foundation for making
+releases in other formats (e.g. `zipapp` and `uv`).
+
+<!-- Claude: I want to get the text above worked out before diving into
+the zipapp and uv stuff further. -->
+
+### Make your Release
+
+4. **Make the release.**  Run your program with `ALT_VENV_EXPORT` set to
    the form you want (each one is described below), for example:
    ```
    ALT_VENV_EXPORT=zipapp python3 prog.py
@@ -318,8 +344,6 @@ more will be added over time.  They all start with the same steps.
    This catches a package that your own Python happens to have, which
    works for you but would fail for everybody else.
 
-Steps 1 and 3 can be done in one run:
-`ALT_VENV_APPROVE=write ALT_VENV_EXPORT=zipapp python3 prog.py`.
 
 One catch: a package that contains compiled code comes as a different file
 for each operating system and Python version.  `prog.altvenv` records the
