@@ -1,7 +1,7 @@
 {
-  "state": "Open",
+  "state": "Closed",
   "created": "2026-10-13T02:03:18Z",
-  "updated": "2026-10-13T03:57:09Z",
+  "updated": "2026-10-13T04:11:12Z",
   "history": [
     {
       "state": "Pending",
@@ -10,6 +10,10 @@
     {
       "state": "Open",
       "time": "2026-10-13T03:57:09Z"
+    },
+    {
+      "state": "Closed",
+      "time": "2026-10-13T04:11:12Z"
     }
   ],
   "tag": "rtg"

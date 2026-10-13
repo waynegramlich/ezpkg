@@ -1,10 +1,12 @@
 # `EZPkg`: Easy Python Packages
 
-`EZPkg` (pronounced "easy package") grew out of the frustration of
-developing several Python programs concurrently, where each program needed
-its own Python virtual environment.  When switching development between
-programs, it is really easy to forget to deactivate one before activating
-another, and accidentally run one program against the other's packages.
+`EZPkg` (pronounced "easy package") grew out the desire to send a simple
+one file Python program to a friend.  When the friend, tried to run it,
+there were a few missing packages.  Next, my friend had to create a virtual
+environment and install the packages.  It worked, but it was annoying.
+The was asked, "Could this made really easy of the recipient?"  Thus, was
+born the concept of `EZPkg` which allows a single file Python program to
+easily download its missing packages.
 
 To get started with `EZPkg`, you paste a modest bootstrap at the front of
 your program and go.  After that, `EZPkg` fetches your packages over the

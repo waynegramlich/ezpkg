@@ -32,3 +32,13 @@
   Wayne's commit; then Claude creates the repository with `gh repo
   create waynegramlich/ezpkg --public --source=. --remote=github` and
   pushes `main`.
+
+## 2026-10-12: Pushed
+
+* `gh repo create` made the public repository, but the ssh push failed:
+  `~/.ssh/config` named the directory `~/.ssh/` as its `IdentityFile`
+  (Wayne fixed it to `~/.ssh/id_ed25519`), and that key's passphrase is
+  forgotten.  The `github` remote now uses HTTPS,
+  `https://github.com/waynegramlich/ezpkg.git`, authenticated by `gh`'s
+  credential helper; no ssh key is needed.  `main` tracks `github/main`.
+* Verified: GitHub's `main` is `9de569e`, 102 commits.
