@@ -1,7 +1,6 @@
 @6_Flesh_out_the_AltVEnv_class/Details.md
 @6_Flesh_out_the_AltVEnv_class/Context.md
 @6.10_README.md_documentation/Details.md
-@6.10_README.md_documentation/Context.md
 @6.13_Messages/Details.md
 @6.17_A_fetch_from_the_real_PyPI/Details.md
 @6.20_Scan_the_imports_on_first_run/Details.md

@@ -295,3 +295,22 @@ S5 Alternatives, S6 Conclusion).
   user yet; dogfood runs use `PYTHONPATH` pointing at the project.
 * Working style unchanged: proposals in HTML comments beside the old
   text with both line ranges; when Wayne says delete, delete.
+
+## 2026-10-12 evening: road map finished; suspended
+
+* Alternatives deleted at Wayne's word (the tool survey was going stale
+  and `AltVEnv` now exports to `zipapp` and `uv`); so was "Why not just
+  use `uv`?" (Wayne: nobody will ask, since `uv` is supported).
+* "How `AltVEnv` Actually Works" rewritten from Wayne's draft: one
+  bullet per bootstrap stage `s`, checked against `quick_start.py`;
+  ends with "Never edit the bootstrap" and `ALT_VENV_BOOTSTRAP=check`.
+  There is no prompt for an edited bootstrap; the check only reports.
+* Conclusion: "Paste the bootstrap, list your packages in Part 1";
+  `zipapp` (pure Python only) or `uv` (compiled packages like `numpy`).
+* Road map comment and Wayne's "shorten the Download Prompt" note
+  deleted: the prompt section is fine as is.  No `Issue:` or `Claude:`
+  comments remain in `README.md`.
+* `install()` docstring now says `nopip4` ships.
+* Still later: a bootstrap anatomy section with `nopip5` (`T.m`), the
+  rename (`T.rp`), and making the Quick Start work once `alt_venv` is
+  on PyPI (`T.ffrp`).

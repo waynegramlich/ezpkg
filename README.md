@@ -99,16 +99,12 @@ starts in a fraction of a second, because `cowsay` is already in
 `~/.alt_venv/`.  It is always safe to delete the `~/.alt_venv/` directory,
 since the next run simply fetches it again.
 
-Python 3.11 or later and a network connection is all that is needed.
+Python 3.11 or later and a network connection are all that is needed.
 
 The `# type: ignore` comment on `import cowsay` is only for `mypy`; leave
 such comments out of your own programs if you do not use `mypy`.
 
 ## Download Prompt
-
-<!-- Claude: General comment about this section.  It needs to be shorter.
-We'll come back a deal with it later.
--->
 
 When people run `pip` by hand, they know they are downloading packages onto
 their computer.  A program that uses `AltVEnv` downloads them on its own, so
@@ -134,7 +130,7 @@ go ahead? [y=>Yes/n=>No/a=>Always/?=>Explanation] y
 ```
 
 The `pip` output is the bootstrap installing `alt_venv`, and appears only on
-a machine's very first run.  One of 4 prompts appear:
+a machine's very first run.  The prompt takes one of four answers:
 * **`n=>No`** - This disables download and immediately exits.
 * **`y=>Yes`** - This allows the download to happen.
 * **`a=>Always`** - This allows this download and all future downloads to occur.
@@ -225,7 +221,7 @@ modules, so one `dependencies` line can cover more than one import.
 
 An import that works only because your own Python happens to have the
 package never fails, so step 4 never catches it.  When you release your
-program (see [Releasing Programs](#releasing-programs) below), `AltVEnv`
+program (see [Releasing a Program](#releasing-a-program) below), `AltVEnv`
 lists every such import, with its line number, and refuses to make the
 release until you add those packages to `dependencies` too.
 
@@ -266,25 +262,6 @@ https://packaging.python.org/en/latest/specifications/dependency-specifiers/)
 specification.  `pip` resolves the whole list at once, so it notices when
 two packages disagree about a third, which is very hard to get right by
 hand.
-
-<!-- Issue: Road map for the rest of the document, in the order of work:
-S1: Releasing a Program.  Done 2026-10-12: the network sentence for
-    `write`; the `zipapp` and `uv` releases dogfooded with
-    `quick_start.py` against PyPI; every PowerShell line run with
-    PowerShell 7.6.6 on Linux, leaving Windows PowerShell 5.1, `python`
-    and `py` on real Windows to Wayne's friends (`I.2`); the one-run
-    form left out by Wayne; the flow read left to Wayne's own
-    end-to-end reads; `nopip4`'s row measured (`T.ewar`).
-S2: Miscellaneous: how `~/.alt_venv` behaves (garbage collection, sharing,
-    versions side by side).
-S3: Alternatives / Why not just use `uv`?  Consider a one-sentence answer
-    in the intro, since skeptics ask early.
-S4: Conclusion: fix "zapapp", the garbled "(pure Python on)", and
-    "Cython packages like `math`" (make it compiled packages like
-    `numpy`, as S1 does), and reword "copy Parts 2 and 3" now that the
-    bootstrap is pasted as one block.
-S5: Wrapup: check the intro (its packaging promise)
-    and the whole document against what the code does. -->
 
 ## Releasing a Program
 
@@ -381,97 +358,63 @@ That is all there is to it.
 
 ## Miscellaneous
 
-* **Garbage collection:** Packages no program has used for about six
+Here are some miscellaneous observations:
+* **Garbage collection:** Packages that no program has used for about six
   months are removed, checked at most once a day.
 * **No duplication:** Programs that need the same package share one copy.
 * **Versions side by side:** Programs that need different versions of a
   package each get their own.
 
-## Alternatives
-
-There are many ways to get a Python program its packages.  `AltVEnv` fills
-one niche: a program that stays a single, readable `.py` file, needs nothing
-installed beforehand, and fetches its packages on its first run.  The
-alternatives below are grouped by what the person running the program has
-to do first.
-
-### Nothing to install beyond Python
-
-* [Virtual environments](https://docs.python.org/3/library/venv.html):
-  Reasonable for developers, but asking somebody else to create and
-  activate one before running a program is asking a lot.  Some Linux
-  distributions also leave out the `venv` module until a separate package is
-  installed.
-* `pip install`: Needs `pip`, which many systems do not provide by default.
-  Many Linux distributions also refuse to let `pip` install into the
-  system's Python at all, as
-  [PEP 668](https://peps.python.org/pep-0668/) allows.
-* [`zipapp`](https://docs.python.org/3/library/zipapp.html): Bundles a
-  program and its packages into one `.pyz` file that Python runs directly.
-  It is in the standard library, but the file is no longer readable, must be
-  rebuilt to update a package, and cannot carry packages with compiled
-  parts.
-* [shiv](https://shiv.readthedocs.io/) and
-  [PEX](https://docs.pex-tool.org/): Like `zipapp`, but able to carry
-  compiled packages, at the cost of a separate file for each platform.  The
-  author installs the tool; the person running the program needs only
-  Python.
-* [PyInstaller](https://pyinstaller.org/) and
-  [Nuitka](https://nuitka.net/): Turn a program into a native executable
-  with Python inside, so the person running it needs nothing at all.  The
-  result is large, and must be built separately for each operating system.
-
-### Something to install first
-
-* [`uv`](https://docs.astral.sh/uv/): `uv run prog.py` reads the same
-  metadata block as Part 1 and runs the program with its packages, very
-  quickly.  It is the closest alternative to `AltVEnv`.
-* [`pipx`](https://pipx.pypa.io/): `pipx run prog.py` also reads that
-  block.
-* Containers, such as [Docker](https://www.docker.com/), or Linux packaging
-  such as [Snap](https://snapcraft.io/docs/): Ship the program with a whole
-  environment around it.  Thorough, but heavy, and the person running the
-  program needs the container system installed first.
-
-### Why not just use `uv`?
-
-If everyone who will run your program has `uv`, use it: it does more than
-`AltVEnv`, and does it faster.  `AltVEnv` is for the program you hand to
-somebody who has Python and nothing else, and whom you would rather not ask
-to install a tool before trying it.  Because both read the same metadata
-block, Part 1 of a program is the same either way.
-
 ## How `AltVEnv` Actually Works
 
-<!-- Issue: Moved here from the old Anatomy section; expected to be
-rewritten completely. -->
+This section is for the curious-minded.  Feel free to skip it unless you
+are interested in puzzling out how the `AltVEnv` bootstrap actually works.
 
-Never edit the bootstrap.  Re-indenting it or changing its
-comments does no harm, but changing its code makes it a different
-bootstrap.  To see whether a program carries the current one, run it with
+Please open `quick_start.py` and go to `# Part 3: ...`.  The entire
+bootstrap runs inside a Python `try` block.  Before each step, the
+variable `s` is set to the step's name, so that if anything goes wrong,
+the `except` at the bottom stops the program with
+`alt_venv: <step> failed: ...`, naming the step that broke.  The steps are:
+* `s = "find home"`:
+  * This names the `~/.alt_venv` directory and tries `import alt_venv`.
+    That succeeds when something like `uv run` has already provided it.
+  * If `alt_venv` imported, or `~/.alt_venv/alt_venv/` already exists,
+    the next three steps are skipped.  They run only the first time any
+    program uses `AltVEnv` on a machine.
+* `s = "choose pip"`:
+  * This asks [PyPI](https://pypi.org/) for the newest `pip` wheel that
+    the running Python can use.
+* `s = "download pip"`:
+  * This downloads that wheel, checks its SHA-256 against the one PyPI
+    publishes, and keeps it as `~/.alt_venv/pip.whl`.
+  * `pip` is downloaded because some commonly used Linux releases
+    (e.g. Ubuntu) do not include it with the base Python installation,
+    and others refuse to let it install into the system's Python
+    ([PEP 668](https://peps.python.org/pep-0668/)).  The machine's own
+    `pip`, if it has one, is never used or changed.
+* `s = "install alt_venv"`:
+  * This runs `pip` straight from the downloaded wheel to fetch `alt_venv`
+    from PyPI and install it into `~/.alt_venv`.
+* `s = "import alt_venv"`:
+  * This puts `~/.alt_venv` at the front of `sys.path` and imports
+    `alt_venv` from there.
+* `s = "fetch packages"`:
+  * `m.AltVEnv()` sets up the `~/.alt_venv` directory, and `.install()`
+    reads Part 1, downloads any packages not already there, and puts
+    them on `sys.path`, so that the imports in Part 4 succeed.
+  * `bootstrap="nopip4"` names the bootstrap this program carries.
+
+Never edit the bootstrap.  Re-indenting it or changing its comments does
+no harm, but changing its code makes it a different bootstrap.  To see
+whether a program carries the current one, run it with
 `ALT_VENV_BOOTSTRAP=check` set, and it says so on standard error.
-
-The bootstrap first tries to import `alt_venv`, and uses it if it is already
-there, such as when something like `uv` has installed it.  Otherwise, the
-first time any program runs it on a machine, it fetches `alt_venv`:
-
-1. It asks [PyPI](https://pypi.org/), the Python Package Index, for the
-   newest `pip` that this Python can run.
-2. It downloads that `pip`, checks its SHA-256 against the one PyPI
-   publishes, and keeps it as `~/.alt_venv/pip.whl`.  The machine's own
-   `pip`, if it has one, is never used or changed.
-3. It runs that `pip` to install `alt_venv` into `~/.alt_venv`.
-
-Later runs skip the previous three steps.  Every run, the first one included,
-then just uses the `AltVEnv` package to download any further packages and
-perform housekeeping in the `~/.alt_venv/` directory.
 
 ## Conclusion
 
-No more remembering which virtual environment is active.  List your packages
-in Part 1, copy Parts 2 and 3 exactly, and each program quietly gets its own
-packages, with nothing to create or activate.  What you are left with is a
+No more remembering which virtual environment is active.  Paste the
+bootstrap, list your packages in Part 1, and each program quietly gets its
+own packages, with nothing to create or activate.  What you are left with is a
 single file you can email to somebody who has nothing but Python 3.11
 (or greater), and it will just work.  You can also trivially package it up
-in either `zapapp` (pure Python on) or `uv` (includes Cython packages like
-`math`.)
+in either `zipapp` (pure Python only) or `uv` (includes compiled packages
+like `numpy`).

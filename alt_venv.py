@@ -2773,7 +2773,7 @@ class AltVEnv:
           a repeated option.
         * `bootstrap` (`str`):
           Which bootstrap the calling program carries, as the pasted code
-          names itself -- `"nopip3"` for the one that ships.  Kept on
+          names itself -- `"nopip4"` for the one that ships.  Kept on
           the instance as `self.bootstrap` and **read by nothing yet**:
           Step 6.12 wants to notice a pasted bootstrap that has gone
           stale, and telling it which one this is costs the caller no
