@@ -133,7 +133,8 @@ The `pip` output is the bootstrap installing `alt_venv`, and appears only on
 a machine's very first run.  The prompt takes one of four answers:
 * **`n=>No`** - This disables download and immediately exits.
 * **`y=>Yes`** - This allows the download to happen.
-* **`a=>Always`** - This allows this download and all future downloads to occur.
+* **`a=>Always`** - This allows this download and all future downloads to
+  occur, after asking `Really never ask again?` (`n` goes back to the prompt).
   This is sticky.  To reset it, remove the `~/.alt_venv/FOREVER_APPROVE` file.
 * **`?=>Explanation`** - This lists all requested downloads and then prompts
   again.
