@@ -56,3 +56,28 @@
 * No change; still waiting on Wayne's two decisions above.  Note that
   `check_imports` now runs at export for `zipapp` and `uv` only (`pins`
   was removed), and the `.pyz` checks `requires-python` itself.
+
+## 2026-10-12: Wayne's decisions
+
+* Fingerprint the import names (plus `dependencies` and approvals), not
+  the file's bytes.
+* Remember every scan, including one that found problems: warn once
+  per change.
+* `T.fipab` is folded into the same scan and the same export check.
+
+## 2026-10-12: Implemented (with `T.fipab`), awaiting Wayne's review
+
+* `import_problems` finds; `check_imports` (export) refuses;
+  `scan_imports` (ordinary run, end of no-argument `install()`) warns
+  and remembers in `scans/<sha256>.json`, keyed by program path,
+  `sys.executable`, import names (guarded flag, above-bootstrap list),
+  Part 1 and approvals.  Records touched on use and aged by `stale`.
+* `packages_distributions()` now called lazily.
+* `imports_above_bootstrap` allows `from __future__` and imports whose
+  bound names the bootstrap uses (so any bootstrap's Part 2 passes).
+* Tests: `test_an_ordinary_run_warns_once_per_change`,
+  `test_imports_above_the_bootstrap_are_found`,
+  `test_export_refuses_an_import_above_the_bootstrap`;
+  `test_install_reports_only_when_asked`'s program reordered.
+* README proposal for steps 3 and 4 is in an HTML comment under
+  "Enabling".

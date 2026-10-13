@@ -819,10 +819,11 @@ def program_imports(text: str) -> list[tuple[str, int, bool]]:
     """Return the top-level modules a program imports, and where.
 
     Read with `ast`, so nothing is imported and nothing runs.  Called
-    only by `AltVEnv.check_imports`, at export time, which is when a
+    by `AltVEnv.import_problems`, for an export, which is when a
     package the author's own Python happens to have, and Part 1 does
-    not name, turns into a program that fails somewhere else.  See
-    `T.cibe` in `TASKS/`.
+    not name, turns into a program that fails somewhere else, and for
+    an ordinary run's warning.  See `T.cibe` and `T.siofr` in
+    `TASKS/`.
 
     Three kinds of import are left out, because the program is ready
     for them to fail or never runs them: one in the body of a `try`
@@ -911,6 +912,73 @@ def program_imports(text: str) -> list[tuple[str, int, bool]]:
     visit(ast.parse(text).body, False)
     return [(name, line, guarded)
             for name, (line, guarded) in found.items()]
+
+
+def imports_above_bootstrap(text: str) -> list[tuple[str, int]]:
+    """Return the imports a program makes before its bootstrap runs.
+
+    The README rule is that every import goes after the bootstrap,
+    because one above it runs first: on a machine whose cache is still
+    empty, `import cowsay` there fails before the bootstrap can fetch
+    `cowsay`, though the author's own machine never shows it.  The
+    exceptions are `from __future__`, which must come first, and the
+    bootstrap's own imports (Part 2), recognised as the ones binding a
+    name the bootstrap uses, so that every bootstrap's Part 2 passes
+    without a list to keep up to date.  See `T.fipab` in `TASKS/`.
+
+    An import inside a function or lambda defined above the bootstrap
+    runs only when called, so it is not counted.
+
+    Arguments:
+    * `text` (`str`):
+      The program's source.
+
+    Returns:
+    * (`list[tuple[str, int]]`): Each offending import, as the module
+      it names and its line, in order; empty when there is no
+      bootstrap.
+
+    Raises:
+    * `SyntaxError`:
+      If the text is not Python, which a running program's is.
+    """
+    # Without a bootstrap there is no above.
+    tree: ast.Module = ast.parse(text)
+    bootstrap: ast.Try | None = bootstrap_node(text)
+    if bootstrap is None:
+        return []
+    used: set[str] = {node.id for node in ast.walk(bootstrap)
+                      if isinstance(node, ast.Name)}
+
+    # Every statement that runs before the bootstrap's line.
+    found: list[tuple[str, int]] = []
+
+    def visit(node: ast.AST) -> None:
+        """Record the imports under `node` that run before the paste."""
+        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef
+                      | ast.Lambda) or node is bootstrap:
+            return
+        bound: list[str] = []
+        module: str = ""
+        if isinstance(node, ast.Import):
+            bound = [alias.asname or alias.name.split(".")[0]
+                     for alias in node.names]
+            module = ", ".join(alias.name for alias in node.names)
+        elif isinstance(node, ast.ImportFrom):
+            if node.module == "__future__":
+                return
+            bound = [alias.asname or alias.name for alias in node.names]
+            module = "." * node.level + (node.module or "")
+        if bound and getattr(node, "lineno", 0) < bootstrap.lineno:
+            if not set(bound) <= used:
+                found.append((module, node.lineno))
+            return
+        child: ast.AST
+        for child in ast.iter_child_nodes(node):
+            visit(child)
+
+    visit(tree)
+    return sorted(found, key=lambda one: one[1])
 
 
 def lock_mismatches(lock: dict[str, Any],
@@ -1049,6 +1117,9 @@ class AltVEnv:
         * `wheels/` keeps the downloaded wheels themselves.
         * `requests/` records what was asked for, one small file per
           request, so that asking again costs nothing.
+        * `scans/` records which programs have had their imports
+          checked against what they declare, so that each is checked
+          again only when its imports change.
         * `pending/` is scratch space used while fetching and
           unpacking.  Anything left in it is litter from an interrupted
           run and is safe to remove.
@@ -1555,22 +1626,13 @@ class AltVEnv:
     def check_imports(self, asking: Sequence[str]) -> None:
         """Refuse an export whose imports Part 1 does not cover.
 
-        While a program is being written, a missing package shows up at
-        once as an `ImportError`, so nothing is checked then.  What does
-        not show up is a package the author's own Python happens to
-        have -- one a Linux distribution installed, say -- that Part 1
-        never names: it works here and fails on the machine the program
-        is sent to.  Exporting is when the program leaves, so every
-        export checks first, and lists every problem before failing.
-        See `T.cibe` in `TASKS/`.
-
-        Each module `program_imports` finds is accepted when it is in
-        the standard library, is `alt_venv` itself (the bootstrap's
-        business), is a file or directory beside the program, or comes
-        from a distribution that Part 1 declares or that the approvals
-        record, which covers the packages that came along.  Which
-        distribution provides a module is read from the installed
-        metadata and never guessed.
+        What a running program does not show is a package the author's
+        own Python happens to have -- one a Linux distribution
+        installed, say -- that Part 1 never names: it works here and
+        fails on the machine the program is sent to.  Exporting is when
+        the program leaves, so every export checks first, and lists
+        every problem before failing.  Ordinary runs check too, but
+        only warn; see `scan_imports`.  See `T.cibe` in `TASKS/`.
 
         Arguments:
         * `asking` (`Sequence[str]`):
@@ -1581,13 +1643,143 @@ class AltVEnv:
           If any import is not covered, after each one is printed on
           standard error with its line number.
         """
-        # A program with no file has no imports to read.
+        # Every problem first, so one export shows them all.
+        found: tuple[Path, list[str]] | None = self.import_problems(asking)
+        if found is None or not found[1]:
+            return
+        program: Path
+        problems: list[str]
+        program, problems = found
+        problem: str
+        for problem in problems:
+            print(f"alt_venv: {program.name}: {problem}", file=sys.stderr)
+        raise RuntimeError(
+            f"{len(problems)} import(s) in {program.name} are not "
+            f"covered by Part 1; see above")
+
+    def scan_imports(self, asking: Sequence[str]) -> list[str]:
+        """Warn, during an ordinary run, about imports Part 1 misses.
+
+        Python stops at the first missing import, so without this an
+        author learns of missing packages one run at a time, and of a
+        package their own Python happens to have only at export.  The
+        scan reports them all at once, on standard error, and carries
+        on; an export still refuses (`check_imports`).  See `T.siofr`
+        in `TASKS/`.
+
+        The scan costs a few hundred milliseconds when it has to ask
+        which package provides a module, so every scan is remembered in
+        `scans/`, one small file per fingerprint, and repeated only
+        when the fingerprint changes.  The fingerprint is the program's
+        path, the Python running it, the modules it imports (whether
+        guarded, whether above the bootstrap), Part 1 and the approvals,
+        so editing or moving code does not rescan, but adding an import
+        does.  A scan that found problems is remembered too, so a
+        warning is given once per change rather than on every run
+        (Wayne, 2026-10-12).  Records age out with the request records;
+        see `stale`.
+
+        Arguments:
+        * `asking` (`Sequence[str]`):
+          The requirements the program declared.
+
+        Returns:
+        * (`list[str]`): The problems just reported, or an empty list
+          when there were none or the scan was skipped as remembered.
+        """
+        # A program with no file, or one that does not parse, has
+        # nothing to scan.
         source: tuple[Path, str] | None = main_source()
         if source is None:
-            return
+            return []
         program: Path
         text: str
         program, text = source
+        try:
+            key: str = json.dumps({
+                "program": str(program.resolve()),
+                "python": sys.executable,
+                "imports": [[module, guarded] for module, _, guarded
+                            in program_imports(text)],
+                "above": [module for module, _
+                          in imports_above_bootstrap(text)],
+                "asking": sorted(asking),
+                "approved": sorted((self.approved() or {}).items()),
+            }, sort_keys=True)
+        except SyntaxError:
+            return []
+
+        # Remembered: touched, so that a scan in use does not age out.
+        scans: Path = self.root / "scans"
+        record: Path = scans / (
+            hashlib.sha256(key.encode()).hexdigest() + ".json")
+        try:
+            if json.loads(record.read_text()).get("key") == key:
+                record.touch()
+                return []
+        except (OSError, ValueError, AttributeError):
+            pass
+
+        # Scanned, reported, then remembered the way `remember` writes.
+        found: tuple[Path, list[str]] | None = self.import_problems(asking)
+        problems: list[str] = [] if found is None else found[1]
+        problem: str
+        for problem in problems:
+            print(f"alt_venv: {program.name}: {problem}", file=sys.stderr)
+        if problems:
+            print(f"alt_venv: {program.name}: shown once; shown again "
+                  f"when its imports, Part 1 or approvals change",
+                  file=sys.stderr)
+        handle: int
+        temporary: str
+        try:
+            scans.mkdir(parents=True, exist_ok=True)
+            handle, temporary = tempfile.mkstemp(dir=scans)
+            with os.fdopen(handle, "w") as opened:
+                json.dump({"key": key, "problems": problems}, opened,
+                          indent=1, sort_keys=True)
+            Path(temporary).replace(record)
+        except OSError:
+            pass
+        return problems
+
+    def import_problems(self, asking: Sequence[str]
+                        ) -> tuple[Path, list[str]] | None:
+        """Find the running program's imports Part 1 does not cover.
+
+        The finding that `check_imports` refuses on and `scan_imports`
+        warns about.  Each module `program_imports` finds is accepted
+        when it is in the standard library, is `alt_venv` itself (the
+        bootstrap's business), is a file or directory beside the
+        program, or comes from a distribution that Part 1 declares or
+        that the approvals record, which covers the packages that came
+        along.  Which distribution provides a module is read from the
+        installed metadata and never guessed, and only when some module
+        needs it, since reading it is the slow part.  An import above
+        the bootstrap is a problem of its own; see
+        `imports_above_bootstrap`.
+
+        Arguments:
+        * `asking` (`Sequence[str]`):
+          The requirements the program declared.
+
+        Returns:
+        * (`tuple[Path, list[str]] | None`): The program and one line
+          per problem, in order, or `None` when there is no program
+          file to read or it does not parse.
+        """
+        # A program with no file has no imports to read.
+        source: tuple[Path, str] | None = main_source()
+        if source is None:
+            return None
+        program: Path
+        text: str
+        program, text = source
+        try:
+            imports: list[tuple[str, int, bool]] = program_imports(text)
+            above: list[tuple[str, int]] = imports_above_bootstrap(text)
+        except SyntaxError:
+            return None
 
         # Distributions are compared by normalized name, the way PEP 503
         # compares them, so `PyYAML` and `pyyaml` are one.
@@ -1598,15 +1790,18 @@ class AltVEnv:
                              for one in asking}
         covered |= {normal(wheel.split("-")[0])
                     for wheel in self.approved() or {}}
-        providers: Mapping[str, list[str]] = (
-            importlib.metadata.packages_distributions())
+        providers: Mapping[str, list[str]] | None = None
 
         # Everything left after the exemptions has to be covered.
-        problems: list[str] = []
+        problems: list[tuple[int, str]] = []
+
+        def add(line: int, problem: str) -> None:
+            """Record a problem under the line it is about."""
+            problems.append((line, f"line {line}: {problem}"))
         module: str
         line: int
         guarded: bool
-        for module, line, guarded in program_imports(text):
+        for module, line, guarded in imports:
             if (module in sys.stdlib_module_names or module == "alt_venv"
                     or (program.parent / f"{module}.py").is_file()
                     or (program.parent / module).is_dir()):
@@ -1618,31 +1813,28 @@ class AltVEnv:
                 spec = None
             if spec is None:
                 if not guarded:
-                    problems.append(
-                        f"line {line}: `{module}` is not importable "
-                        f"here; add its package to Part 1")
+                    add(line, f"`{module}` is not importable here; "
+                        f"add its package to Part 1")
                 continue
+            if providers is None:
+                providers = importlib.metadata.packages_distributions()
             names: list[str] = sorted(set(providers.get(module, [])))
             if not names:
-                problems.append(
-                    f"line {line}: `{module}` comes from "
+                add(line, f"`{module}` comes from "
                     f"{spec.origin or 'somewhere'}, which no package "
                     f"provides; it cannot travel with the program")
             elif not covered & {normal(name) for name in names}:
-                problems.append(
-                    f"line {line}: `{module}` comes from "
-                    f"{' or '.join(names)}, which Part 1 does not "
-                    f"declare; add it to `dependencies`")
+                add(line, f"`{module}` comes from {' or '.join(names)}, "
+                    f"which Part 1 does not declare; add it to "
+                    f"`dependencies`")
 
-        # Every problem first, so one export shows them all.
-        if problems:
-            problem: str
-            for problem in problems:
-                print(f"alt_venv: {program.name}: {problem}",
-                      file=sys.stderr)
-            raise RuntimeError(
-                f"{len(problems)} import(s) in {program.name} are not "
-                f"covered by Part 1; see above")
+        # On a machine with an empty cache, these run before anything
+        # has been fetched.
+        for module, line in above:
+            add(line, f"`{module}` is imported above the bootstrap; "
+                f"move it below, with the other imports")
+        return program, [problem for _, problem in sorted(
+            problems, key=lambda one: one[0])]
 
     def build_zipapp(self, asking: Sequence[str],
                      target: Path | None = None) -> Path:
@@ -2749,7 +2941,9 @@ class AltVEnv:
         `ALT_VENV_EXPORT`, in the no-argument form, writes what the
         approvals record in another form and then exits instead of
         returning, so the program's own code never runs: `zipapp` or
-        `uv`, as `export` describes.
+        `uv`, as `export` describes.  Otherwise the program's imports
+        are checked against Part 1, and any it misses are reported once
+        on standard error; see `scan_imports`.
 
         A requirement is spelled the way `pip` spells it, so a version
         constraint needs no special support:
@@ -2830,6 +3024,10 @@ class AltVEnv:
             if form:
                 self.export(form, asked)
                 sys.exit(0)
+
+            # An ordinary run warns about every uncovered import at
+            # once, now that the declared packages can be found.
+            self.scan_imports(asked)
             return None
 
         # One string is the simple case, and it returns one module.
@@ -3209,13 +3407,16 @@ class AltVEnv:
         return sorted(found)
 
     def stale(self, days: float = CULL_DAYS) -> list[Path]:
-        """Return the request records nothing has used for a long time.
+        """Return the records nothing has used for a long time.
 
         A record's modification time is when its request was last
         answered, because `remember` touches it on every hit, warm or
         cold.  So age here means *unused*, not merely *old*, which is the
         distinction that matters: a package fetched two years ago and
         used this morning is not stale.
+
+        Scan records in `scans/` age the same way, since `scan_imports`
+        touches them too, and nothing else names them.
 
         Nothing else is aged.  Trees are kept or dropped by whether a
         record still names them, so removing a record is what makes its
@@ -3234,7 +3435,8 @@ class AltVEnv:
         cutoff: float = time.time() - days
         found: list[Path] = []
         record: Path
-        for record in self.paths()[3].glob("*.json"):
+        for record in [*self.paths()[3].glob("*.json"),
+                       *(self.root / "scans").glob("*.json")]:
             try:
                 if record.stat().st_mtime < cutoff:
                     found.append(record)

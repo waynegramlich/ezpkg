@@ -3,14 +3,13 @@
 @6.10_README.md_documentation/Details.md
 @6.13_Messages/Details.md
 @6.17_A_fetch_from_the_real_PyPI/Details.md
-@6.20_Scan_the_imports_on_first_run/Details.md
-@6.20_Scan_the_imports_on_first_run/Context.md
-@6.22_Flag_imports_placed_above_the_bootstrap/Details.md
 @6.25_Rename_the_project/Details.md
 @../ISSUES/1_The_bootstrap_trusts_only_system_certificates/Details.md
 @../ISSUES/2_Windows_and_macOS_are_untried/Details.md
 @../ISSUES/3_Reviewer_thoughts_have_two_formats/Details.md
 @../ISSUES/19_How_to_deal_with_compiled_packages/Details.md
+@6.20_Scan_the_imports_on_first_run/Summary.md
+@6.22_Flag_imports_placed_above_the_bootstrap/Summary.md
 @6.21_Test_the_README_copy_of_the_bootstrap/Summary.md
 @6.16_Test_suite_cleanup/Summary.md
 @6.3_A_versioned_cache_built_out_of_the_wheels/Summary.md

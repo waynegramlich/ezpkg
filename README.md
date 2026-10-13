@@ -206,9 +206,13 @@ To use `AltVEnv` in your own program, new or preexisting:
 2. Replace `"""TOP_LEVEL_DOCSTRING"""` with your program's own docstring
    (moving it up from below, if it has one), or delete it.
 3. Put all of your imports after the bootstrap, even ones from the standard
-   library, such as `import os`.
-4. Run your program.  Each time an import fails with `ModuleNotFoundError`,
-   add the missing package to `dependencies`, and run it again.
+   library, such as `import os`.  An import placed above the bootstrap is
+   reported when you run your program.
+4. Run your program.  `AltVEnv` lists every import that `dependencies`
+   does not cover, all at once, including a package your own Python
+   happens to have that your friends' will not.  Add each one to
+   `dependencies` and run it again.  The list is shown once, and again
+   only when your imports or `dependencies` change.
 
 That's it.
 

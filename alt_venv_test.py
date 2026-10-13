@@ -5068,6 +5068,103 @@ class InstallTest(unittest.TestCase):
             ("yaml", 3, False), ("strict", 10, False),
             ("win32api", 14, True), ("numpy", 18, False)])
 
+    def test_an_ordinary_run_warns_once_per_change(self) -> None:
+        """Uncovered imports are listed together, once per change.
+
+        `lurker` is on this Python but not in Part 1, the case that
+        otherwise surfaces only at export.  The program still runs, and
+        the warning is not repeated until the imports change; moving
+        code does not count.  See `T.siofr`.
+        """
+        # A distribution only this machine has, as in the export test.
+        program: Path = self.declaring_program(
+            "scanned", 'dependencies = ["widget"]',
+            "import widget\nimport lurker\nprint('ran')")
+        system: Path = self.root / "scanned" / "system"
+        (system / "lurker").mkdir(parents=True)
+        (system / "lurker" / "__init__.py").write_text("")
+        info: Path = system / "lurker-1.0.dist-info"
+        info.mkdir()
+        (info / "METADATA").write_text(
+            "Metadata-Version: 2.1\nName: lurker\nVersion: 1.0\n")
+        (info / "top_level.txt").write_text("lurker\n")
+        warning: str = "`lurker` comes from lurker, which Part 1 does not"
+
+        # Warned and run; then quiet, even after the code moves.
+        done: subprocess.CompletedProcess[str] = self.run_program(
+            program, PYTHONPATH=str(system))
+        self.assertEqual(done.returncode, 0, done.stderr[-400:])
+        self.assertEqual(done.stdout, "ran\n")
+        self.assertIn(warning, done.stderr)
+        self.assertIn("shown once", done.stderr)
+        program.write_text(program.read_text().replace(
+            "import lurker\n", "\nimport lurker  # Moved.\n"))
+        done = self.run_program(program, PYTHONPATH=str(system))
+        self.assertEqual(done.returncode, 0, done.stderr[-400:])
+        self.assertNotIn(warning, done.stderr)
+
+        # A new import is a change, so the warning comes back.
+        program.write_text(program.read_text().replace(
+            "import widget\n", "import widget\nimport json\n"))
+        done = self.run_program(program, PYTHONPATH=str(system))
+        self.assertEqual(done.returncode, 0, done.stderr[-400:])
+        self.assertIn(warning, done.stderr)
+
+        # One record, touched on use, which `stale` can age out.
+        records: list[Path] = sorted(
+            (self.root / "scanned" / "cache" / "scans").glob("*.json"))
+        self.assertEqual(len(records), 2)
+        venv: alt_venv.AltVEnv = alt_venv.AltVEnv(
+            self.root / "scanned" / "cache")
+        self.assertEqual([one for one in venv.stale(-60)
+                          if one.parent.name == "scans"], records)
+
+    def test_imports_above_the_bootstrap_are_found(self) -> None:
+        """Only `__future__` and the paste's own imports may precede it.
+
+        The bootstrap's own are recognised by the names it uses, so the
+        Part 2 of any bootstrap passes.  See `T.fipab`.
+        """
+        # Part 2 and a `__future__` pass; the rest are named by line.
+        text: str = ("from __future__ import annotations\n"
+                     "import os\n"
+                     "def early():\n"
+                     "    import numpy\n"
+                     "if True:\n"
+                     "    from cowsay import cow\n"
+                     + bootstrap.pasted(SHIPPING)
+                     + "import yaml\n")
+        self.assertEqual(alt_venv.imports_above_bootstrap(text),
+                         [("os", 2), ("cowsay", 6)])
+        self.assertEqual(alt_venv.imports_above_bootstrap(
+            bootstrap.pasted(SHIPPING)), [])
+        self.assertEqual(alt_venv.imports_above_bootstrap("import os\n"), [])
+
+    def test_export_refuses_an_import_above_the_bootstrap(self) -> None:
+        """An export refuses a program whose imports precede the paste.
+
+        Even a standard library one, which would work, breaks the rule
+        that keeps the rest safe.  See `T.fipab`.
+        """
+        # `os` above the bootstrap, with its line as written.
+        program: Path
+        home: Path
+        program, home = self.bootstrapped_program(
+            "early", 'dependencies = ["widget"]', "print('ran')")
+        program.write_text(program.read_text().replace(
+            "import importlib\n", "import os\nimport importlib\n", 1))
+
+        # Nothing written, and the import named.
+        done: subprocess.CompletedProcess[str] = self.run_program(
+            program, HOME=str(home), ALT_VENV_APPROVE="write",
+            ALT_VENV_EXPORT="zipapp")
+        self.assertNotEqual(done.returncode, 0)
+        line: int = program.read_text().splitlines().index("import os") + 1
+        self.assertIn(f"line {line}: `os` is imported above the "
+                      "bootstrap", done.stderr)
+        self.assertIn("1 import(s) in prog.py", done.stderr)
+        self.assertFalse(program.with_suffix(".pyz").exists())
+
     def test_export_refuses_an_unknown_form(self) -> None:
         """A misspelt form is refused rather than silently ignored."""
         # In process: the refusal comes before anything is read.
@@ -5531,15 +5628,16 @@ class BootstrapCheckTest(unittest.TestCase):
 
     def test_install_reports_only_when_asked(self) -> None:
         """`ALT_VENV_BOOTSTRAP=check` prints one line; otherwise nothing."""
-        # A real program carrying the paste, which must not run it.
+        # A real program carrying the paste, which must not run it.  Its
+        # imports follow the paste, or the import scan would object.
         program: Path = self.root / "prog.py"
         program.write_text(
             "import sys\n"
+            "if False:\n"
+            f"{textwrap.indent(self.shipping(), '    ')}\n"
             f"sys.path.insert(0, {str(Path(__file__).resolve().parent)!r})\n"
             "import alt_venv\n"
             "from pathlib import Path\n"
-            "if False:\n"
-            f"{textwrap.indent(self.shipping(), '    ')}\n"
             f"cache = Path({str(self.root / 'cache')!r})\n"
             "alt_venv.AltVEnv(cache).install()\n")
         environment: dict[str, str] = dict(os.environ)
