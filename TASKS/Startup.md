@@ -1,5 +1,3 @@
-@6_Flesh_out_the_EZPkg_class/Details.md
-@6_Flesh_out_the_EZPkg_class/Context.md
 @7_A_fetch_from_the_real_PyPI/Details.md
 @7.2_Upload_to_test.pypi/Details.md
 @7.3_Upload_to_pypi/Details.md
@@ -7,6 +5,7 @@
 @../ISSUES/2_Windows_and_macOS_are_untried/Details.md
 @../ISSUES/3_Reviewer_thoughts_have_two_formats/Details.md
 @../ISSUES/19_How_to_deal_with_compiled_packages/Details.md
+@6_Flesh_out_the_EZPkg_class/Summary.md
 @7.1_Reconnect_to_git/Summary.md
 @6.10_README.md_documentation/Summary.md
 @6.24_Rename_the_project/Summary.md

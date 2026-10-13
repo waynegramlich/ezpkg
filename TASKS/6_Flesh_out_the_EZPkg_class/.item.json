@@ -1,11 +1,15 @@
 {
-  "state": "Open",
+  "state": "Closed",
   "created": "2026-10-05T00:06:50Z",
-  "updated": "2026-10-13T02:16:45Z",
+  "updated": "2026-10-13T04:26:46Z",
   "history": [
     {
       "state": "Open",
       "time": "2026-10-05T00:06:50Z"
+    },
+    {
+      "state": "Closed",
+      "time": "2026-10-13T04:26:46Z"
     }
   ],
   "tag": "foec"
