@@ -905,7 +905,7 @@ def nopip5() -> None:
     import json
     import subprocess
     import urllib.request as req
-    try:
+    try:  # Do not edit try block!  See https://pypi.org/project/ezpkg/
         s = "find home"; t = pathlib.Path.home()/".ezpkg"; w = t/"pip.whl"
         m = None
         try: m = importlib.import_module(PACKAGE)  # Already importable?
@@ -913,11 +913,11 @@ def nopip5() -> None:
         if m is None and not (t/PACKAGE).is_dir():  # Not installed yet.
             s = "choose pip"; v = sys.version_info[1]
             d = json.load(req.urlopen(f"{JSON_API}/pip/json", None, 30))
-            e = max((e for f in d["releases"].values() for e in f  # Newest pip
+            e = max((e for f in d["releases"].values() for e in f  # Newest pip ...
                      if e["url"][-4:] == ".whl" and not e["yanked"]
                      and (q := e["requires_python"] or "")[:4] == ">=3."
                      and "," not in q and int(q.split(".")[1]) <= v),
-                    key=lambda e: e["upload_time"])  # whose floor we meet.
+                    key=lambda e: e["upload_time"])  # ... whose floor we meet.
             s = "download pip"; r = req.urlopen(e["url"], None, 60).read()
             if hashlib.sha256(r).hexdigest() != e["digests"]["sha256"]:
                 raise ValueError(f"{e['filename']} fails its SHA-256 check")
@@ -931,7 +931,7 @@ def nopip5() -> None:
             importlib.invalidate_caches(); m = importlib.import_module(PACKAGE)
         s = "fetch packages"; m.EZPkg().install(bootstrap="nopip5")
     except Exception as x:
-        raise SystemExit(f"{PACKAGE}: {s} failed: {x!r}")
+        raise SystemExit(f"{PACKAGE}: {s} failed: {x!r}")  # Do not edit try block!
 
 
 def main() -> None:

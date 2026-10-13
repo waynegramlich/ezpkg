@@ -6,19 +6,19 @@ it, a few packages were missing, so my friend had to create a virtual
 environment and install them.  It worked, but it was annoying.  So I
 asked, "Could this be made really easy for the recipient?"  Thus was born
 `EZPkg`, which lets a single-file Python program download its missing
-packages by itself.
+packages all by itself.
 
 To get started with `EZPkg`, you paste a modest bootstrap at the front of
 your program and go.  After that, `EZPkg` fetches your packages over the
 net on demand, without a virtual environment or the right to install
 packages.  Get everything working with `EZPkg` first, then either email
 the single `.py` file to a friend or let `EZPkg` package it up in `zipapp`
-or `uv` format.
+or `uv` format.  You can remove the bootstrap at any time.
 
 ## Quick Start
 
-Save this program as `quick_start.py`, and run it with
-`python3 quick_start.py`:
+Save the program below as `quick_start.py`, and run it with
+`python3 quick_start.py` (Linux/macOS) or `python quick_start.py` (Windows):
 
 ```python
 #!/usr/bin/env python3
@@ -37,10 +37,11 @@ import pathlib
 import subprocess
 import sys
 import urllib.request as req
+
 # All other imports are added after the EZPkg bootstrap.
 
 # Part 3: The EZPkg bootstrap.  Never edit it.
-try:
+try:  # Do not edit try block!  See https://pypi.org/project/ezpkg/
     s = "find home"; t = pathlib.Path.home()/".ezpkg"; w = t/"pip.whl"
     m = None
     try: m = importlib.import_module("ezpkg")  # Already importable?
@@ -48,11 +49,11 @@ try:
     if m is None and not (t/"ezpkg").is_dir():  # Not installed yet.
         s = "choose pip"; v = sys.version_info[1]
         d = json.load(req.urlopen("https://pypi.org/pypi/pip/json", None, 30))
-        e = max((e for f in d["releases"].values() for e in f  # Newest pip
+        e = max((e for f in d["releases"].values() for e in f  # Newest pip ...
                  if e["url"][-4:] == ".whl" and not e["yanked"]
                  and (q := e["requires_python"] or "")[:4] == ">=3."
                  and "," not in q and int(q.split(".")[1]) <= v),
-                key=lambda e: e["upload_time"])  # whose floor we meet.
+                key=lambda e: e["upload_time"])  # ... whose floor we meet.
         s = "download pip"; r = req.urlopen(e["url"], None, 60).read()
         if hashlib.sha256(r).hexdigest() != e["digests"]["sha256"]:
             raise ValueError(f"{e['filename']} fails its SHA-256 check")
@@ -66,7 +67,7 @@ try:
         importlib.invalidate_caches(); m = importlib.import_module("ezpkg")
     s = "fetch packages"; m.EZPkg().install(bootstrap="nopip5")
 except Exception as x:
-    raise SystemExit(f"ezpkg: {s} failed: {x!r}")
+    raise SystemExit(f"ezpkg: {s} failed: {x!r}")  # Do not edit try block!
 
 # Part 4: Your imports, all after the bootstrap.
 import cowsay  # type: ignore[import-not-found]  # For mypy.
@@ -78,8 +79,9 @@ print(f"cowsay {cowsay.__version__} was loaded from {cowsay.__file__}")
 
 The first run creates `~/.ezpkg/` in your home directory, which is where
 `EZPkg` keeps everything it fetches.  It fetches `ezpkg` into it, then
-the `cowsay` package that the program lists at the top, and asks once whether
-it may install `cowsay`.  Answer `y`, and the program runs:
+the `cowsay` package that the program lists at the top (line 5,
+`# dependencies = ["cowsay"]`), and asks once whether `EZPkg` may
+install `cowsay`.  Answer `y`, and the program runs:
 
 ```
   ______________
@@ -169,10 +171,11 @@ import pathlib
 import subprocess
 import sys
 import urllib.request as req
+
 # All other imports are added after the EZPkg bootstrap.
 
 # Part 3: The EZPkg bootstrap.  Never edit it.
-try:
+try:  # Do not edit try block!  See https://pypi.org/project/ezpkg/
     s = "find home"; t = pathlib.Path.home()/".ezpkg"; w = t/"pip.whl"
     m = None
     try: m = importlib.import_module("ezpkg")  # Already importable?
@@ -180,11 +183,11 @@ try:
     if m is None and not (t/"ezpkg").is_dir():  # Not installed yet.
         s = "choose pip"; v = sys.version_info[1]
         d = json.load(req.urlopen("https://pypi.org/pypi/pip/json", None, 30))
-        e = max((e for f in d["releases"].values() for e in f  # Newest pip
+        e = max((e for f in d["releases"].values() for e in f  # Newest pip ...
                  if e["url"][-4:] == ".whl" and not e["yanked"]
                  and (q := e["requires_python"] or "")[:4] == ">=3."
                  and "," not in q and int(q.split(".")[1]) <= v),
-                key=lambda e: e["upload_time"])  # whose floor we meet.
+                key=lambda e: e["upload_time"])  # ... whose floor we meet.
         s = "download pip"; r = req.urlopen(e["url"], None, 60).read()
         if hashlib.sha256(r).hexdigest() != e["digests"]["sha256"]:
             raise ValueError(f"{e['filename']} fails its SHA-256 check")
@@ -198,7 +201,7 @@ try:
         importlib.invalidate_caches(); m = importlib.import_module("ezpkg")
     s = "fetch packages"; m.EZPkg().install(bootstrap="nopip5")
 except Exception as x:
-    raise SystemExit(f"ezpkg: {s} failed: {x!r}")
+    raise SystemExit(f"ezpkg: {s} failed: {x!r}")  # Do not edit try block!
 
 # Your imports go here, followed by the rest of your program.
 ```
@@ -286,15 +289,16 @@ The currently supported package formats are:
 * `zipapp`: one file holding the program and its packages; no compiled code.
 * `uv`: a script and its lock file, run with `uv`; compiled code is fine.
 
-The first step is to record information about every package currently in
-use by running `YOUR_PROG.py` as follows:
+Both package formats start with the same first step, which is to
+record information about every package currently in use by running
+`YOUR_PROG.py` as follows:
 * Linux/macOS: `EZPKG_APPROVE=write python3 YOUR_PROG.py`
 * Windows (PowerShell):
   `powershell -Command { $env:EZPKG_APPROVE="write"; & python YOUR_PROG.py }`
 
-This run needs the network: it always asks the package index for the
-newest versions that `dependencies` allows, even when your machine
-already has the packages.
+This run needs the network, since it always asks the PyPI package
+index for the newest versions that `dependencies` allows, even when your
+machine already has the packages.
 
 This writes out `YOUR_PROG.ezpkg` beside `YOUR_PROG.py`, which records all
 needed information.  It is prudent to add `YOUR_PROG.ezpkg` to your version
@@ -324,10 +328,11 @@ Make the release by running your program like this:
 * Windows (PowerShell):
   `powershell -Command { $env:EZPKG_EXPORT="zipapp"; & python YOUR_PROG.py }`
 
-Your program does not run.  Instead, `EZPkg` checks that every package
-your program imports is listed in `dependencies` (naming the line of any
-that is not), and then writes `YOUR_PROG.pyz` beside `YOUR_PROG.py`.
-`EZPKG_EXPORT=zipapp:SOMEWHERE.pyz` writes it elsewhere.
+Your program does not actually run.  Instead, `EZPkg` checks that every
+package your program imports is listed in `dependencies` (naming the
+line of any that is not), and then writes `YOUR_PROG.pyz` beside
+`YOUR_PROG.py`.
+`EZPKG_EXPORT=zipapp:ELSEWHERE.pyz` writes it elsewhere.
 
 `YOUR_PROG.pyz` is one file holding your program and every package it
 uses.  Send it to your friend, who runs it with:
@@ -349,12 +354,12 @@ Make the release by running your program like this:
 * Windows (PowerShell):
   `powershell -Command { $env:EZPKG_EXPORT="uv"; & python YOUR_PROG.py }`
 
-Your program does not run.  Instead, `EZPkg` checks that every package
-your program imports is listed in `dependencies` (naming the line of any
-that is not), and then writes `YOUR_PROG-uv.py` beside `YOUR_PROG.py`,
-with its lock file, `YOUR_PROG-uv.py.lock`, beside it.
-`EZPKG_EXPORT=uv:SOMEWHERE.py` writes them elsewhere, named after
-`SOMEWHERE.py`.
+Your program does not actually run.  Instead, `EZPkg` checks that every
+package your program imports is listed in `dependencies` (naming the
+line of any that is not), and then writes `YOUR_PROG-uv.py` beside
+`YOUR_PROG.py`, with its lock file, `YOUR_PROG-uv.py.lock`, beside it.
+`EZPKG_EXPORT=uv:ELSEWHERE.py` writes them elsewhere, named after
+`ELSEWHERE.py`.
 
 `YOUR_PROG-uv.py` is your program with its packages pinned to the versions
 you approved and the bootstrap taken out.  Send it to your friend with its
@@ -376,7 +381,8 @@ Here are some miscellaneous observations:
 ## How `EZPkg` Actually Works
 
 This section is for the curious-minded.  Feel free to skip it unless you
-are interested in puzzling out how the `EZPkg` bootstrap actually works.
+are interested in puzzling out how the `EZPkg` bootstrap actually works
+on your own.
 
 Please open `quick_start.py` and go to `# Part 3: ...`.  The entire
 bootstrap runs inside a Python `try` block.  Before each step, the

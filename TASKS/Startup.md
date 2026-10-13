@@ -5,9 +5,9 @@
 @../ISSUES/2_Windows_and_macOS_are_untried/Details.md
 @../ISSUES/3_Reviewer_thoughts_have_two_formats/Details.md
 @../ISSUES/19_How_to_deal_with_compiled_packages/Details.md
+@6.10_README.md_documentation/Summary.md
 @6_Flesh_out_the_EZPkg_class/Summary.md
 @7.1_Reconnect_to_git/Summary.md
-@6.10_README.md_documentation/Summary.md
 @6.24_Rename_the_project/Summary.md
 @6.13_Messages/Summary.md
 @6.19_Scan_the_imports_on_first_run/Summary.md

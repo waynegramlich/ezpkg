@@ -324,3 +324,14 @@ S5 Alternatives, S6 Conclusion).
 ## 2026-10-12: Closed with `T.rp`
 
 * All four proposals applied; no `Claude:` or `Issue:` comments remain.
+
+## 2026-10-13: Reopened for Wayne's pre-upload read
+
+* Wayne added "Do not edit try block!" comments (on the `try` line, with
+  `https://pypi.org/project/ezpkg/`, and on the `raise` line) and split
+  the pip comment as "Newest pip ..." / "... whose floor we meet."  The
+  changes are comments only, so it is still `nopip5` with the same fingerprint.  Copied
+  to the README (both copies), `QUICK_START` in `ezpkg.py` and the
+  `nopip5` case in `bootstrap.py`.  The fingerprint test's "commented"
+  variant now comments `m = None`, since `try:\n` no longer occurs.
+* Next: Wayne's `README.md` edits.

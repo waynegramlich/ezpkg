@@ -5579,7 +5579,8 @@ class BootstrapCheckTest(unittest.TestCase):
         block: str = self.shipping()
         same: str = ezpkg.bootstrap_fingerprint(block)
         indented: str = textwrap.indent(block, "    ")
-        commented: str = block.replace("try:\n", "try:  # Fetch it.\n", 1)
+        commented: str = block.replace(
+            "m = None\n", "m = None  # Fetch it.\n", 1)
         rewrapped: str = block.replace(
             "; t = pathlib", ";\\\n        t = pathlib", 1)
         for variant in (indented, commented, rewrapped):

@@ -27,7 +27,7 @@ What carries the old name:
   variables, and the `.altvenv` approvals suffix.
 * `alt_venv_test.py`, `alt_venv_coverage.py`, `bootstrap.py`'s
   `PACKAGE` and messages that begin `alt_venv:`.
-* `README.md`, `ABOUT.md`, `LICENSE`, `mypy.ini`, `ruff.toml`, and the
+* `README.md`, `LICENSE`, `mypy.ini`, `ruff.toml`, and the
   repository and directory names.
 
 Task and issue files are history and keep the old name.

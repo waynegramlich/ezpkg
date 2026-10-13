@@ -11,3 +11,8 @@ your own Python happens to have) were applied on 2026-10-12.  No
 `Claude:` or `Issue:` comments remain.  Wayne will redo the intro and
 do his own end-to-end reads; the Quick Start works only once `ezpkg` is
 on PyPI (task 7).
+
+Reopened on 2026-10-13 for Wayne's read before the test.pypi upload
+(`T.utt`): he edited the README text and added "Do not edit try block!"
+comments to the bootstrap.  Those are comments only, so it is still
+`nopip5` with the same fingerprint; all four copies agree.
