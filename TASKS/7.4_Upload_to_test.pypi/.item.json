@@ -1,7 +1,7 @@
 {
-  "state": "Open",
+  "state": "Pending",
   "created": "2026-10-13T02:03:18Z",
-  "updated": "2026-10-13T17:40:56Z",
+  "updated": "2026-10-13T18:53:01Z",
   "history": [
     {
       "state": "Pending",
@@ -10,6 +10,10 @@
     {
       "state": "Open",
       "time": "2026-10-13T17:40:56Z"
+    },
+    {
+      "state": "Pending",
+      "time": "2026-10-13T18:53:01Z"
     }
   ],
   "tag": "utt"

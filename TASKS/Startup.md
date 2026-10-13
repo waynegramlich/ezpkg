@@ -1,8 +1,10 @@
 @7_A_fetch_from_the_real_PyPI/Details.md
 @7_A_fetch_from_the_real_PyPI/Context.md
-@7.2_Upload_to_test.pypi/Details.md
-@7.2_Upload_to_test.pypi/Context.md
-@7.3_Upload_to_pypi/Details.md
+@7.2_Set_up_hardware_2FA/Details.md
+@7.2_Set_up_hardware_2FA/Context.md
+@7.3_Write_the_release_workflow/Details.md
+@7.4_Upload_to_test.pypi/Details.md
+@7.5_Upload_to_pypi/Details.md
 @../ISSUES/1_The_bootstrap_trusts_only_system_certificates/Details.md
 @../ISSUES/2_Windows_and_macOS_are_untried/Details.md
 @../ISSUES/3_Reviewer_thoughts_have_two_formats/Details.md

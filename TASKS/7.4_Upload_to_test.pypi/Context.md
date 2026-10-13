@@ -42,3 +42,10 @@
   (`SUMMARY` in `ezpkg_test.py`), so it is written once.  Wayne chose
   "Automatic Package Fetching for One-File Programs" ("Python" is
   redundant on PyPI).
+
+## 2026-10-13: Back to Pending
+
+* The token plan above is superseded: the upload goes through the
+  release workflow (`T.wrw`) after hardware 2FA (`T.suh2`), so that it
+  rehearses the pypi.org upload (`T.utp`).  The dry run and the
+  fetch-back plan still stand.
