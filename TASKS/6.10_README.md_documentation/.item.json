@@ -1,7 +1,7 @@
 {
-  "state": "Open",
+  "state": "Closed",
   "created": "2026-10-05T00:06:52Z",
-  "updated": "2026-10-13T01:33:59Z",
+  "updated": "2026-10-13T03:27:01Z",
   "history": [
     {
       "state": "Open",
@@ -30,6 +30,10 @@
     {
       "state": "Open",
       "time": "2026-10-13T01:33:59Z"
+    },
+    {
+      "state": "Closed",
+      "time": "2026-10-13T03:27:01Z"
     }
   ],
   "tag": "rd"

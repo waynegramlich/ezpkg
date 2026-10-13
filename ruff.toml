@@ -7,8 +7,8 @@
 # wrong silently.  Step 6.7.7 in `LOGBOOK.md` set the floor at 3.11, and
 # this is the linter being told the same thing.
 #
-# `alt_venv.py`'s own PEP 723 block is the authority: `FLOOR` in
-# `alt_venv_test.py` is read out of it.  Configuration cannot be derived
+# `ezpkg.py`'s own PEP 723 block is the authority: `FLOOR` in
+# `ezpkg_test.py` is read out of it.  Configuration cannot be derived
 # that way, so this file and `mypy.ini` still say 3.11 by hand, and
 # `test_the_linters_agree_with_the_block` is what stops them drifting.
 target-version = "py311"

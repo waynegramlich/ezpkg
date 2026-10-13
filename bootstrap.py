@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Fourteen ways to get a package onto `sys.path` with nothing preinstalled.
+"""Fifteen ways to get a package onto `sys.path` with nothing preinstalled.
 
 Run it with no arguments: `python3 bootstrap.py`.  It runs every case
 three times and prints the table below to standard output, so
@@ -29,14 +29,14 @@ no `def` and no `sys.argv` at all, which is why neither the function's
 `def` line and docstring nor `main()` is counted in `paste`, and
 neither is the closing `print`.  Every other line in a
 case is counted and is exactly the line a real program would carry --
-`~/.alt_venv` is named in the code rather than passed in, so that
+`~/.ezpkg` is named in the code rather than passed in, so that
 stays true.
 
 `PACKAGE` is internal, and stopped being charged on 2026-09-29.  It
 exists here so that `BOOTSTRAP_PACKAGE` can aim the cases at a locally
 built wheel without editing a case body, and the `import os` that makes
 that lookup possible is harness machinery in the same way.  A real
-pasted program does not need the variable at all: it spells `alt_venv`
+pasted program does not need the variable at all: it spells `ezpkg`
 in the four places that use it, which costs no line, so charging a line
 for the name overstated what a program actually carries.  `PACKAGE`,
 `import os`, `sys.argv[1]` and the closing `print` are all excluded from
@@ -57,14 +57,14 @@ and means the text a person copies is the text that was measured.
 
 The message names a **stage** where a case sets one.  `nopip3` sets
 its stage, `s`, before each step of its work -- `find home`, `choose
-pip`, `download pip`, `install alt_venv`, `import alt_venv`, `fetch
+pip`, `download pip`, `install ezpkg`, `import ezpkg`, `fetch
 packages`, two words at most -- and its `except` reports the stage that
 was running, then the exception's `repr`, which carries its type as
-well as its text: `alt_venv: choose pip failed: <HTTPError 404: 'Not
+well as its text: `ezpkg: choose pip failed: <HTTPError 404: 'Not
 Found'>`.  The type matters because some exceptions have no text at
-all: a bare `StopIteration` used to print `cannot fetch alt_venv: ` and
+all: a bare `StopIteration` used to print `cannot fetch ezpkg: ` and
 nothing more.  The other cases name no stage, report the type and text
-alone, and begin `cannot fetch alt_venv`, which `nopip3` cannot say
+alone, and begin `cannot fetch ezpkg`, which `nopip3` cannot say
 since its last stage fetches the program's packages.  See issue
 `I.fpfipe`.
 
@@ -80,12 +80,12 @@ steer them at a local server.  A pasted case carries the literal
 The substitution costs a case no lines, so the `paste` column is
 unchanged.
 
-Measuring fourteen cases against one `~/.alt_venv` would be wrong: the
+Measuring fifteen cases against one `~/.ezpkg` would be wrong: the
 second case onwards would find `coverage` already on disk and report a
 warm time as its cold time.  Each run therefore gets its own `HOME`,
 which `pathlib.Path.home()` honours -- the isolation is in the
 environment, where it belongs, and not in a line of code that no real
-user would type.  The real `~/.alt_venv` is never touched.
+user would type.  The real `~/.ezpkg` is never touched.
 
 +--------+---------------+---------+-------+-------+--------+--------+--------+
 | case   | mechanism     | imports | lines | paste | cold   | warm   | size   |
@@ -123,6 +123,8 @@ user would type.  The real `~/.alt_venv` is never touched.
 | nopip4 | as nopip3,    | 4       | 32    | 35    | 3.37 s | 0.14 s | 3538   |
 |        | importable    |         |       |       |        |        |        |
 |        | first         |         |       |       |        |        |        |
+| nopip5 | as nopip4,    | 4       | 32    | 35    | 3.53 s | 0.16 s | 3538   |
+|        | pip to stderr |         |       |       |        |        |        |
 +--------+---------------+---------+-------+-------+--------+--------+--------+
 
 What the columns mean, in the order they appear above:
@@ -175,11 +177,11 @@ What the columns mean, in the order they appear above:
 
 * **warm** -- wall clock for the second run, when the package is already
   on disk.  Median of `REPETITIONS` runs.  It is ~0.14 s for every case
-  because all fourteen then do the same thing: one existence check, one
+  because all fifteen then do the same thing: one existence check, one
   `sys.path.insert`, and one import.  Cold cost is paid once per
   machine; warm cost is paid on every run of the program, forever.
 
-* **size** -- kilobytes under `~/.alt_venv` afterwards, counting
+* **size** -- kilobytes under `~/.ezpkg` afterwards, counting
   allocated blocks much as `du -sk` does, landing within about 3 KB of
   it in either direction.  Compare these against each other, not
   against `du`.  Kilobytes rather than
@@ -193,7 +195,7 @@ What the columns mean, in the order they appear above:
   what it imports anyway.  `nopip1` is smallest at 1682 precisely
   because it never generates the console scripts, and `nopip2` is
   1714, which is `nopip1` plus 32 KB of empty venv.  `nopip3` is
-  `pip2`'s 1762 plus the 1.8 MB `pip.whl` it keeps for `AltVEnv`.
+  `pip2`'s 1762 plus the 1.8 MB `pip.whl` it keeps for `EZPkg`.
 
 The clusters: `pip1` and `pip2` are the floor at 17 pasted lines, with
 `pip4` and `pip5` one above it, but all four need pip already present;
@@ -223,7 +225,7 @@ load pip at all.
 `nopip2` exists to answer a question about the instructions rather than
 to be shipped.  Those asked for a venv built with `venv`, no spawning
 of `python3 -m pip install`, only `venv` and standard libraries, and
-an `importlib` import.  `nopip2` is the only one of the fourteen that
+an `importlib` import.  `nopip2` is the only one of the fifteen that
 does all four, and it costs 57 pasted lines against `nopip1`'s 51.  The
 extra 6 lines and 32 KB buy a virtual environment that nothing then
 reads, which is finding 3 of the log book arriving from yet another
@@ -233,8 +235,8 @@ direction.
 6.15 and `T.ewar` of `TASKS/`.  It is
 `pip2` with the one thing `pip2` assumes taken away.  Rather than run
 the machine's pip, it fetches pip's own wheel from the JSON API, keeps
-it as `~/.alt_venv/pip.whl`, and runs it as `python pip.whl/pip`, which
-is how pip documents running itself without being installed.  `AltVEnv`
+it as `~/.ezpkg/pip.whl`, and runs it as `python pip.whl/pip`, which
+is how pip documents running itself without being installed.  `EZPkg`
 then uses that same copy, so nothing on the machine needs pip at all.
 It is a subprocess case, so none of pip's state reaches the program,
 and it costs 31 pasted lines against `pip2`'s 17.
@@ -250,13 +252,13 @@ top of their program, where many tools check exactly that.  That took it
 from 41 pasted lines to 27, and checking the SHA-256 of the pip it
 downloads, against the digest PyPI lists, then added three: `import
 hashlib` and a two line `if` that raises.  On 2026-10-02 it took one
-more, to call `AltVEnv().install()` itself, so that a program using it
-never has to name `alt_venv` at all; Wayne: "The end-user should never
-have to directly touch `AltVEnv`."  `ruff.toml` exempts this file
+more, to call `EZPkg().install()` itself, so that a program using it
+never has to name `ezpkg` at all; Wayne: "The end-user should never
+have to directly touch `EZPkg`."  `ruff.toml` exempts this file
 from the one rule the squeeze breaks, `E702`.  The comment on the choice
 of pip went too, at Wayne's word, since this docstring explains it.  Not
 squeezed: pip's `--no-input` and `--disable-pip-version-check`, which
-change what pip does.  It fetches pip whenever `alt_venv` is missing,
+change what pip does.  It fetches pip whenever `ezpkg` is missing,
 even if an earlier run that failed before installing left a `pip.whl`
 behind; skipping that rare download cost a whole level of indentation.
 Paths go to `subprocess.run` as they are, and pip's `--target` is
@@ -275,18 +277,18 @@ simply passed over.  Against the real index that gives pip 24.0 on
 3.7, 25.0.1 on 3.8 and 26.0.1 on 3.9, each the last release for its
 Python.  See issue `I.bfnprp`.
 
-`nopip4` is the one that ships, since 2026-10-10.  It is `nopip3` with
-one question asked first: is `alt_venv` already importable?  Under
+`nopip4` shipped from 2026-10-10 to 2026-10-12.  It is `nopip3` with
+one question asked first: is `ezpkg` already importable?  Under
 `uv run`, beside a working copy, or wherever an installer such as shiv
-or PEX has already put it, `nopip3` fetched `pip` and `alt_venv`
+or PEX has already put it, `nopip3` fetched `pip` and `ezpkg`
 regardless, and with no network it failed.  `nopip4` tries the import,
 and only when that fails does `nopip3`'s work, unchanged.  It costs four
 lines, 35 pasted: `m = None`, a one line `try` and `except`, and an `if`
-around the import from `~/.alt_venv`.  The `m = None` is there for
+around the import from `~/.ezpkg`.  The `m = None` is there for
 `mypy`, which at module level, where a program pastes it, refuses `None`
 assigned in the `except` to a name the `try` made a module.  The
 harness runs every case with `python -P`, so that this directory, which
-holds `alt_venv.py`, is not on the child's `sys.path`; otherwise
+holds `ezpkg.py`, is not on the child's `sys.path`; otherwise
 `nopip4` would import the working copy and measure nothing.  See
 `T.ewar` and `I.apiia`.
 
@@ -296,10 +298,20 @@ in the same session so that the network was the same for both: `nopip3`
 the 15% that single runs vary by, as one failed import should be.  The
 size is identical, 3538 KB.  Both rows, like every row, fetch the
 default `coverage`, and so both end in a failure the timings do not
-include: their last stage, `fetch packages`, calls `m.AltVEnv()`, which
-`coverage` does not have.  Aiming them at `alt_venv` itself with
-`BOOTSTRAP_PACKAGE` needs `alt_venv` on an index, and it is not yet on
+include: their last stage, `fetch packages`, calls `m.EZPkg()`, which
+`coverage` does not have.  Aiming them at `ezpkg` itself with
+`BOOTSTRAP_PACKAGE` needs `ezpkg` on an index, and it is not yet on
 PyPI.
+
+`nopip5` has shipped since 2026-10-12, when the project was renamed from
+`alt_venv` to `ezpkg` (`T.rp`), which changed every pasted bootstrap
+anyway.  It is `nopip4` with `stdout=2` on its `pip install`, so the
+five lines `pip` prints on a first run go to standard error and not
+into the output of a program that is piped or parsed (`T.m`).  It costs
+no line.  Its row was measured beside a fresh `nopip4` run, 3.53 s
+against 3.75 s cold and 0.16 s against 0.15 s warm, the same within
+the noise.  Every case above was renamed with the project, so all of
+them install into `~/.ezpkg`.
 
 MIT No Attribution
 
@@ -346,12 +358,12 @@ def venv1() -> None:
     * `SystemExit`:
       If any step fails, with one line saying what failed and why.
     """
-    # Ensure `alt_venv` is downloaded.
+    # Ensure `ezpkg` is downloaded.
     import os
     import sysconfig
     import venv
     try:
-        root = pathlib.Path.home() / ".alt_venv"
+        root = pathlib.Path.home() / ".ezpkg"
         if not (root / "pyvenv.cfg").exists():
             venv.EnvBuilder(with_pip=True, symlinks=(os.name != "nt")
                             ).create(root)
@@ -381,13 +393,13 @@ def venv2() -> None:
     * `SystemExit`:
       If any step fails, with one line saying what failed and why.
     """
-    # Ensure `alt_venv` is downloaded.
+    # Ensure `ezpkg` is downloaded.
     import os
     import subprocess
     import sysconfig
     import venv
     try:
-        root = pathlib.Path.home() / ".alt_venv"
+        root = pathlib.Path.home() / ".ezpkg"
         if not (root / "pyvenv.cfg").exists():
             venv.EnvBuilder(with_pip=True, symlinks=(os.name != "nt")
                             ).create(root)
@@ -416,13 +428,13 @@ def venv3() -> None:
     * `SystemExit`:
       If any step fails, with one line saying what failed and why.
     """
-    # Ensure `alt_venv` is downloaded.
+    # Ensure `ezpkg` is downloaded.
     import os
     import shutil
     import sysconfig
     import venv
     try:
-        root = pathlib.Path.home() / ".alt_venv"
+        root = pathlib.Path.home() / ".ezpkg"
         if not (root / "pyvenv.cfg").exists():
             venv.EnvBuilder(with_pip=True, symlinks=(os.name != "nt")
                             ).create(root)
@@ -457,14 +469,14 @@ def venv4() -> None:
     * `SystemExit`:
       If any step fails, with one line saying what failed and why.
     """
-    # Ensure `alt_venv` is downloaded.
+    # Ensure `ezpkg` is downloaded.
     import os
     import shutil
     import subprocess
     import sysconfig
     import venv
     try:
-        root = pathlib.Path.home() / ".alt_venv"
+        root = pathlib.Path.home() / ".ezpkg"
         if not (root / "pyvenv.cfg").exists():
             venv.EnvBuilder(with_pip=True, symlinks=(os.name != "nt")
                             ).create(root)
@@ -499,12 +511,12 @@ def venv5() -> None:
     * `SystemExit`:
       If any step fails, with one line saying what failed and why.
     """
-    # Ensure `alt_venv` is downloaded.
+    # Ensure `ezpkg` is downloaded.
     import os
     import sysconfig
     import venv
     try:
-        root = pathlib.Path.home() / ".alt_venv"
+        root = pathlib.Path.home() / ".ezpkg"
         if not (root / "pyvenv.cfg").exists():
             venv.EnvBuilder(with_pip=False, symlinks=(os.name != "nt")
                             ).create(root)
@@ -534,9 +546,9 @@ def pip1() -> None:
     * `SystemExit`:
       If any step fails, with one line saying what failed and why.
     """
-    # Ensure `alt_venv` is downloaded.
+    # Ensure `ezpkg` is downloaded.
     try:
-        target = pathlib.Path.home() / ".alt_venv"
+        target = pathlib.Path.home() / ".ezpkg"
         if not (target / PACKAGE).is_dir():
             from pip._internal.cli.main import main as pip_main
             if pip_main(["install", "--no-input", "--target", str(target),
@@ -560,10 +572,10 @@ def pip2() -> None:
     * `SystemExit`:
       If any step fails, with one line saying what failed and why.
     """
-    # Ensure `alt_venv` is downloaded.
+    # Ensure `ezpkg` is downloaded.
     import subprocess
     try:
-        target = pathlib.Path.home() / ".alt_venv"
+        target = pathlib.Path.home() / ".ezpkg"
         if not (target / PACKAGE).is_dir():
             subprocess.run([sys.executable, "-m", "pip", "install",
                             "--no-input", "--disable-pip-version-check",
@@ -586,10 +598,10 @@ def pip3() -> None:
     * `SystemExit`:
       If any step fails, with one line saying what failed and why.
     """
-    # Ensure `alt_venv` is downloaded.
+    # Ensure `ezpkg` is downloaded.
     import ensurepip
     try:
-        target = pathlib.Path.home() / ".alt_venv"
+        target = pathlib.Path.home() / ".ezpkg"
         if not (target / PACKAGE).is_dir():
             shipped = (ensurepip._WHEEL_PKG_DIR  # type: ignore
                        or pathlib.Path(ensurepip.__file__).parent / "_bundled")
@@ -617,9 +629,9 @@ def pip4() -> None:
     * `SystemExit`:
       If any step fails, with one line saying what failed and why.
     """
-    # Ensure `alt_venv` is downloaded.
+    # Ensure `ezpkg` is downloaded.
     try:
-        target = pathlib.Path.home() / ".alt_venv"
+        target = pathlib.Path.home() / ".ezpkg"
         if not (target / PACKAGE).is_dir():
             from pip._internal.cli.main import main as pip_main
             if pip_main(["install", "--no-input",
@@ -644,10 +656,10 @@ def pip5() -> None:
     * `SystemExit`:
       If any step fails, with one line saying what failed and why.
     """
-    # Ensure `alt_venv` is downloaded.
+    # Ensure `ezpkg` is downloaded.
     import subprocess
     try:
-        target = pathlib.Path.home() / ".alt_venv"
+        target = pathlib.Path.home() / ".ezpkg"
         if not (target / PACKAGE).is_dir():
             subprocess.run([sys.executable, "-m", "pip", "install",
                             "--no-input", "--no-compile",
@@ -671,14 +683,14 @@ def nopip1() -> None:
     * `SystemExit`:
       If any step fails, with one line saying what failed and why.
     """
-    # Ensure `alt_venv` is downloaded.
+    # Ensure `ezpkg` is downloaded.
     import io
     import json
     import sysconfig
     import urllib.request
     import zipfile
     try:
-        root = pathlib.Path.home() / ".alt_venv"
+        root = pathlib.Path.home() / ".ezpkg"
         target = root
         target.mkdir(parents=True, exist_ok=True)
         if not (target / PACKAGE).is_dir():
@@ -731,7 +743,7 @@ def nopip2() -> None:
     * `SystemExit`:
       If any step fails, with one line saying what failed and why.
     """
-    # Ensure `alt_venv` is downloaded.
+    # Ensure `ezpkg` is downloaded.
     import io
     import json
     import os
@@ -740,7 +752,7 @@ def nopip2() -> None:
     import venv
     import zipfile
     try:
-        root = pathlib.Path.home() / ".alt_venv"
+        root = pathlib.Path.home() / ".ezpkg"
         if not (root / "pyvenv.cfg").exists():
             venv.EnvBuilder(with_pip=False, symlinks=(os.name != "nt")
                             ).create(root)
@@ -797,13 +809,13 @@ def nopip3() -> None:
     * `SystemExit`:
       If any step fails, with one line saying what failed and why.
     """
-    # Ensure `alt_venv` is downloaded.
+    # Ensure `ezpkg` is downloaded.
     import hashlib
     import json
     import subprocess
     import urllib.request as req
     try:
-        s = "find home"; t = pathlib.Path.home()/".alt_venv"; w = t/"pip.whl"
+        s = "find home"; t = pathlib.Path.home()/".ezpkg"; w = t/"pip.whl"
         if not (t/PACKAGE).is_dir():  # Not installed yet.
             s = "choose pip"; v = sys.version_info[1]
             d = json.load(req.urlopen(f"{JSON_API}/pip/json", None, 30))
@@ -822,16 +834,16 @@ def nopip3() -> None:
                 "--disable-pip-version-check", PACKAGE], check=True)
         s = f"import {PACKAGE}"; sys.path.insert(0, str(t))
         importlib.invalidate_caches(); m = importlib.import_module(PACKAGE)
-        s = "fetch packages"; m.AltVEnv().install(bootstrap="nopip3")
+        s = "fetch packages"; m.EZPkg().install(bootstrap="nopip3")
     except Exception as x:
         raise SystemExit(f"{PACKAGE}: {s} failed: {x!r}")
 
 
 def nopip4() -> None:
-    """As nopip3, but first use an `alt_venv` that is already importable.
+    """As nopip3, but first use an `ezpkg` that is already importable.
 
-    `nopip3` asks only whether `~/.alt_venv` holds `alt_venv`, so under
-    `uv run`, or beside a working copy, it fetches `pip` and `alt_venv`
+    `nopip3` asks only whether `~/.ezpkg` holds `ezpkg`, so under
+    `uv run`, or beside a working copy, it fetches `pip` and `ezpkg`
     that are already on `sys.path`, and fails with no network.  This case
     tries the import first and falls back to `nopip3` unchanged.  See
     `T.ewar` and `I.apiia`.
@@ -840,13 +852,13 @@ def nopip4() -> None:
     * `SystemExit`:
       If any step fails, with one line saying what failed and why.
     """
-    # Ensure `alt_venv` is downloaded.
+    # Ensure `ezpkg` is downloaded.
     import hashlib
     import json
     import subprocess
     import urllib.request as req
     try:
-        s = "find home"; t = pathlib.Path.home()/".alt_venv"; w = t/"pip.whl"
+        s = "find home"; t = pathlib.Path.home()/".ezpkg"; w = t/"pip.whl"
         m = None
         try: m = importlib.import_module(PACKAGE)  # Already importable?
         except ImportError: pass
@@ -869,7 +881,55 @@ def nopip4() -> None:
         if m is None:
             s = f"import {PACKAGE}"; sys.path.insert(0, str(t))
             importlib.invalidate_caches(); m = importlib.import_module(PACKAGE)
-        s = "fetch packages"; m.AltVEnv().install(bootstrap="nopip4")
+        s = "fetch packages"; m.EZPkg().install(bootstrap="nopip4")
+    except Exception as x:
+        raise SystemExit(f"{PACKAGE}: {s} failed: {x!r}")
+
+
+def nopip5() -> None:
+    """As nopip4, but `pip`'s progress goes to standard error.
+
+    On a first run `nopip4`'s `pip install` printed five lines --
+    `Collecting ezpkg` to `Successfully installed` -- on the program's
+    own standard output, mixing them into output that may be piped or
+    parsed.  `stdout=2` sends them to standard error, where a person at
+    a terminal still sees them.  Shipped with the rename to `ezpkg`.
+    See `T.m` and `T.rp`.
+
+    Raises:
+    * `SystemExit`:
+      If any step fails, with one line saying what failed and why.
+    """
+    # Ensure `ezpkg` is downloaded.
+    import hashlib
+    import json
+    import subprocess
+    import urllib.request as req
+    try:
+        s = "find home"; t = pathlib.Path.home()/".ezpkg"; w = t/"pip.whl"
+        m = None
+        try: m = importlib.import_module(PACKAGE)  # Already importable?
+        except ImportError: pass
+        if m is None and not (t/PACKAGE).is_dir():  # Not installed yet.
+            s = "choose pip"; v = sys.version_info[1]
+            d = json.load(req.urlopen(f"{JSON_API}/pip/json", None, 30))
+            e = max((e for f in d["releases"].values() for e in f  # Newest pip
+                     if e["url"][-4:] == ".whl" and not e["yanked"]
+                     and (q := e["requires_python"] or "")[:4] == ">=3."
+                     and "," not in q and int(q.split(".")[1]) <= v),
+                    key=lambda e: e["upload_time"])  # whose floor we meet.
+            s = "download pip"; r = req.urlopen(e["url"], None, 60).read()
+            if hashlib.sha256(r).hexdigest() != e["digests"]["sha256"]:
+                raise ValueError(f"{e['filename']} fails its SHA-256 check")
+            t.mkdir(parents=True, exist_ok=True); p = t/"pip.part"
+            p.write_bytes(r); p.replace(w)  # The rename is atomic.
+            s = f"install {PACKAGE}"; subprocess.run([
+                sys.executable, w/"pip", "install", "--no-input", "-t", t,
+                "--disable-pip-version-check", PACKAGE], check=True, stdout=2)
+        if m is None:
+            s = f"import {PACKAGE}"; sys.path.insert(0, str(t))
+            importlib.invalidate_caches(); m = importlib.import_module(PACKAGE)
+        s = "fetch packages"; m.EZPkg().install(bootstrap="nopip5")
     except Exception as x:
         raise SystemExit(f"{PACKAGE}: {s} failed: {x!r}")
 
@@ -901,11 +961,11 @@ def main() -> None:
     # neither is idle here: the constructor repairs a single module
     # install so that this case's own `is_dir()` guard recognises it on
     # the following run, and `install()` walks the declared path in every
-    # one of the fourteen shapes, virtual environments included.  This
+    # one of the fifteen shapes, virtual environments included.  This
     # file has no PEP 723 block, so nothing is fetched.  See `I.cctfd` and Step
     # 6.7.8.  Harness machinery, so `paste` does not count it.
-    if hasattr(module, "AltVEnv"):
-        module.AltVEnv().install(bootstrap=sys.argv[1])
+    if hasattr(module, "EZPkg"):
+        module.EZPkg().install(bootstrap=sys.argv[1])
 
     print(f"{PACKAGE}: module {module.__name__} "
           f"version {module.__version__} from {module.__file__}")
@@ -926,6 +986,7 @@ MECHANISMS = {
     "nopip2": "venv(no pip), stdlib wheel",
     "nopip3": "no venv, PyPI pip subprocess",
     "nopip4": "as nopip3, importable first",
+    "nopip5": "as nopip4, pip to stderr",
 }
 # Lines a case needs but does not contain: the three module level
 # imports.  This is the difference between `lines` and `paste`.
@@ -972,7 +1033,7 @@ def pasted(label: str) -> str:
 
     The function's body below its docstring, one level shallower, with
     the two names that exist only so the harness can be steered spelled
-    out the way a pasted copy carries them: `PACKAGE` as `"alt_venv"`
+    out the way a pasted copy carries them: `PACKAGE` as `"ezpkg"`
     and `JSON_API` as `https://pypi.org/pypi`.  An f-string left with
     nothing to substitute becomes a plain string, as it would be
     written by hand.  This is the text Step 6.12 fingerprints, and the
@@ -994,8 +1055,8 @@ def pasted(label: str) -> str:
     lines = source.splitlines()[node.body[1].lineno - 2:node.end_lineno]
     text = textwrap.dedent("\n".join(lines)) + "\n"
     text = text.replace("{JSON_API}", "https://pypi.org/pypi")
-    text = text.replace("{PACKAGE}", "alt_venv")
-    text = re.sub(r"\bPACKAGE\b", '"alt_venv"', text)
+    text = text.replace("{PACKAGE}", "ezpkg")
+    text = re.sub(r"\bPACKAGE\b", '"ezpkg"', text)
     return re.sub(r'\bf"([^"{}]*)"', r'"\1"', text)
 
 
@@ -1079,11 +1140,11 @@ def format_table(rows: list[list]) -> str:
 def run_tests() -> None:
     """Run every case in a throwaway `HOME` and print the report.
 
-    Each case installs into `~/.alt_venv`, so every run is given
+    Each case installs into `~/.ezpkg`, so every run is given
     its own temporary `HOME`, which `pathlib.Path.home()` honours.
     Without that, the second case onwards would find the package
     already on disk and report a warm time as its cold time.  The real
-    `~/.alt_venv` is never touched, and each temporary tree is
+    `~/.ezpkg` is never touched, and each temporary tree is
     removed once it has been measured.
 
     Every case is run `REPETITIONS` times, cold and then warm, and the
@@ -1120,7 +1181,7 @@ def run_tests() -> None:
                 if done.returncode or PACKAGE not in done.stdout:
                     failures.append((label, done.stderr.strip()[-300:]))
             if repetition == 0:
-                size = directory_size(pathlib.Path(home) / ".alt_venv")
+                size = directory_size(pathlib.Path(home) / ".ezpkg")
             shutil.rmtree(home, ignore_errors=True)
         cold, warm = statistics.median(colds), statistics.median(warms)
         imports, lines = counts[label]

@@ -314,3 +314,13 @@ S5 Alternatives, S6 Conclusion).
 * Still later: a bootstrap anatomy section with `nopip5` (`T.m`), the
   rename (`T.rp`), and making the Quick Start work once `alt_venv` is
   on PyPI (`T.ffrp`).
+
+## 2026-10-12: With the rename (`T.rp`)
+
+* "How `EZPkg` Actually Works" is the bootstrap anatomy; it needed only a
+  `stdout=2` bullet for `nopip5`, proposed in an HTML comment.
+* Four `Claude:` proposals await Wayne (see `T.rp` Context).
+
+## 2026-10-12: Closed with `T.rp`
+
+* All four proposals applied; no `Claude:` or `Issue:` comments remain.
