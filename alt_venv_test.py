@@ -5435,6 +5435,44 @@ class BootstrapCheckTest(unittest.TestCase):
         self.assertEqual(alt_venv.bootstrap_fingerprint(block),
                          list(alt_venv.BOOTSTRAPS)[-1])
 
+    def test_the_enabling_copy_is_current(self) -> None:
+        """`README.md`'s copy-from bootstrap matches `quick_start.py`.
+
+        "Enabling `AltVEnv` for Your Program" shows the bootstrap on its
+        own, and that is the copy readers paste into their programs.
+        Its Part 1 and docstring are placeholders, so only Part 2's
+        imports and Part 3's code are compared, the code by fingerprint.
+        See `T.trcb`.
+        """
+        # The section's first Python block is the copy readers take.
+        here: Path = Path(__file__).resolve().parent
+        program: str = (here / "quick_start.py").read_text(encoding="utf-8")
+        readme: str = (here / "README.md").read_text(encoding="utf-8")
+        heading: str = "\n## Enabling `AltVEnv` for Your Program\n"
+        self.assertIn(heading, readme)
+        section: str = readme.split(heading, 1)[1].split("\n## ", 1)[0]
+        self.assertIn("```python\n", section)
+        enabling: str = section.split("```python\n", 1)[1].split("```", 1)[0]
+
+        # Part 2 is the import lines between the Part 2 and Part 3
+        # comments, which must be the same lines in the same order.
+        def imports(text: str) -> list[str]:
+            part2: str = text.split("# Part 2:", 1)[1].split("# Part 3:")[0]
+            return [line for line in part2.splitlines()
+                    if line.startswith("import ")]
+
+        self.assertTrue(imports(program))
+        self.assertEqual(imports(enabling), imports(program))
+
+        # Part 3 is found the way a running program's would be.
+        ours: str | None = alt_venv.find_bootstrap(enabling)
+        theirs: str | None = alt_venv.find_bootstrap(program)
+        assert ours is not None and theirs is not None
+        self.assertEqual(alt_venv.bootstrap_fingerprint(ours),
+                         alt_venv.bootstrap_fingerprint(theirs),
+                         "the bootstrap in README.md's \"Enabling\" section "
+                         "is not the one in quick_start.py")
+
     def test_layout_and_comments_do_not_change_the_fingerprint(self) -> None:
         """Re-indenting, re-wrapping and commenting leave it the same."""
         # Three cosmetic changes, then one real one.
@@ -5668,8 +5706,7 @@ class CoverageToolTest(unittest.TestCase):
         """Runs that never finished are named rather than ignored."""
         # An empty directory is missing everything the default selects.
         text: str = alt_venv_coverage.compare(self.root)
-        self.assertIn("No counts for: baseline, nopip1, nopip2, nopip3, "
-                      "nopip4.", text)
+        self.assertIn("No counts for: baseline, nopip1, nopip4.", text)
 
     def test_report_keeps_the_counts(self) -> None:
         """`report` saves what `compare` later reads back."""

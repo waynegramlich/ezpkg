@@ -1,11 +1,19 @@
 {
-  "state": "Pending",
+  "state": "Closed",
   "created": "2026-10-12T03:40:16Z",
-  "updated": "2026-10-12T03:40:16Z",
+  "updated": "2026-10-13T00:18:44Z",
   "history": [
     {
       "state": "Pending",
       "time": "2026-10-12T03:40:16Z"
+    },
+    {
+      "state": "Open",
+      "time": "2026-10-13T00:12:27Z"
+    },
+    {
+      "state": "Closed",
+      "time": "2026-10-13T00:18:44Z"
     }
   ],
   "tag": "trcb"
