@@ -231,8 +231,8 @@ extra 6 lines and 32 KB buy a virtual environment that nothing then
 reads, which is finding 3 of the log book arriving from yet another
 direction.
 
-`nopip3` shipped until 2026-10-10, when `nopip4` replaced it; see Step
-6.15 and `T.ewar` of `TASKS/`.  It is
+`nopip3` shipped until 2026-10-10, when `nopip4` replaced it; see
+`T.npp` and `T.ewar`.  It is
 `pip2` with the one thing `pip2` assumes taken away.  Rather than run
 the machine's pip, it fetches pip's own wheel from the JSON API, keeps
 it as `~/.ezpkg/pip.whl`, and runs it as `python pip.whl/pip`, which
@@ -962,8 +962,8 @@ def main() -> None:
     # install so that this case's own `is_dir()` guard recognises it on
     # the following run, and `install()` walks the declared path in every
     # one of the fifteen shapes, virtual environments included.  This
-    # file has no PEP 723 block, so nothing is fetched.  See `I.cctfd` and Step
-    # 6.7.8.  Harness machinery, so `paste` does not count it.
+    # file has no PEP 723 block, so nothing is fetched.  See `I.cctfd` and
+    # 6.7.8 of `T.p7i`.  Harness machinery, so `paste` does not count it.
     if hasattr(module, "EZPkg"):
         module.EZPkg().install(bootstrap=sys.argv[1])
 
@@ -1036,7 +1036,7 @@ def pasted(label: str) -> str:
     out the way a pasted copy carries them: `PACKAGE` as `"ezpkg"`
     and `JSON_API` as `https://pypi.org/pypi`.  An f-string left with
     nothing to substitute becomes a plain string, as it would be
-    written by hand.  This is the text Step 6.12 fingerprints, and the
+    written by hand.  This is the text `T.fbanwiis` fingerprints, and the
     text a `README.md` can quote.
 
     Arguments:

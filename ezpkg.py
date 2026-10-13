@@ -3,36 +3,14 @@
 # dependencies = []
 # ///
 #
-# The block above is this project eating its own cooking, and it is the
-# one place the Python floor is written down.  See Steps 6.7.4 and 6.7.7
-# in `TASKS/`: 3.11, because `tomllib` reads the block and `tomllib`
-# arrived in 3.11, and no higher because nothing here needs 3.12.  The
-# language features used set only 3.10 -- `Path | None` is evaluated at
-# run time and `bootstrap.py` uses `match` -- so the standard library is
-# what costs the extra version.  `dependencies` is empty on purpose and
-# says so: a project about fetching packages that are not preinstalled
-# has none of its own.
-#
-# Nothing reads it yet.  A tool such as `uv` reads the block belonging to
-# the script it is running, and this is a library that is never
-# `__main__`, so the block is documentation until Step 6.7 can parse it.
-# At that point `build_wheel` should take `Requires-Python` from here
-# rather than keeping a second copy.
+# The lines above are standard PEP 723 metadata, read by tools such as
+# `uv` and by `EZPkg` itself.  See `README.md` for more details.
 
-"""Fetch Python packages that are not preinstalled, from one file.
+"""Automatic Package Fetching for One-File Programs
 
-This module is the second stage of a two stage design.  A small
-bootstrap stub, pasted by hand into a program that needs it, fetches
-this package and imports it.  Everything that is too large to paste
-lives here.
-
-The stub fetches exactly one package, of known name and with no
-dependencies.  `EZPkg` then fetches whatever the calling program
-actually declared, which is the general case: version constraints,
-extras, transitive dependencies and compiled wheels.
-
-This file is a placeholder.  `EZPkg` is deliberately empty until
-the shape of the general case fetch has been worked out.
+This package allows a Python program to find its missing Python packages and
+automatically download and import them in conjunction with the `pip` program.
+Read `README.md` or [EZPkg](https://pypi.org/project/ezpkg/) for more details.
 
 MIT No Attribution
 
@@ -85,6 +63,11 @@ from pathlib import Path
 from types import ModuleType
 from typing import IO, Any, overload
 
+# The one place the version is written down.  `bootstrap.py` prints it
+# after importing, and `release_wheel` in the test suite writes the
+# wheel's version over it in the copy that it packages.
+__version__: str = "0.0.1"
+
 # How many times `EZPkg.consent` will put the same question, when the
 # answer is neither yes nor no.  Bounded, so that a terminal feeding
 # nonsense cannot keep a program alive indefinitely.
@@ -97,14 +80,14 @@ ATTEMPTS: int = 3
 # the record naming it is written, so anything young may belong to a
 # program that is still running.  A day is far longer than either window
 # and short enough to keep a crashed run's leftovers from accumulating.
-# See Step 6.11 in `TASKS/`.
+# See `T.gc`.
 CULL_GRACE: float = 86400.0
 CULL_INTERVAL: float = 86400.0
 
 # How long a request may go unanswered before the cache stops keeping the
 # packages that answered it.  Six months, because the cost of being wrong
 # is one download and the cost of being right is a little disk, and those
-# are not symmetrical.  See Step 6.11 in `TASKS/`.
+# are not symmetrical.  See `T.gc`.
 CULL_DAYS: float = 180.0 * 86400.0
 
 # How often the private `pip` is checked for a newer release.  Weekly, as
@@ -118,7 +101,7 @@ PIP_INTERVAL: float = 7.0 * 86400.0
 # bootstrap means adding its fingerprint here; the test suite renders
 # the shipping case as pasted and fails until the last entry matches it.  Old
 # entries stay, because they are how a stale copy is recognised.  See
-# Step 6.12 in `TASKS/`.
+# `T.fbanwiis`.
 BOOTSTRAPS: dict[str, str] = {
     "46336be666731d6a8999d4233d51b99a0cc327d479e57ece2f7b003290ffa466":
         "nopip3 of 2026-10-02",
@@ -190,11 +173,6 @@ import cowsay  # type: ignore[import-not-found]  # For mypy.
 cowsay.cow("EZPkg works!")
 print(f"cowsay {cowsay.__version__} was loaded from {cowsay.__file__}")
 '''
-
-# The one place the version is written down.  `bootstrap.py`
-# prints it after importing, and the test suite stamps it into
-# the wheel it builds.
-__version__: str = "0.0.1"
 
 
 # Where a requirement stops naming a package and starts constraining
@@ -321,7 +299,7 @@ def main_path() -> Path | None:
     There is often no such file.  The interpreter prompt and `python3
     -c` leave `__main__` without a `__file__` at all, and then there is
     nothing to find.  Every caller has to cope with that rather than
-    assume a program has a file; see Step 6.12.1 in `TASKS/`.
+    assume a program has a file; see 6.12.1 of `T.fbanwiis`.
 
     Worse, a `__file__` that is present is not necessarily a file.  A
     program piped in as `python3 - < program.py` gets the literal
@@ -361,7 +339,7 @@ BLOCK: re.Pattern[str] = re.compile(
 # `BLOCK`'s `content` group matches commented lines greedily and will
 # swallow a closing fence and the next block's opener, so two adjacent
 # blocks arrive as one match and never look duplicated; measured
-# 2026-09-27.  Counting the fences notices them anyway.  See Step 6.7.7.
+# 2026-09-27.  Counting the fences notices them anyway.  See 6.7.7 of `T.p7i`.
 FENCE: re.Pattern[str] = re.compile(r"(?m)^# /// script$")
 
 
@@ -369,7 +347,7 @@ FENCE: re.Pattern[str] = re.compile(r"(?m)^# /// script$")
 # naming two or three numbers, which is what a real block says.  Anything
 # else -- `>=3.9,<4`, `!=3.9.*`, `~=3.11`, a pre-release rule -- is left
 # alone rather than guessed at, because PEP 440 belongs to `pip`.  See
-# Steps 6.3.3 and 6.7.10 in `TASKS/`.
+# 6.3.3 of `T.vcbow` and 6.7.10 of `T.p7i`.
 PYTHON_FLOOR: re.Pattern[str] = re.compile(
     r"^>=\s*(\d+)\.(\d+)(?:\.(\d+))?$")
 
@@ -404,7 +382,7 @@ def script_metadata(text: str) -> dict[str, Any] | None:
     PEP 723 puts the metadata in `#` comments, opened by `# /// script`
     and closed by `# ///`, with every line between them commented too.
     Stripping the comment markers leaves TOML, which `tomllib` reads.
-    See Steps 6.7.2 and 6.7.7 in `TASKS/`.
+    See 6.7.2 and 6.7.7 of `T.p7i`.
 
     The argument is source **text**, not a module or a path, because a
     comment does not exist at run time: the compiler drops it, and `-OO`
@@ -467,8 +445,8 @@ def script_metadata(text: str) -> dict[str, Any] | None:
 def main_source() -> tuple[Path, str] | None:
     """Return the running program's file and its text.
 
-    Three things want this: the PEP 723 block of Step 6.7, the bootstrap
-    that Step 6.12 looks for, and the approvals file of Step 6.6, which
+    Three things want this: the PEP 723 block of `T.p7i`, the bootstrap
+    that `T.fbanwiis` looks for, and the approvals file of `T.sawaw`, which
     needs only the path.  One function so that the awkward cases are got
     right once and tested once.
 
@@ -513,7 +491,7 @@ def bootstrap_fingerprint(text: str) -> str:
     `tokenize` finds the comments, because a `#` may sit inside a
     string.  The tokens are joined back into text before the whitespace
     goes, which makes the result the same under 3.11, where an f-string
-    is one token, and under 3.12, where it is several.  See Step 6.12.
+    is one token, and under 3.12, where it is several.  See `T.fbanwiis`.
 
     Arguments:
     * `text` (`str`):
@@ -1043,8 +1021,8 @@ def refresh(path: Path, text: str) -> None:
 
     Making an object used to write a file every time, which is a side
     effect nobody asks a constructor for and which touches the
-    modification time of a file a person may be reading; see Step
-    6.10.5 in `TASKS/`.  A stale copy is still replaced, so a newer
+    modification time of a file a person may be reading; see
+    6.10.5 of `T.rd`.  A stale copy is still replaced, so a newer
     `ezpkg` still reaches a cache that holds an older file.
 
     Arguments:
@@ -1081,7 +1059,7 @@ class EZPkg:
     Attributes:
     * `bootstrap` (`str`):
       Which bootstrap the program carries, as `install` was told, or the
-      empty string.  Nothing reads it yet; see Step 6.12 in `TASKS/`.
+      empty string.  Nothing reads it yet; see `T.fbanwiis`.
     * `readme` (`Path`):
       The `README.md` written into `root`.
     * `quick_start` (`Path`):
@@ -1256,7 +1234,7 @@ class EZPkg:
     def paths(self) -> tuple[Path, Path, Path, Path]:
         """Return the four cache directories, creating them if needed.
 
-        See Step 6.3.1 in `TASKS/`.  `pending` holds wheels that
+        See 6.3.1 of `T.vcbow`.  `pending` holds wheels that
         have arrived and are not approved, `wheels` holds the approved
         artifacts, `versions` holds one unpacked tree per resolved
         distribution and version, and `requests` holds one small record
@@ -1289,7 +1267,7 @@ class EZPkg:
 
         A program with no file of its own -- the interpreter prompt,
         `python3 -c`, a frozen executable -- has nowhere to keep one and
-        gets no verification.  See Step 6.6 in `TASKS/`.
+        gets no verification.  See `T.sawaw`.
 
         Returns:
         * (`Path | None`): Where the approvals are, or `None` when this
@@ -2192,7 +2170,7 @@ class EZPkg:
         the list has already been printed, and failing instead would
         break every program run from `cron` or a build on the first day.
         A guarantee rather than a notification is what the approvals file
-        is for; see Step 6.6.
+        is for; see `T.sawaw`.
 
         Arguments:
         * `wheels` (`Sequence[Path]`):
@@ -2330,7 +2308,7 @@ class EZPkg:
 
         It lives in the cache, so deleting the cache restores the
         question, which is the same lifetime the question already had:
-        asked once per cache.  See Step 6.10 in `TASKS/`.
+        asked once per cache.  See `T.rd`.
 
         Returns:
         * (`Path`): The marker, whether or not it exists.
@@ -2481,8 +2459,8 @@ class EZPkg:
 
         The hash is of the file that arrived, not of whatever the index
         claimed, which is the better of the two and the only one
-        available: `pip download` does not accept `--report`.  See Step
-        6.3.7 in `TASKS/`.  This is the identity Step 6.6 approves,
+        available: `pip download` does not accept `--report`.  See
+        6.3.7 of `T.vcbow`.  This is the identity `T.sawaw` approves,
         and the only thing that can notice a distribution being
         re-uploaded under a version it already used.
 
@@ -2713,7 +2691,7 @@ class EZPkg:
         # retries that were buying the diagnosis are no longer needed
         # for it.  One is kept for a genuinely flaky network.  A caller
         # wanting pip's defaults back passes them in `argv`, which wins.
-        # See Step 6.17.7 in `TASKS/`.
+        # See 6.17.7 of `T.ffrp`.
         done: subprocess.CompletedProcess[str] = subprocess.run(
             [*self.pip(), "download", "--retries", "1",
              "--no-input", "--disable-pip-version-check",
@@ -2766,7 +2744,7 @@ class EZPkg:
         A wheel's `.data/purelib` and `.data/platlib` contents belong
         beside the modules rather than under a `.data` directory, which
         is the one part of the wheel specification this has to know;
-        see Step 6.3.12.
+        see 6.3.12 of `T.vcbow`.
 
         Arguments:
         * `wheel` (`Path`):
@@ -2800,8 +2778,8 @@ class EZPkg:
         # the directory they came from is then removed, so that an empty
         # `.data` is not left sitting in an otherwise tidy tree.  A
         # wheel's `scripts`, `headers` or `data` subdirectories are not
-        # handled and are deliberately left where they are; see Step
-        # 6.3.12 in `TASKS/`.
+        # handled and are deliberately left where they are; see
+        # 6.3.12 of `T.vcbow`.
         data: Path
         sub: str
         item: Path
@@ -2821,7 +2799,7 @@ class EZPkg:
             return target
 
         # Keep the artifact, and beside it the hash of what arrived,
-        # which is what Step 6.6 approves.
+        # which is what `T.sawaw` approves.
         kept: Path = wheels / wheel.name
         wheel.rename(kept)
         kept.with_suffix(".sha256").write_text(f"{self.digest(kept)}\n")
@@ -2859,8 +2837,8 @@ class EZPkg:
 
         Silent by default; `install` prints this only when
         `EZPKG_BOOTSTRAP=check` asks, because the person running a
-        program cannot act on it and its author can ask.  See Step 6.12.2
-        in `TASKS/`.
+        program cannot act on it and its author can ask.  See 6.12.2 of
+        `T.fbanwiis`.
 
         Returns:
         * (`str`): The line, for standard error.
@@ -2901,7 +2879,7 @@ class EZPkg:
         cache goes on `sys.path` and the program's own `import`
         statements, written below the bootstrap, then succeed.  This is
         the form the bootstrap calls and the one `README.md` teaches;
-        see Step 6.7.8 in `TASKS/`.  A program with no block, or a
+        see 6.7.8 of `T.p7i`.  A program with no block, or a
         block declaring nothing, asks for nothing and gets nothing,
         without complaint.
 
@@ -2937,7 +2915,7 @@ class EZPkg:
         instead of checking it, which is how an author regenerates the
         file.  `skip` checks nothing, which is for an author still
         deciding what the program needs.  A program with no approvals
-        file is told what arrived and not asked about it; see Step 6.6.
+        file is told what arrived and not asked about it; see `T.sawaw`.
         Unset, the approvals also lock: the versions they record are
         the ones fetched, whatever is newer; see `locked`.
 
@@ -2972,7 +2950,7 @@ class EZPkg:
           Which bootstrap the calling program carries, as the pasted code
           names itself -- `"nopip5"` for the one that ships.  Kept on
           the instance as `self.bootstrap` and **read by nothing yet**:
-          Step 6.12 wants to notice a pasted bootstrap that has gone
+          `T.fbanwiis` wants to notice a pasted bootstrap that has gone
           stale, and telling it which one this is costs the caller no
           line and saves it guessing.  An empty string means the caller
           did not say.
@@ -3004,11 +2982,11 @@ class EZPkg:
           form.  The no-argument form imports nothing and so cannot
           raise it.
         """
-        # Remembered for Step 6.12, which has not been written yet.
+        # Remembered, though nothing reads it yet; see `T.fbanwiis`.
         self.bootstrap = bootstrap
 
         # Say whether the pasted bootstrap is current, but only when the
-        # author asks; see Step 6.12.
+        # author asks; see `T.fbanwiis`.
         if os.environ.get("EZPKG_BOOTSTRAP", "").lower() == "check":
             print(self.report_bootstrap(), file=sys.stderr)
 
@@ -3066,7 +3044,7 @@ class EZPkg:
         # `sys.modules` is keyed by name, so a module already imported
         # from another version's tree would be handed back in place of
         # the version just asked for, silently.  One process holds one
-        # version of a module; say so instead.  See Step 6.3.11.
+        # version of a module; say so instead.  See 6.3.11 of `T.vcbow`.
         name: str
         for name in names:
             loaded: ModuleType | None = sys.modules.get(name)
@@ -3089,7 +3067,7 @@ class EZPkg:
         """Return the running program's PEP 723 declaration.
 
         The block is in the program's source text, which `main_source`
-        supplies; see Steps 6.7.2 and 6.7.7 in `TASKS/`.  Two callers
+        supplies; see 6.7.2 and 6.7.7 of `T.p7i`.  Two callers
         want it -- `declared` for the packages and `check_python` for the
         interpreter -- and reading it once means they cannot disagree.
 
@@ -3137,7 +3115,7 @@ class EZPkg:
         * `RuntimeError`:
           If the running Python is below a floor this understands.  Named
           so that the bootstrap's one line of diagnosis carries it; see
-          Step 6.1.
+          `T.eoff`.
         * `TypeError`:
           If `requires-python` is present but not a string.
         """
@@ -3232,7 +3210,7 @@ class EZPkg:
         # could aim the fetch at somebody else's index.  Requirement
         # syntax is not checked here, because `pip` owns PEP 508 and
         # rejects a malformed one locally in half a second without
-        # touching the network.  See Step 6.2.4 in `TASKS/`.
+        # touching the network.  See 6.2.4 of `T.spioc`.
         requirement: str
         for requirement in asking:
             if requirement.startswith("-"):
@@ -3259,8 +3237,8 @@ class EZPkg:
         self.refresh_pip()
 
         # A request answered before is answered from the cache, keyed by
-        # what was asked rather than by what it resolved to; see Step
-        # 6.3.4.  No version expression is compared, so no PEP 440
+        # what was asked rather than by what it resolved to; see
+        # 6.3.4 of `T.vcbow`.  No version expression is compared, so no PEP 440
         # parser is needed and none can disagree with `pip`.  The lock
         # is part of what was asked; see `request_for`.
         #
@@ -3330,8 +3308,8 @@ class EZPkg:
         #
         # A `.pth` line beginning with `import` is **executed** here.
         # That is the specification, not a liberty we are taking, and it
-        # happens only for a wheel the gate already approved; see Step
-        # 6.9 in `TASKS/`.  The guard matters for a second reason
+        # happens only for a wheel the gate already approved; see
+        # `T.pf`.  The guard matters for a second reason
         # now: running the same `.pth` twice in one process would run
         # its import line twice.
         tree: Path
@@ -3533,7 +3511,7 @@ class EZPkg:
         never a partial one.  Two writers recording the *same* request
         may legitimately disagree, if the index gained a release between
         them; one wins, both trees exist, and the loser's becomes
-        garbage for Step 6.11 to cull.
+        garbage for `T.gc` to cull.
 
         The request is stored inside the file as well as hashed into its
         name, so that a record can be read by a person and so that a
@@ -3613,7 +3591,7 @@ class EZPkg:
 
         Nothing under `pending` is looked at.  A wheel there has not
         been approved, so as far as the rest of the world is concerned
-        it is not in the cache at all; see Step 6.3.1 in `TASKS/`.
+        it is not in the cache at all; see 6.3.1 of `T.vcbow`.
 
         Arguments:
         * `package` (`str`):

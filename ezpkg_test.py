@@ -9,7 +9,7 @@ rather than around a table of measurements.
 
 The index is a [PEP 503](https://peps.python.org/pep-0503/) directory
 tree, published over HTTP by `serve_index` so that `pip` reaches it
-through a socket rather than reading the files directly.  Step 5.1
+through a socket rather than reading the files directly.  5.1 of `T.rps`
 settled that `http.server` is enough for this; a third party package
 server would have cost between 4 and 43 dependencies and given the
 tests nothing they do not already have.
@@ -85,11 +85,13 @@ import bootstrap
 import ezpkg
 import ezpkg_coverage
 
-# The version comes from the module, so it is written down once.
+# The version and the summary come from the module, so each is written
+# down once: the summary is the first line of its docstring, and is what
+# PyPI shows under the name.
 DISTRIBUTION: str = "ezpkg"
 MODULE: str = "ezpkg"
 VERSION: str = ezpkg.__version__
-SUMMARY: str = "Fetch Python packages that are not preinstalled."
+SUMMARY: str = (ezpkg.__doc__ or "").splitlines()[0]
 
 # Whether `I.wtmifs` shows on this interpreter.  `cryptography`, the
 # package its test fetches, publishes a `cp311-abi3` wheel, which the
@@ -103,7 +105,7 @@ ABI3_GAP: bool = sys.version_info >= (3, 12)
 # would shadow this suite whenever a cache went on `sys.path` in front of
 # the project.  Spelled with an underscore so that one word serves as the
 # `pip` name and the import name at once, which is what `bootstrap.py`'s
-# single `PACKAGE` needs.  See Step 6.17.2 in `TASKS/`.
+# single `PACKAGE` needs.  See 6.17.2 of `T.ffrp`.
 RELEASE_DISTRIBUTION: str = "ezpkg_trial"
 
 
@@ -111,9 +113,9 @@ def floor() -> str:
     """Return the Python floor `ezpkg.py` declares for itself.
 
     Read out of that file's own PEP 723 block, with our own parser, so
-    that the floor is written down once and the dogfooding of Step 6.7.5
+    that the floor is written down once and the dogfooding of 6.7.5 of `T.p7i`
     has a consequence: break the parser or the block and the wheels stop
-    claiming the right `Requires-Python`.  See Step 6.7.9.
+    claiming the right `Requires-Python`.  See 6.7.9 of `T.p7i`.
 
     Returns:
     * (`str`): The specifier, such as `>=3.11`.
@@ -136,7 +138,7 @@ def floor() -> str:
 # The lowest Python `ezpkg.py` runs on, written into the wheel as
 # `Requires-Python`.  It is 3.11 because `tomllib` reads the PEP 723
 # block and arrived in 3.11; the language features used need only 3.10.
-# See Steps 6.7.4 and 6.7.7.
+# See 6.7.4 and 6.7.7 of `T.p7i`.
 FLOOR: str = floor()
 
 # The consent question, spelled once here so that changing the wording in
@@ -148,12 +150,12 @@ CONFIRM: str = "Really never ask again? [y=>Yes/n=>No]"
 # importable, and otherwise fetches a `pip` of its own and runs it as a
 # subprocess, with its output on standard error, so it needs no `pip`
 # on the machine and leaves none of `pip`'s state in the program.  See
-# Step 6.15, `T.ewar` and `T.rp` in `TASKS/`.
+# `T.npp`, `T.ewar` and `T.rp`.
 SHIPPING: str = "nopip5"
 
 # Which cases the all-case tests exercise by default.  The first cull
 # found that only the four needing no `pip` add anything to coverage
-# (Step 6.16.3), and the cull of 2026-10-12 that `nopip2` and `nopip3`
+# (6.16.3 of `T.tsc`), and the cull of 2026-10-12 that `nopip2` and `nopip3`
 # add nothing beyond `nopip1` and `nopip4`, so those two went too
 # (Wayne).  `nopip5`, which ships, took `nopip4`'s place in 2026-10-12's
 # rename, being the same code with `pip`'s output on standard error.
@@ -386,7 +388,7 @@ def build_wheel(module: Path, distribution: str, version: str,
     That is a faithful input for anything which reads wheel filenames,
     such as the matcher in `nopip1` and `nopip2` of `bootstrap.py`, because
     that code never opens the archive; it is not a substitute for a
-    genuinely compiled wheel.  See Step 6.5.11 in `TASKS/`.
+    genuinely compiled wheel.  See 6.5.11 of `T.ccp`.
 
     Arguments:
     * `module` (`Path`):
@@ -426,7 +428,7 @@ def build_wheel(module: Path, distribution: str, version: str,
       The `Author` field.  No email, because an address in package
       metadata is published to everybody and is the author's to give.
     * `urls` (`Mapping[str, str] | None`):
-      Labels and addresses for `Project-URL`.  Step 6.13's failed fetch
+      Labels and addresses for `Project-URL`.  `T.m`'s failed fetch
       message wants somewhere to point, and this is where a wheel
       carries it.
     * `classifiers` (`Sequence[str]`):
@@ -493,7 +495,7 @@ def dev_version(version: str = VERSION) -> str:
     A minute stamped suffix gives one without anybody having to
     remember what the last attempt was called, and `.devN` sorts below
     the release it rehearses, so publishing `0.0.1` afterwards still
-    supersedes them all.  See Step 6.17.2 in `TASKS/`.
+    supersedes them all.  See 6.17.2 of `T.ffrp`.
 
     Arguments:
     * `version` (`str`):
@@ -516,8 +518,8 @@ def release_wheel(directory: Path,
 
     The same builder the tests use, given the metadata an index wants:
     a long description, a license, an author, a project address and
-    classifiers.  Nothing here uploads anything; see Step 6.17.2 in
-    `TASKS/`, and uploading is Wayne's by hand in any case.
+    classifiers.  Nothing here uploads anything; see 6.17.2 of
+    `T.ffrp`, and uploading is Wayne's by hand in any case.
 
     The module inside is named after the distribution, so that one word
     serves as both the `pip` name and the import name -- which is what
@@ -526,7 +528,7 @@ def release_wheel(directory: Path,
     honest thing to publish: it is the same code.
 
     `Requires-Python` comes from `ezpkg.py`'s own PEP 723 block, per
-    Step 6.7.9, so a published wheel cannot claim a floor the source
+    6.7.9 of `T.p7i`, so a published wheel cannot claim a floor the source
     does not.
 
     Arguments:
@@ -544,11 +546,17 @@ def release_wheel(directory: Path,
     Returns:
     * (`Path`): The wheel that was written.
     """
-    # The module is a copy of ours under the published name.
+    # The module is a copy of ours under the published name, with the
+    # wheel's version written in, so a rehearsal's `__version__` says
+    # which rehearsal it is.
     here: Path = Path(__file__).resolve().parent
     directory.mkdir(parents=True, exist_ok=True)
     module: Path = directory / f"{distribution}.py"
-    module.write_bytes((here / f"{MODULE}.py").read_bytes())
+    source: bytes = (here / f"{MODULE}.py").read_bytes()
+    stated: bytes = f'__version__: str = "{VERSION}"\n'.encode()
+    assert source.count(stated) == 1, f"{MODULE}.py: no single {stated!r}"
+    module.write_bytes(source.replace(
+        stated, f'__version__: str = "{version}"\n'.encode()))
 
     # Everything else is metadata an index asks for and a test does not.
     page: Path = (here / "README.md") if readme is None else readme
@@ -574,8 +582,8 @@ def add_data_member(wheel: Path, sub: str, name: str,
     A real wheel may also carry a `{distribution}-{version}.data`
     directory whose `purelib` and `platlib` contents belong beside the
     modules rather than under `.data`, and moving them is the one part
-    of the wheel specification `EZPkg.unpack` has to know; see Step
-    6.3.12 in `TASKS/`.  Nothing here can test that without a wheel
+    of the wheel specification `EZPkg.unpack` has to know; see
+    6.3.12 of `T.vcbow`.  Nothing here can test that without a wheel
     shaped this way.
 
     Arguments:
@@ -612,8 +620,8 @@ def add_root_member(wheel: Path, name: str, text: str) -> Path:
     `add_data_member` puts a file inside the `.data` directory, which is
     where a wheel carries things that belong elsewhere.  A `.pth` file
     is not one of those: it sits at the root, beside the module, and is
-    installed straight into the directory packages land in.  See Step
-    6.9 in `TASKS/`.
+    installed straight into the directory packages land in.  See
+    `T.pf`.
 
     `RECORD` is left alone, as `add_data_member` leaves it: nothing in
     this project verifies it, and a wheel that disagrees with its own
@@ -1203,7 +1211,7 @@ def with_path(*entries: Path) -> str:
     Replacing `PYTHONPATH` outright would discard whatever is already
     there, and what is already there may be the `trace_hook` directory
     that `ezpkg_coverage.py` uses to measure this very child; see
-    Step 6.6 in `TASKS/`.
+    `T.sawaw`.
 
     Arguments:
     * `entries` (`Path`):
@@ -1305,7 +1313,7 @@ class EZPkgTest(unittest.TestCase):
         # A second wheel, wearing this interpreter's compiled tag and
         # carrying a `.data/purelib` member.  `nopip1` and `nopip2` prefer it,
         # which is the only way to reach their platform branch and their
-        # `.data` move; see Step 6.5.11 in `TASKS/`.
+        # `.data` move; see 6.5.11 of `T.ccp`.
         cls.tagged = build_wheel(module, DISTRIBUTION, VERSION, SUMMARY,
                                  cls.root / "dist", tag=platform_tag(),
                                  floor=FLOOR)
@@ -1502,7 +1510,7 @@ class EZPkgTest(unittest.TestCase):
     def test_a_truncated_wheel_fails_nopip1(self) -> None:
         """`nopip1` unzips the wheel itself, so it must fail too."""
         # `zipfile` is what notices, since the fetch itself succeeded.
-        # Step 6.1 replaced the traceback with one line, so the
+        # `T.eoff` replaced the traceback with one line, so the
         # assertion reads the message rather than the module name.
         self.inject(".whl", "truncate")
         if not selected("nopip1"):
@@ -1546,7 +1554,7 @@ class EZPkgTest(unittest.TestCase):
     def test_a_failed_fetch_is_one_line(self) -> None:
         """A case that cannot reach the index says so, without a traceback.
 
-        This is the `I.whwnn` issue.  Before Step 6.1 `nopip1` buried
+        This is the `I.whwnn` issue.  Before `T.eoff`, `nopip1` buried
         `Connection refused` under 47 lines of traceback and `pip1`
         ended in `RuntimeError: pip failed` without ever mentioning the
         network.
@@ -1661,7 +1669,7 @@ class EZPkgTest(unittest.TestCase):
         Both regions were dead until the index carried a wheel with this
         interpreter's tag: the matcher's platform branch short-circuits
         on `py3-none-any`, and its `.data` move needs a wheel with a
-        `.data` tree.  See `I.wtmifs` and Step 6.5.11.
+        `.data` tree.  See `I.wtmifs` and 6.5.11 of `T.ccp`.
 
         What this cannot check is that a genuinely compiled wheel would
         import, since ours is pure Python wearing a compiled name.
@@ -2091,8 +2099,8 @@ class EZPkgTest(unittest.TestCase):
     def test_the_readme_describes_the_layout(self) -> None:
         """It names the four directories a person will find.
 
-        The file predated the versioned cache of Step 6.3 and described
-        a layout that no longer existed; see Step 6.10.5.
+        The file predated the versioned cache of `T.vcbow` and described
+        a layout that no longer existed; see 6.10.5 of `T.rd`.
         """
         # Somebody who opens the cache should recognise what is in it.
         cache: Path = self.root / "layout_readme"
@@ -2342,7 +2350,7 @@ class InstallTest(unittest.TestCase):
         # A package that depends on another, so that `pip` fetches
         # something nobody asked for.  Without this the difference
         # between "asked for" and "came along" is unreachable, which is
-        # what Step 6.6.4 rests on.
+        # what 6.6.4 of `T.sawaw` rests on.
         needy: Path = cls.root / "needy.py"
         needy.write_text('"""Needs a widget."""\n'
                          '__version__ = "1.0.0"\n')
@@ -2353,7 +2361,7 @@ class InstallTest(unittest.TestCase):
 
         # A package that ships a `.pth`, which `sys.path.insert` alone
         # never runs.  One line imports and one names a directory, which
-        # are the two things a `.pth` can do; see Step 6.9.
+        # are the two things a `.pth` can do; see `T.pf`.
         pathy: Path = cls.root / "pathy.py"
         pathy.write_text('"""Ships a .pth."""\n__version__ = "1.0.0"\n')
         shipping: Path = build_wheel(pathy, "pathy", "1.0.0",
@@ -2710,7 +2718,7 @@ class InstallTest(unittest.TestCase):
 
         `pip` exits 2 for a command line it cannot parse and 1 for
         anything the index is responsible for, which is the one bit of
-        discrimination its exit codes offer.  See Step 6.2.2.
+        discrimination its exit codes offer.  See 6.2.2 of `T.spioc`.
         """
         # A `ValueError` on exit code 2, not the `RuntimeError` that a
         # missing package gets.
@@ -2723,7 +2731,7 @@ class InstallTest(unittest.TestCase):
 
         This is the one `pip` would accept and should not:
         `--index-url=...` as a requirement would aim the fetch at
-        somebody else's index.  See Step 6.2.4.
+        somebody else's index.  See 6.2.4 of `T.spioc`.
         """
         # Nothing is fetched, so this needs no index at all.
         venv: ezpkg.EZPkg = ezpkg.EZPkg(self.root / "option")
@@ -2763,7 +2771,7 @@ class InstallTest(unittest.TestCase):
     def test_pip_owns_requirement_syntax(self) -> None:
         """A malformed requirement is `pip`'s to reject.
 
-        This pins the measurement Step 6.2.4 rests on: `pip` refuses
+        This pins the measurement 6.2.4 of `T.spioc` rests on: `pip` refuses
         bad syntax itself, so reimplementing PEP 508 here would only
         add a way to disagree with it.  Were a future `pip` to stop
         doing so, this test would say so.
@@ -2804,7 +2812,7 @@ class InstallTest(unittest.TestCase):
     def test_the_cache_has_three_directories_and_one_rule(self) -> None:
         """Only `versions` is ever put on `sys.path`.
 
-        That one sentence is the jail of Step 6.3.1.  A wheel under
+        That one sentence is the jail of 6.3.1 of `T.vcbow`.  A wheel under
         `pending` is an inert zip, so nothing in it can have run, and
         nothing there is importable.
         """
@@ -2848,7 +2856,7 @@ class InstallTest(unittest.TestCase):
         """A wheel's `.data/purelib` contents land beside its modules.
 
         This is the part of the wheel specification `unpack` took on
-        when it stopped using `pip install`; see Step 6.3.12.  Coverage
+        when it stopped using `pip install`; see 6.3.12 of `T.vcbow`.  Coverage
         found it unexercised, because no wheel the suite built had a
         `.data` tree at all.
         """
@@ -2908,7 +2916,7 @@ class InstallTest(unittest.TestCase):
 
         `sys.modules` is keyed by name, so the second call used to hand
         back the first version without a word.  Asking again for the
-        same version is still fine.  See Step 6.3.11.
+        same version is still fine.  See 6.3.11 of `T.vcbow`.
         """
         # 1.0.0 first, then the same again, then 2.0.0.
         cache: Path = self.root / "two-versions"
@@ -2930,7 +2938,7 @@ class InstallTest(unittest.TestCase):
 
         Two programs starting at once both unpack, and the loser of the
         rename has to take the winner's tree rather than raise.  This is
-        the concurrency answer of Step 6.3.9, and coverage found it
+        the concurrency answer of 6.3.9 of `T.vcbow`, and coverage found it
         unexercised because one process never loses.
         """
         # Make the rename into place fail exactly as a lost race does.
@@ -2994,7 +3002,7 @@ class InstallTest(unittest.TestCase):
 
         Keyed on what was asked rather than on what it resolved to, so
         no version expression is compared and no PEP 440 parser can
-        disagree with `pip`; see Step 6.3.4.
+        disagree with `pip`; see 6.3.4 of `T.vcbow`.
         """
         # First call fetches; second must not run `pip` at all.
         cache: Path = self.root / "remembered"
@@ -3109,7 +3117,7 @@ class InstallTest(unittest.TestCase):
 
         So each process downloads first, then waits at a barrier until
         every one of them has arrived, and only then unpacks.  That puts
-        them inside the window on purpose.  See Step 6.4.3.
+        them inside the window on purpose.  See 6.4.3 of `T.ci`.
         """
         # Each child downloads, waits for the others, then unpacks.
         # More racers than four, because the window is a millisecond or
@@ -3162,8 +3170,8 @@ class InstallTest(unittest.TestCase):
         """The hash of what arrived is written down beside the wheel.
 
         Not what the index claimed, which is unavailable anyway since
-        `pip download` refuses `--report`; see Step 6.3.7.  This is the
-        identity Step 6.6 approves, and the only thing that could notice
+        `pip download` refuses `--report`; see 6.3.7 of `T.vcbow`.  This is the
+        identity `T.sawaw` approves, and the only thing that could notice
         a distribution re-uploaded under a version it had already used.
         """
         # Install, then check the sidecar against the file itself.
@@ -3249,7 +3257,7 @@ class InstallTest(unittest.TestCase):
 
         The person who merely ran somebody's program cannot judge
         `charset-normalizer 3.3.2` either way, so asking them would be a
-        rubber stamp.  See Step 6.6.
+        rubber stamp.  See `T.sawaw`.
         """
         # Nothing is prompted, and the listing separates the two kinds.
         program: Path = self.program("told", "widget")
@@ -3747,7 +3755,7 @@ class InstallTest(unittest.TestCase):
         """Saying no installs nothing, and nothing has run.
 
         The refusal comes before any wheel is unpacked, so declining is
-        clean rather than half done; see Step 6.6.2.
+        clean rather than half done; see 6.6.2 of `T.sawaw`.
         """
         # Answer no, then look at what the cache holds.
         program: Path = self.program("asked_no", "widget")
@@ -3849,7 +3857,7 @@ class InstallTest(unittest.TestCase):
     def test_a_dependency_is_shown_as_having_come_along(self) -> None:
         """What was asked for is told apart from what arrived with it.
 
-        This is what Step 6.6.4 rests on: nobody ever looks at what a
+        This is what 6.6.4 of `T.sawaw` rests on: nobody ever looks at what a
         single `pip install` actually pulls in, and the listing is the
         first time most people would see the number.  Until a test wheel
         had a dependency, the `came along` branch had never executed at
@@ -3980,8 +3988,8 @@ class InstallTest(unittest.TestCase):
     def test_install_runs_pip_once_for_the_set(self) -> None:
         """Several requirements cost one `pip`, not one each.
 
-        This is the point of Step 6.2: `pip` resolves the set together,
-        and one invocation is what makes Step 6.3's freshness check
+        This is the point of `T.spioc`: `pip` resolves the set together,
+        and one invocation is what makes `T.vcbow`'s freshness check
         affordable.  Counted rather than inferred, by wrapping
         `subprocess.run` and letting the real one do the work.
         """
@@ -4197,7 +4205,7 @@ class InstallTest(unittest.TestCase):
 
         `setuptools` ships `distutils-precedence.pth` and `pytest-cov`
         ships `pytest-cov.pth`; without this both install half working,
-        which is the whole of Step 6.9.
+        which is the whole of `T.pf`.
         """
         # The `.pth` marks `sys` itself, which the program can see.
         program: Path = self.declaring_program(
@@ -4245,8 +4253,7 @@ class InstallTest(unittest.TestCase):
 
         No clock is injected and nothing sleeps: the cache's own notion of
         age is file modification time, so `os.utime` is an exact lever
-        where a sleep would be a slow approximation.  See Step 6.11.1 in
-        `TASKS/`.
+        where a sleep would be a slow approximation.  See 6.11.1 of `T.gc`.
 
         Arguments:
         * `path` (`Path`):
@@ -4333,7 +4340,7 @@ class InstallTest(unittest.TestCase):
 
         This reverses an earlier decision to leave `wheels/` alone, and
         the reason is that records now age out: their wheels would be the
-        one thing in the cache that grew for ever.  See Step 6.11.
+        one thing in the cache that grew for ever.  See `T.gc`.
         """
         # Old and named by no record, so nothing can ever look at it.
         venv: ezpkg.EZPkg = ezpkg.EZPkg(self.root / "dead_wheel")
@@ -5341,7 +5348,7 @@ class HarnessTest(unittest.TestCase):
 
     def test_measure_source_counts_the_shipping_case(self) -> None:
         """The counts come from parsing the file, not from a table."""
-        # `SHIPPING` is the one that ships; see Step 6.15.
+        # `SHIPPING` is the one that ships; see `T.npp`.
         counts: dict[str, tuple[int, int]] = bootstrap.measure_source()
         self.assertEqual(sorted(counts), sorted(bootstrap.MECHANISMS))
         imports: int
@@ -5468,7 +5475,7 @@ class HarnessTest(unittest.TestCase):
 class BootstrapCheckTest(unittest.TestCase):
     """Recognise a pasted bootstrap, and say whether it is current.
 
-    Step 6.12.  The pasted text comes from `bootstrap.pasted`, so these
+    `T.fbanwiis`.  The pasted text comes from `bootstrap.pasted`, so these
     tests read the shipping case exactly as a person would paste it.
 
     Attributes:
@@ -5942,7 +5949,7 @@ class CoverageToolTest(unittest.TestCase):
         """`--per-case` copies the project and goes on in the copy.
 
         So that editing the project during a long run cannot shift the
-        line numbers its report attributes.  See Step 6.16.4.
+        line numbers its report attributes.  See 6.16.4 of `T.tsc`.
         """
         # The copy is real; only the run in it is pretended.
         directory: Path = self.root / "per-case"
@@ -6444,7 +6451,7 @@ class MetadataTest(unittest.TestCase):
 
         Three files state the floor and only one can be the authority.
         The other two are configuration that no parser can derive, so
-        this test is what keeps them honest; see Step 6.7.7.
+        this test is what keeps them honest; see 6.7.7 of `T.p7i`.
         """
         # `>=3.11` spelled three ways, which is why this is a test and
         # not an assignment.
@@ -6673,8 +6680,7 @@ class ReleaseWheelTest(unittest.TestCase):
     Nothing here reaches an index.  `build` and `twine` are not
     installed on this machine, which is fitting for a project about
     packages that are not preinstalled but does mean `twine check` is
-    not the validator; `pip` accepting the wheel is.  See Step 6.17.2 in
-    `TASKS/`.
+    not the validator; `pip` accepting the wheel is.  See 6.17.2 of `T.ffrp`.
 
     Attributes:
     * `root` (`Path`):
@@ -6805,6 +6811,28 @@ class ReleaseWheelTest(unittest.TestCase):
             self.assertIn("ez_pkg-9.9.9.dist-info/METADATA",
                           archive.namelist())
 
+    def test_the_module_states_the_wheel_version(self) -> None:
+        """A rehearsal's `__version__` is the wheel's, not the source's.
+
+        Otherwise a `0.0.1.dev...` wheel would import as `0.0.1`, and
+        nobody could tell which upload a test machine had fetched.
+        """
+        # Only the one line differs from `ezpkg.py`.
+        here: Path = Path(__file__).resolve().parent
+        version: str = dev_version()
+        other: Path = release_wheel(self.root / "dev",
+                                    distribution="ez_pkg",
+                                    version=version)
+        archive: zipfile.ZipFile
+        with zipfile.ZipFile(other) as archive:
+            inside: str = archive.read("ez_pkg.py").decode()
+        source: str = (here / f"{MODULE}.py").read_text(encoding="utf-8")
+        self.assertEqual(
+            inside,
+            source.replace(f'__version__: str = "{VERSION}"',
+                           f'__version__: str = "{version}"'))
+        self.assertIn(f'__version__: str = "{version}"\n', inside)
+
 
 @unittest.skipUnless(os.environ.get("EZPKG_PYPI"),
                      "set EZPKG_PYPI to fetch from the real index")
@@ -6814,7 +6842,7 @@ class PyPITest(unittest.TestCase):
     Everything else in this suite runs against wheels this project built
     and served itself, so three things have never been exercised: real
     wheel tag soup, a real transitive closure, and TLS against the public
-    certificate authorities.  See Step 6.17 in `TASKS/`.
+    certificate authorities.  See `T.ffrp`.
 
     Opt in, because this is the one class that can fail for reasons
     outside the repository -- no network, a rate limit, a yanked release
@@ -6912,7 +6940,7 @@ class PyPITest(unittest.TestCase):
         Two things at once, and both are the point.  `twine` is fetched
         with `install()` rather than with `pip`, which is the largest
         transitive closure this project has ever resolved -- about twenty
-        packages -- and is the dogfood Step 6.17.2 asks for.  Then that
+        packages -- and is the dogfood 6.17.2 of `T.ffrp` asks for.  Then that
         `twine` judges our handwritten `METADATA`, which is the only
         independent check available here that an index would accept it.
         """
@@ -7081,7 +7109,7 @@ class PyPITest(unittest.TestCase):
                       self.real_case("nopip1", "cryptography"))
 
     def test_a_real_wheel_carries_a_pth_file(self) -> None:
-        """`setuptools` ships `.pth`, which Step 6.9 is about.
+        """`setuptools` ships `.pth`, which `T.pf` is about.
 
         Evidence rather than a fix: the file arrives and lands in the
         tree, where `sys.path.insert` will never execute it.

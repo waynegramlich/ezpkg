@@ -8,3 +8,37 @@
   token.  Claude checks what packaging needs: a `pyproject.toml`,
   version `0.0.1`, a wheel holding only `ezpkg.py`, and the Homepage
   `https://github.com/waynegramlich/ezpkg`.
+
+## 2026-10-13: Opened; a dry run passes
+
+* Tasks 7 and 7.2 opened (Wayne: 7 holds information shared by 7.1-7.3).
+* No `pyproject.toml` is needed: `ezpkg_test.release_wheel` already
+  builds the published wheel by hand (`History.md` in task 7, 6.17.2).
+  `release_wheel(dir, distribution="ezpkg", version=dev_version())`
+  made `ezpkg-0.0.1.dev202610131741-py3-none-any.whl` (55 KB: `ezpkg.py`
+  plus `METADATA`, `WHEEL`, `RECORD`); `uvx twine check --strict`
+  passes.  `README.md` has no relative links to break on the PyPI page.
+* Plan: upload as `ezpkg` (not a trial name), since the bootstrap
+  hard-codes `ezpkg`, with a `.dev` version so `0.0.1` stays clean.
+  test.pypi names are separate from pypi.org's.  Wayne holds the token
+  and runs the upload (`uv publish` is already installed; `twine` via
+  `uvx`).  Then fetch back as a stranger: `quick_start.py` with no
+  `~/.ezpkg`, `PIP_INDEX_URL=https://test.pypi.org/simple/` and
+  `PIP_EXTRA_INDEX_URL=https://pypi.org/simple/` (for `cowsay`).
+* Noticed: `ezpkg.py`'s docstring still says "This file is a
+  placeholder.  `EZPkg` is deliberately empty", which ships in the wheel.
+* Fixed: Wayne shortened `ezpkg.py`'s header comment and docstring to
+  pointers at `README.md` (and its PyPI page); license untouched.
+* test.pypi and pypi.org accounts share nothing (users, 2FA, tokens).
+  First token must be account-wide; after the first upload, swap it for
+  one scoped to `ezpkg`.  Trusted Publishing is an option for 7.3.
+* `release_wheel` now writes the wheel's version into the packaged
+  module's `__version__` (test `test_the_module_states_the_wheel_version`);
+  `__version__` moved up to just after the imports in `ezpkg.py`.
+* Every "Step N.M[.K]" in the code became a tag: `T.xyz` for an item,
+  "N.M.K of `T.xyz`" for a sub-step in that item's `History.md`.  Old
+  6.17.x sub-steps live in `T.ffrp`'s `History.md`, not `T.ewar`.
+* The wheel's `Summary` is now the first line of `ezpkg.py`'s docstring
+  (`SUMMARY` in `ezpkg_test.py`), so it is written once.  Wayne chose
+  "Automatic Package Fetching for One-File Programs" ("Python" is
+  redundant on PyPI).

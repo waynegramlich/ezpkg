@@ -1,5 +1,7 @@
 @7_A_fetch_from_the_real_PyPI/Details.md
+@7_A_fetch_from_the_real_PyPI/Context.md
 @7.2_Upload_to_test.pypi/Details.md
+@7.2_Upload_to_test.pypi/Context.md
 @7.3_Upload_to_pypi/Details.md
 @../ISSUES/1_The_bootstrap_trusts_only_system_certificates/Details.md
 @../ISSUES/2_Windows_and_macOS_are_untried/Details.md

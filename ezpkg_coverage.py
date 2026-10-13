@@ -4,8 +4,7 @@
 `trace` is used rather than `coverage` because it ships with Python.
 A test suite for a project about fetching packages that are not
 preinstalled should not itself need a package fetched, which is the
-same criterion that chose `http.server` over `pypiserver` in Step 5.1
-of `TASKS/`.
+same criterion that chose `http.server` over `pypiserver` in 5.1 of `T.rps`.
 
 Run it with no arguments to measure the suite, or with a directory to
 say where the annotated `.cover` files should go.  `EZPKG_TEST`
@@ -28,7 +27,7 @@ ordering from the case that ships showing which cases add nothing.
 counts, in seconds, which is what makes culling cases cheap to repeat.
 Both work in a copy of the project made under `<directory>/project/`,
 so that editing the project during a run cannot spoil its report.
-See Step 6.16 of `TASKS/`.
+See `T.tsc`.
 
 Three workarounds here were each found the hard way, and all matter
 more than they look:
@@ -51,7 +50,7 @@ more than they look:
    that patches `ezpkg.__file__` to `None` or to a file that is not
    a `.py` made `trace` stop following there, so two lines of
    `repair_module_layout` that a passing test reaches read as never
-   run.  `ByCode` asks about `co_filename` instead.  Step 6.16.8.
+   run.  `ByCode` asks about `co_filename` instead.  6.16.8 of `T.tsc`.
 
 One blind spot remains, and it is not a defect in the tests:
 
@@ -133,7 +132,7 @@ class ProjectOnly:
     for all the others.  A child that met one of this project's first
     went on to trace every `__init__.py` in the standard library, and
     one that met the standard library's first would have skipped this
-    project's.  Step 6.16.4 in `TASKS/` found it.
+    project's.  6.16.4 of `T.tsc` found it.
 
     This replaces it with a positive rule, cached by path: follow a
     file in this project's directory, or a copy of `ezpkg` that a
@@ -592,7 +591,7 @@ def take_snapshot(here: Path, copy: Path) -> None:
     edit made during a run shifted line numbers between the baseline and
     the cases, and the report claimed lines the cases never ran.  A copy
     cannot be edited by accident.  Caches and version control are left
-    out, and symbolic links stay links.  See Step 6.16.4 in `TASKS/`.
+    out, and symbolic links stay links.  See 6.16.4 of `T.tsc`.
 
     Arguments:
     * `here` (`Path`):
