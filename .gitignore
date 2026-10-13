@@ -23,3 +23,8 @@ python_with_markdown.md
 *~
 \#*#
 .#*
+
+# Symbolic links to sibling projects, which would dangle on GitHub.
+aic
+ai_contexts
+claude_notes.md

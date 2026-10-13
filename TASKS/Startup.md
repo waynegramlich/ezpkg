@@ -2,6 +2,7 @@
 @6_Flesh_out_the_EZPkg_class/Context.md
 @7_A_fetch_from_the_real_PyPI/Details.md
 @7.1_Reconnect_to_git/Details.md
+@7.1_Reconnect_to_git/Context.md
 @7.2_Upload_to_test.pypi/Details.md
 @7.3_Upload_to_pypi/Details.md
 @../ISSUES/1_The_bootstrap_trusts_only_system_certificates/Details.md

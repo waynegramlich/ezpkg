@@ -15,3 +15,20 @@
   Claude's `git stash` / `stash pop` during the rename; harmless.
 * The test wheel's metadata already says
   `Homepage: https://github.com/waynegramlich/ezpkg` (`ezpkg_test.py`).
+
+## 2026-10-12: Nothing to reconnect to
+
+* `waynegramlich` has 79 GitHub repositories; none is this project under
+  any name, and none was pushed after 2026-09-01.  So 7.1 is creating
+  `waynegramlich/ezpkg` and pushing `main` (101 commits, all Wayne's;
+  `.git` is 14 MB; no tokens or keys in the history).
+* `../ai_contexts` has no remote either.
+* Tracked files that would dangle on GitHub: the symlinks `aic` and
+  `ai_contexts` (into `../ai_contexts`) and `claude_notes.md` (into
+  `../claude_notes`, which no longer exists here).  Also tracked:
+  `CLAUDE.md-` (four `@` imports) and `TASKS/`, `ISSUES/`, `RULES/`.
+* Wayne chose a public repository, and untracking the three symlinks
+  (`git rm --cached`, now in `.gitignore`; still on disk).  Staged for
+  Wayne's commit; then Claude creates the repository with `gh repo
+  create waynegramlich/ezpkg --public --source=. --remote=github` and
+  pushes `main`.

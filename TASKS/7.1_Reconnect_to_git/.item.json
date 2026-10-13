@@ -1,11 +1,15 @@
 {
-  "state": "Pending",
+  "state": "Open",
   "created": "2026-10-13T02:03:18Z",
-  "updated": "2026-10-13T02:03:18Z",
+  "updated": "2026-10-13T03:57:09Z",
   "history": [
     {
       "state": "Pending",
       "time": "2026-10-13T02:03:18Z"
+    },
+    {
+      "state": "Open",
+      "time": "2026-10-13T03:57:09Z"
     }
   ],
   "tag": "rtg"
