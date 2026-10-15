@@ -1,7 +1,7 @@
 {
-  "state": "Open",
+  "state": "Closed",
   "created": "2026-10-13T18:52:55Z",
-  "updated": "2026-10-13T18:53:01Z",
+  "updated": "2026-10-15T00:21:14Z",
   "history": [
     {
       "state": "Pending",
@@ -10,6 +10,10 @@
     {
       "state": "Open",
       "time": "2026-10-13T18:53:01Z"
+    },
+    {
+      "state": "Closed",
+      "time": "2026-10-15T00:21:14Z"
     }
   ],
   "tag": "suh2"
