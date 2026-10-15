@@ -2,8 +2,10 @@
 """Check a published `ezpkg` by running the Quick Start as a new user.
 
 Run as `./release_check.py TARGET [VERSION]`, where `TARGET` is
-`testpypi` or `pypi` and `VERSION` defaults to the newest on that
-index.  A copy of `quick_start.py` runs outside the project, with a
+`testpypi` or `pypi`.  `VERSION` defaults to the one the newest
+successful `release` run for `TARGET` built, found with `gh`; not the
+index's own newest, which is cached for up to 15 minutes and so names
+the previous upload just when a check is wanted.  A copy of `quick_start.py` runs outside the project, with a
 fresh `HOME`, no `PYTHONPATH` and no `PIP_*` settings, so nothing of
 this project's can stand in for what was published.  It passes when
 the cow appears and the `ezpkg` installed is the version asked for.
@@ -40,6 +42,51 @@ JSON_APIS: dict[str, str] = {
 COW: str = "EZPkg works!"
 
 
+def built_version(target: str) -> str:
+    """Return the version the newest successful release run built.
+
+    `release.yml` titles each run `release TARGET`, and saves the wheel
+    as the artifact `dist`, whose file name carries the version.
+
+    Arguments:
+    * `target` (`str`):
+      `testpypi` or `pypi`.
+
+    Returns:
+    * (`str`): The version, such as `0.0.1.dev202610151925`.
+
+    Raises:
+    * `LookupError`:
+      If no such run exists, or its artifact has expired (after 90
+      days), in which case the version has to be given by hand.
+    """
+    # Newest first; earlier runs, titled only `release`, never match.
+    listed: subprocess.CompletedProcess[str] = subprocess.run(
+        ["gh", "run", "list", "--workflow", "release.yml",
+         "--status", "success", "--limit", "50",
+         "--json", "databaseId,displayTitle"],
+        capture_output=True, text=True, check=True)
+    runs: list[dict[str, Any]] = [
+        run for run in json.loads(listed.stdout)
+        if run["displayTitle"] == f"release {target}"]
+    if not runs:
+        raise LookupError(f"no successful release run for {target}")
+
+    # The wheel's name is `ezpkg-VERSION-py3-none-any.whl`.
+    run_id: str = str(runs[0]["databaseId"])
+    scratch: str
+    with tempfile.TemporaryDirectory() as scratch:
+        fetched: subprocess.CompletedProcess[str] = subprocess.run(
+            ["gh", "run", "download", run_id, "--name", "dist",
+             "--dir", scratch],
+            capture_output=True, text=True, check=False)
+        wheels: list[Path] = sorted(Path(scratch).glob("ezpkg-*.whl"))
+        if fetched.returncode != 0 or len(wheels) != 1:
+            raise LookupError(f"run {run_id} has no wheel to read; "
+                              "give the version by hand")
+        return wheels[0].name.split("-")[1]
+
+
 def wheel_info(target: str, version: str | None) -> dict[str, Any]:
     """Return the index's record of the `ezpkg` wheel.
 
@@ -57,7 +104,8 @@ def wheel_info(target: str, version: str | None) -> dict[str, Any]:
     * `LookupError`:
       If that release has no wheel.
     """
-    # The newest is `/ezpkg/json`; a particular one is one level deeper.
+    # The newest is `/ezpkg/json`, which is cached; a particular one is
+    # one level deeper, and is fresh the first time it is asked for.
     url: str = f"{JSON_APIS[target]}/ezpkg"
     url += f"/{version}/json" if version else "/json"
     with urllib.request.urlopen(url, timeout=30) as response:
@@ -84,10 +132,11 @@ def main() -> int:
     target: str = arguments[0]
     info: dict[str, Any]
     try:
-        info = wheel_info(
-            target, arguments[1] if len(arguments) == 2 else None)
-    except (urllib.error.URLError, LookupError) as error:
-        print(f"release_check: no ezpkg on {target}: {error}",
+        info = wheel_info(target, arguments[1] if len(arguments) == 2
+                          else built_version(target))
+    except (urllib.error.URLError, LookupError,
+            subprocess.CalledProcessError) as error:
+        print(f"release_check: cannot check {target}: {error}",
               file=sys.stderr)
         return 1
     version: str = info["version"]

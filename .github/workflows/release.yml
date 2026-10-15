@@ -8,6 +8,8 @@
 # reviewer (Wayne) approves the upload.  See `T.wrw` and `T.ffrp`.
 
 name: release
+# The title `release_check.py` looks for.
+run-name: release ${{ inputs.target }}
 
 on:
   workflow_dispatch:
