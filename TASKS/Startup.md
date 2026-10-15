@@ -3,11 +3,11 @@
 @7.3_Write_the_release_workflow/Details.md
 @7.4_Upload_to_test.pypi/Details.md
 @7.5_Upload_to_pypi/Details.md
-@7.6_Print_the_2FA_recovery_codes/Details.md
 @../ISSUES/1_The_bootstrap_trusts_only_system_certificates/Details.md
 @../ISSUES/2_Windows_and_macOS_are_untried/Details.md
 @../ISSUES/3_Reviewer_thoughts_have_two_formats/Details.md
 @../ISSUES/19_How_to_deal_with_compiled_packages/Details.md
+@7.6_Print_the_2FA_recovery_codes/Summary.md
 @7.2_Set_up_hardware_2FA/Summary.md
 @6.10_README.md_documentation/Summary.md
 @6_Flesh_out_the_EZPkg_class/Summary.md

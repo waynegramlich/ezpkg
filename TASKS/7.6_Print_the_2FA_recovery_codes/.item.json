@@ -1,11 +1,19 @@
 {
-  "state": "Pending",
+  "state": "Closed",
   "created": "2026-10-15T00:21:06Z",
-  "updated": "2026-10-15T00:21:06Z",
+  "updated": "2026-10-15T02:51:01Z",
   "history": [
     {
       "state": "Pending",
       "time": "2026-10-15T00:21:06Z"
+    },
+    {
+      "state": "Open",
+      "time": "2026-10-15T00:38:28Z"
+    },
+    {
+      "state": "Closed",
+      "time": "2026-10-15T02:51:01Z"
     }
   ],
   "tag": "p2rc"
