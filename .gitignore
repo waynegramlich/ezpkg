@@ -31,3 +31,6 @@ claude_notes.md
 
 # Wheels built by release.py.
 dist/
+
+# Notes on publishing, kept for reuse in other projects.
+PyPI_Via_GitHub.md

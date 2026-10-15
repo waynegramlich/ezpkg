@@ -36,3 +36,9 @@
   tag should never move, and `dev` uploads need no tag.
 * Wayne: `v0.N.M` versions are disposable; a bad one is followed by the
   next number rather than repaired.
+
+## 2026-10-15: `PyPI_Via_GitHub.md`
+
+* Wayne asked for a reusable write-up of what was learned, for another
+  project: `PyPI_Via_GitHub.md` at the top level, git-ignored for now.
+  Bring it up to date when the `pypi` half works (`T.utpat`).
