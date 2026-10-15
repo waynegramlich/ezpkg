@@ -42,3 +42,9 @@
 * Wayne asked for a reusable write-up of what was learned, for another
   project: `PyPI_Via_GitHub.md` at the top level, git-ignored for now.
   Bring it up to date when the `pypi` half works (`T.utpat`).
+
+## 2026-10-15: Windows and macOS block shipping
+
+* Wayne: `I.wmau` (Windows and macOS are untried) has to be closed
+  before shipping to pypi.org (`T.utpat`).  Work on it starts after
+  `T.kdaiis` closes.

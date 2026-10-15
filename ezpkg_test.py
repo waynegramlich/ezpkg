@@ -2374,13 +2374,23 @@ class InstallTest(unittest.TestCase):
             "import sys; setattr(sys, 'ezpkg_pth_ran', True)\n"
             "inner\n")
 
+        # A package whose name is not the module it holds, the way a
+        # squatted name would be, for the guess `sync_dependencies`
+        # must prove; see `T.kdaiis`.
+        elsewhere: Path = cls.root / "elsewhere.py"
+        elsewhere.write_text('"""Not what its name says."""\n')
+        decoy: Path = build_wheel(elsewhere, "decoy", "1.0.0",
+                                  "Not what its name says.",
+                                  cls.root / "dist")
+
         # This project too, for the bootstrap the no-`pip` test runs.
         project: Path = build_wheel(
             Path(__file__).resolve().parent / f"{MODULE}.py",
             DISTRIBUTION, VERSION, SUMMARY, cls.root / "dist", floor=FLOOR)
 
         cls.index = build_index([wheel, two_named, depending, shipping,
-                                 project, *versions], cls.root / "index")
+                                 decoy, project, *versions],
+                                cls.root / "index")
         cls.cache = cls.root / "cache"
 
         # Start the server last, so nothing can fail after it is up.
@@ -5129,6 +5139,212 @@ class InstallTest(unittest.TestCase):
         self.assertEqual([one for one in venv.stale(-60)
                           if one.parent.name == "scans"], records)
 
+    def synced_program(self, name: str, declared: str, tail: str,
+                       comment: str = "") -> Path:
+        """Write a program, run it once clean, then change its imports.
+
+        The first run has nothing to raise, so it only records the
+        program; the edit is the change that makes `sync_dependencies`
+        speak.  Downloads go ahead without the consent question, which
+        other tests cover, so that the terminal sees only this one.
+
+        Arguments:
+        * `name` (`str`):
+          A directory name, as `declaring_program` takes.
+        * `declared` (`str`):
+          The `dependencies` line, such as `["widget"]`.
+        * `tail` (`str`):
+          What to put below `import widget` after the first run.
+        * `comment` (`str`):
+          A comment for the `widget` import, such as a `mypy` one.
+
+        Returns:
+        * (`Path`): The program, edited but not run again.
+        """
+        # Declares and imports `widget`, so the first run is clean.
+        program: Path = self.declaring_program(
+            name, 'dependencies = ["widget"]',
+            f"import widget{comment}\nprint('ran')")
+        done: subprocess.CompletedProcess[str] = self.run_program(program)
+        self.assertEqual(done.returncode, 0, done.stderr[-400:])
+        self.assertNotIn("disagree", done.stderr)
+        (program.parent / "cache" / "FOREVER_APPROVE").write_text("x\n")
+        program.write_text(program.read_text().replace(
+            'dependencies = ["widget"]', f"dependencies = {declared}").replace(
+            f"import widget{comment}\n",
+            f"import widget{comment}\n{tail}\n"))
+        return program
+
+    def declared_now(self, program: Path) -> list[str]:
+        """Return a program's `dependencies` as its file says now.
+
+        Arguments:
+        * `program` (`Path`):
+          The program.
+
+        Returns:
+        * (`list[str]`): The entries.
+        """
+        # Read back the way `install` reads it.
+        metadata: dict[str, Any] | None = ezpkg.script_metadata(
+            program.read_text())
+        assert metadata is not None
+        found: list[str] = metadata["dependencies"]
+        return found
+
+    def test_a_missing_dependency_is_listed_and_added(self) -> None:
+        """A new import is named, asked about, shown, approved and added.
+
+        The package is fetched before the program's own import runs, so
+        the run that asked succeeds.  See `T.kdaiis`.
+        """
+        # Once, yes to the addition, yes to the changes.
+        program: Path = self.synced_program(
+            "added", '["widget"]', "import sprocket")
+        seen: str = self.answer_on_a_terminal(program, b"o\ny\ny\n")
+        flat: str = " ".join(seen.split())
+        self.assertIn("EZPkg: prog.py: its `dependencies` and its imports "
+                      "(line 12) disagree.", flat)
+        self.assertIn("See the discrepancy list? "
+                      "[o=>Once/a=>Always/n=>No/d=>Don't ask again]", flat)
+        self.assertIn("line 12: `sprocket` is imported, but not in "
+                      'dependencies. Add "sprocket"?', flat)
+        self.assertIn('line 3 "widget", add "sprocket", ]', flat)
+        self.assertIn('added "sprocket" to dependencies', seen)
+        self.assertNotIn("mypy comment", seen)
+        self.assertIn("ran", seen)
+        self.assertEqual(self.declared_now(program), ["widget", "sprocket"])
+
+        # Settled, so the next run says nothing at all.
+        done: subprocess.CompletedProcess[str] = self.run_program(program)
+        self.assertEqual(done.returncode, 0, done.stderr[-400:])
+        self.assertEqual((done.stdout, done.stderr), ("ran\n", ""))
+
+    def test_the_authors_mypy_comment_is_copied(self) -> None:
+        """A new import gets the `type: ignore` the others carry."""
+        # The Quick Start's own comment, word for word.
+        comment: str = "  # type: ignore[import-not-found]  # For mypy."
+        program: Path = self.synced_program(
+            "commented", '["widget"]', "import sprocket", comment)
+        seen: str = self.answer_on_a_terminal(program, b"o\ny\ny\n")
+        self.assertIn("and the mypy comment on its import of sprocket", seen)
+        self.assertIn('added "sprocket" to dependencies, and its mypy '
+                      "comment", seen)
+        self.assertIn(f"\nimport sprocket{comment}\n", program.read_text())
+
+    def test_an_unused_dependency_is_removed_or_kept(self) -> None:
+        """Nothing importing a package offers to remove it, or keep it.
+
+        `k` records it in `[tool.ezpkg] unimported`, after which it is
+        not raised again.
+        """
+        # Removed.
+        program: Path = self.synced_program(
+            "removed", '["widget", "sprocket"]', "")
+        seen: str = self.answer_on_a_terminal(program, b"o\ny\ny\n")
+        flat: str = " ".join(seen.split())
+        self.assertIn('line 3: "sprocket" is in dependencies, but nothing '
+                      "imports it. Remove it? [y=>Yes/n=>No/k=>Keep it, and "
+                      "stop asking]", flat)
+        self.assertIn('remove "sprocket",', flat)
+        self.assertIn('removed "sprocket" from dependencies', seen)
+        self.assertEqual(self.declared_now(program), ["widget"])
+
+        # Kept, and then left alone.
+        program = self.synced_program("kept", '["widget", "sprocket"]', "")
+        seen = self.answer_on_a_terminal(program, b"o\nk\ny\n")
+        self.assertIn('kept "sprocket" as unimported', seen)
+        self.assertEqual(self.declared_now(program), ["widget", "sprocket"])
+        self.assertEqual(ezpkg.unimported(program.read_text()), ["sprocket"])
+        seen = self.answer_on_a_terminal(program, b"o\n")
+        self.assertNotIn("disagree", seen)
+
+    def test_dependencies_follow_the_order_of_the_imports(self) -> None:
+        """Out of order is a discrepancy; approving puts it in order."""
+        # Nothing to add or remove, so straight to the changes.
+        program: Path = self.synced_program(
+            "ordered", '["sprocket", "widget"]', "import sprocket")
+        seen: str = self.answer_on_a_terminal(program, b"o\ny\n")
+        flat: str = " ".join(seen.split())
+        self.assertIn("its `dependencies` (line 3) and its imports (line "
+                      "11) disagree.", flat)
+        self.assertIn('[ move "widget", "sprocket", ]', flat)
+        self.assertIn("put dependencies in the order of their imports", seen)
+        self.assertEqual(self.declared_now(program), ["widget", "sprocket"])
+
+    def test_an_optional_import_counts_as_used(self) -> None:
+        """A declared package imported only under `try` is not unused."""
+        # Silent, since the two agree.
+        program: Path = self.synced_program(
+            "optional", '["widget", "sprocket"]',
+            "try:\n    import sprocket\nexcept ImportError:\n    pass")
+        seen: str = self.answer_on_a_terminal(program, b"o\n")
+        self.assertNotIn("disagree", seen)
+        self.assertIn("ran", seen)
+
+    def test_without_a_terminal_it_is_named_once(self) -> None:
+        """No terminal, or `n`: named once per change, nothing edited."""
+        # Named, then not again for the same imports.
+        program: Path = self.synced_program(
+            "quiet", '["widget"]', "import sprocket")
+        before: str = program.read_text()
+        done: subprocess.CompletedProcess[str] = self.run_program(program)
+        self.assertIn("disagree", done.stderr)
+        self.assertEqual(program.read_text(), before)
+        done = self.run_program(program)
+        self.assertNotIn("disagree", done.stderr)
+
+        # A terminal is still asked, since nobody has answered yet; `n`.
+        seen: str = self.answer_on_a_terminal(program, b"n\n")
+        self.assertIn("See the discrepancy list?", seen)
+        self.assertEqual(program.read_text(), before)
+        seen = self.answer_on_a_terminal(program, b"o\n")
+        self.assertNotIn("See the discrepancy list?", seen)
+
+    def test_always_and_never_outlive_the_run(self) -> None:
+        """`a` skips the question from then on; `d` stops all asking."""
+        # Always, confirmed: the list comes straight away next time.
+        program: Path = self.synced_program(
+            "always", '["widget"]', "import sprocket")
+        seen: str = self.answer_on_a_terminal(program, b"a\ny\ny\ny\n")
+        self.assertIn("Really show the list from now on", seen)
+        self.assertIn("To be asked again, delete", seen)
+        program.write_text(program.read_text().replace(
+            "import sprocket\n", "import sprocket\nimport needy\n"))
+        seen = self.answer_on_a_terminal(program, b"y\ny\n")
+        self.assertNotIn("See the discrepancy list?", seen)
+        self.assertIn('added "needy" to dependencies', seen)
+
+        # Don't ask again, confirmed: named, never asked.
+        program = self.synced_program("never", '["widget"]', "import sprocket")
+        before: str = program.read_text()
+        seen = self.answer_on_a_terminal(program, b"d\ny\n")
+        self.assertIn("Really never ask about prog.py again?", seen)
+        program.write_text(program.read_text().replace(
+            "import sprocket\n", "import sprocket\nimport needy\n"))
+        before = program.read_text()
+        seen = self.answer_on_a_terminal(program, b"o\n")
+        self.assertNotIn("See the discrepancy list?", seen)
+        self.assertIn("disagree", seen)
+        self.assertEqual(program.read_text(), before)
+
+    def test_a_wrong_guess_changes_nothing(self) -> None:
+        """A package that is not what its name says is refused.
+
+        `decoy` exists but holds `elsewhere`, as a squatted name might,
+        so nothing is unpacked and the program is not edited.
+        """
+        # Approved, fetched, refused.
+        program: Path = self.synced_program(
+            "decoyed", '["widget"]', "import decoy")
+        before: str = program.read_text()
+        seen: str = self.answer_on_a_terminal(program, b"o\ny\ny\n")
+        self.assertIn("nothing changed", seen)
+        self.assertIn("does not provide `decoy`", seen)
+        self.assertEqual(program.read_text(), before)
+        self.assertFalse(list((program.parent / "cache" / "versions")
+                              .glob("decoy-*")))
+
     def test_imports_above_the_bootstrap_are_found(self) -> None:
         """Only `__future__` and the paste's own imports may precede it.
 
@@ -6350,6 +6566,159 @@ class MetadataTest(unittest.TestCase):
         self.assertIsNone(ezpkg.pin_dependencies("print('ran')\n", pins))
         self.assertIsNone(ezpkg.pin_dependencies(
             '# /// script\n# requires-python = ">=3.11"\n# ///\n', pins))
+
+    def test_with_dependency_list_replaces_the_array(self) -> None:
+        """A short array stays on one line; a long one, one per line.
+
+        A missing one is made above the first table, so it is not the
+        table's.  See `T.kdaiis`.
+        """
+        # One line stays one line while it fits.
+        text: str = ("# /// script\n"
+                     '# requires-python = ">=3.11"\n'
+                     '# dependencies = ["widget"]\n'
+                     "# ///\nprint('x')\n")
+        self.assertEqual(
+            ezpkg.with_dependency_list(text, ["PyYAML", "widget"]),
+            text.replace('["widget"]', '["PyYAML", "widget"]'))
+
+        # Too long for one line.
+        many: list[str] = [f"package-number-{index}" for index in range(5)]
+        added: str | None = ezpkg.with_dependency_list(text, many)
+        assert added is not None
+        metadata: dict[str, Any] | None = ezpkg.script_metadata(added)
+        assert metadata is not None
+        self.assertEqual(metadata["dependencies"], many)
+        self.assertIn('#   "package-number-4",\n# ]\n', added)
+
+        # None yet: made above the first table.
+        bare: str = ("# /// script\n"
+                     '# requires-python = ">=3.11"\n'
+                     "#\n# [tool.uv]\n"
+                     '# exclude-newer = "2026-10-12T00:00:00Z"\n'
+                     "# ///\n")
+        added = ezpkg.with_dependency_list(bare, ["widget"])
+        assert added is not None
+        metadata = ezpkg.script_metadata(added)
+        assert metadata is not None
+        self.assertEqual(metadata["dependencies"], ["widget"])
+        self.assertEqual(metadata["tool"]["uv"]["exclude-newer"],
+                         "2026-10-12T00:00:00Z")
+
+        # No block, nothing to edit; the lines of each entry.
+        self.assertIsNone(ezpkg.with_dependency_list("print('x')\n", ["a"]))
+        self.assertEqual(ezpkg.dependency_lines(added), [3])
+        self.assertEqual(ezpkg.dependency_lines(
+            "#!/usr/bin/env python3\n# /// script\n# dependencies = [\n"
+            '#   "a",  # A comment, with "quotes".\n#\n#   "b[x]",\n# ]\n'
+            "# ///\n"), [4, 6])
+
+    def test_every_import_and_the_fingerprint(self) -> None:
+        """Every import, optional ones marked, in order of first use.
+
+        The fingerprint changes with the order or the entries, but not
+        with code that moves without changing the order.
+        """
+        # `b` only under `try` is optional; `a.c` is `a`; relative is out.
+        text: str = ("import a\ntry:\n    import b\nexcept ImportError:\n"
+                     "    b = None\nfrom a.c import d\nfrom . import e\n"
+                     "def f():\n    import g\n")
+        self.assertEqual(ezpkg.every_import(text),
+                         [("a", 1, False), ("b", 3, True), ("g", 9, False)])
+        one: str = ezpkg.dependency_fingerprint(text, ["a"], ())
+        self.assertRegex(one, r"^[0-9a-f]{8}$")
+        self.assertEqual(ezpkg.dependency_fingerprint(
+            "\n" + text, ["a"], ()), one)
+        self.assertNotEqual(ezpkg.dependency_fingerprint(
+            text, ["a", "g"], ()), one)
+        self.assertNotEqual(ezpkg.dependency_fingerprint(
+            text.replace("import a\n", "") + "import a\n", ["a"], ()), one)
+        self.assertEqual(ezpkg.line_list([9, 5, 6, 5]), "lines 5-6, 9")
+        self.assertEqual(ezpkg.line_list([7]), "line 7")
+
+    def test_a_discrepancy_is_arranged_and_shown(self) -> None:
+        """Unexplained entries keep their neighbour; changes are shown.
+
+        `widget` and `sprocket` are placed by imports, `PyYAML` is
+        added, `rich` is unused, and `pywin32`, whose modules are not
+        known here, stays after `widget`, its neighbour now.
+        """
+        # Entries as written, and what the imports make of them.
+        found: ezpkg.Discrepancy = ezpkg.Discrepancy(
+            Path("prog.py"), ["rich", "widget", "pywin32", "sprocket"],
+            [4, 5, 6, 7],
+            [("entry", 3, ""), ("add", 0, "PyYAML"), ("entry", 1, "")],
+            {3: 12, 1: 14}, [(13, "yaml", "PyYAML")], [0], {"sprocket"})
+        self.assertEqual(found.target(),
+                         ["sprocket", "PyYAML", "widget", "pywin32"])
+        self.assertEqual(found.arrange((), ()),
+                         ["rich", "sprocket", "widget", "pywin32"])
+        self.assertIn("EZPkg: prog.py: its `dependencies` (lines 4, 7) and "
+                      "its imports (lines 12-13) disagree.",
+                      " ".join(found.summary().split()))
+        shown: str = found.changes(found.target(), ["pywin32"])
+        self.assertIn('   remove     "rich",\n', shown)
+        self.assertIn('   move (7)   "sprocket",\n', shown)
+        self.assertIn('   add        "PyYAML",\n', shown)
+        self.assertIn('   line 5     "widget",\n', shown)
+        self.assertIn('   keep       "pywin32" (added to [tool.ezpkg] '
+                      "unimported)\n", shown)
+
+    def test_with_type_ignores_copies_the_authors_comment(self) -> None:
+        """New imports get the nearest `type: ignore` above, or none.
+
+        A line with a `type: ignore` already, or a backslash, is left
+        alone; one with its own comment gets this one in front of it,
+        since `mypy` reads only a comment that starts with `type:`.
+        """
+        # Two habits; each new import takes the nearest one above.
+        text: str = (
+            "import json\n"
+            "import one  # type: ignore[import-not-found]\n"
+            "import new_a\n"
+            "import two  # type: ignore[import-untyped]  # Note.\n"
+            "import new_b  # Mine.\n"
+            "import new_c  # type: ignore\n"
+            "import new_d, \\\n    json\n")
+        result: str
+        given: list[str]
+        result, given = ezpkg.with_type_ignores(
+            text, {"new_a", "new_b", "new_c", "new_d"},
+            {"one", "two", "json"})
+        self.assertEqual(result, text.replace(
+            "import new_a\n",
+            "import new_a  # type: ignore[import-not-found]\n").replace(
+            "import new_b  # Mine.\n",
+            "import new_b  # type: ignore[import-untyped]  # Note.  "
+            "# Mine.\n"))
+        self.assertEqual(given, ["new_a", "new_b"])
+
+        # The first habit serves an import above every habit.
+        result, given = ezpkg.with_type_ignores(
+            "import new\nimport one  # type: ignore\n", {"new"}, {"one"})
+        self.assertEqual(result, "import new  # type: ignore\n"
+                         "import one  # type: ignore\n")
+
+        # No habit, no comment.
+        self.assertEqual(ezpkg.with_type_ignores(
+            "import one\nimport new\n", {"new"}, {"one"}),
+            ("import one\nimport new\n", []))
+
+    def test_wheel_modules_reads_the_top_level_names(self) -> None:
+        """A wheel's importable names come from its member names."""
+        # A module, a package, an extension and a `.data/purelib` file.
+        with tempfile.TemporaryDirectory() as scratch:
+            wheel: Path = Path(scratch) / "mixed-1.0-py3-none-any.whl"
+            archive: zipfile.ZipFile
+            with zipfile.ZipFile(wheel, "w") as archive:
+                for member in ("alone.py", "package/__init__.py",
+                               "_speed.cpython-312-x86_64-linux-gnu.so",
+                               "mixed-1.0.data/purelib/moved.py",
+                               "mixed-1.0.data/scripts/tool",
+                               "mixed-1.0.dist-info/METADATA"):
+                    archive.writestr(member, "")
+            self.assertEqual(ezpkg.wheel_modules(wheel),
+                             {"alone", "package", "_speed", "moved"})
 
     def test_uv_setting_changes_one_key(self) -> None:
         """A key is replaced, added under the header, or a table added."""

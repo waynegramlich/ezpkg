@@ -36,7 +36,9 @@ SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 # Every import below is in the standard library, and none of them comes
 # from a package a distribution can leave out.
 import ast
+import dataclasses
 import datetime
+import difflib
 import hashlib
 import importlib
 import importlib.metadata
@@ -58,7 +60,7 @@ import tokenize
 import tomllib
 import zipapp
 import zipfile
-from collections.abc import Mapping, Sequence
+from collections.abc import Collection, Mapping, Sequence
 from pathlib import Path
 from types import ModuleType
 from typing import IO, Any, overload
@@ -644,8 +646,11 @@ def with_script_toml(text: str, found: re.Match[str], toml: str) -> str:
             + text[found.end("content"):])
 
 
-def uv_setting(toml: str, key: str, value: str | None) -> str | None:
+def uv_setting(toml: str, key: str, value: str | None,
+               table: str = "uv") -> str | None:
     """Return a block's TOML with one key of `[tool.uv]` set or removed.
+
+    Or of another `[tool.*]` table, such as `[tool.ezpkg]`.
 
     The line is edited in place when the key is already there, added
     under the `[tool.uv]` header when the table is, and a table is
@@ -663,6 +668,8 @@ def uv_setting(toml: str, key: str, value: str | None) -> str | None:
     * `value` (`str | None`):
       Its value as TOML spells it, such as `"2026-10-12T19:05:41Z"`
       with its quotes, or `true`; `None` removes the key.
+    * `table` (`str`):
+      The table under `tool`, `uv` unless said otherwise.
 
     Returns:
     * (`str | None`): The new TOML, or `None` when this cannot set the
@@ -673,9 +680,9 @@ def uv_setting(toml: str, key: str, value: str | None) -> str | None:
     try:
         expected: dict[str, Any] = tomllib.loads(toml)
         if value is None:
-            expected.get("tool", {}).get("uv", {}).pop(key, None)
+            expected.get("tool", {}).get(table, {}).pop(key, None)
         else:
-            expected.setdefault("tool", {}).setdefault("uv", {})[key] = (
+            expected.setdefault("tool", {}).setdefault(table, {})[key] = (
                 tomllib.loads(setting)[key])
     except (tomllib.TOMLDecodeError, AttributeError):
         return None
@@ -684,11 +691,12 @@ def uv_setting(toml: str, key: str, value: str | None) -> str | None:
     lines: list[str] = toml.split("\n")
     header: int | None = next(
         (index for index, line in enumerate(lines)
-         if re.fullmatch(r"\s*\[tool\.uv\]\s*(#.*)?", line)), None)
+         if re.fullmatch(rf"\s*\[tool\.{re.escape(table)}\]\s*(#.*)?",
+                         line)), None)
     if header is None and value is not None:
         while lines and not lines[-1].strip():
             lines.pop()
-        lines += ["", "[tool.uv]", setting]
+        lines += ["", f"[tool.{table}]", setting]
     elif header is not None:
         end: int = next((index for index in range(header + 1, len(lines))
                          if lines[index].lstrip().startswith("[")),
@@ -712,6 +720,162 @@ def uv_setting(toml: str, key: str, value: str | None) -> str | None:
     except tomllib.TOMLDecodeError:
         return None
     return result
+
+
+def dependencies_span(toml: str) -> tuple[int, int] | None:
+    """Return where a block's `dependencies = [...]` starts and ends.
+
+    Arguments:
+    * `toml` (`str`):
+      The block's TOML, as `script_toml` returns it.
+
+    Returns:
+    * (`tuple[int, int] | None`): The offsets of the key and of the
+      character after the `]` that closes its array, or `None` when
+      there is no such array, or it does not close.
+    """
+    # The array runs to the `]` that closes it, skipping over strings,
+    # which may hold a `]` of their own, as in `widget[extra]`.
+    key: re.Match[str] | None = re.search(
+        r"(?m)^dependencies\s*=\s*\[", toml)
+    if key is None:
+        return None
+    depth: int = 1
+    index: int = key.end()
+    while depth and index < len(toml):
+        char: str = toml[index]
+        if char in "\"'":
+            index = toml.find(char, index + 1)
+            if index < 0:
+                return None
+        elif char == "#":
+            index = toml.find("\n", index)
+            if index < 0:
+                return None
+        elif char == "[":
+            depth += 1
+        elif char == "]":
+            depth -= 1
+        index += 1
+    if depth:
+        return None
+    return key.start(), index
+
+
+def with_dependency_list(text: str, entries: Sequence[str]) -> str | None:
+    """Return a program's text with Part 1's `dependencies` replaced.
+
+    An array written on one line stays on one line while it fits in 79
+    columns; otherwise it is written one entry per line, as
+    `pin_dependencies` writes it.  A block with no `dependencies` gets
+    one above its first table, since a key after a table header would
+    belong to that table.  Everything else in the block, and outside
+    it, stays as written.  See `T.kdaiis`.
+
+    Arguments:
+    * `text` (`str`):
+      The program's source.
+    * `entries` (`Sequence[str]`):
+      The requirement strings, in order.
+
+    Returns:
+    * (`str | None`): The program with the new block, or `None` when it
+      has no block, or one this cannot edit safely.
+    """
+    # The block, and what it should say afterwards.
+    block: tuple[re.Match[str], str] | None = script_toml(text)
+    if block is None:
+        return None
+    found: re.Match[str]
+    toml: str
+    found, toml = block
+    try:
+        expected: dict[str, Any] = tomllib.loads(toml)
+    except tomllib.TOMLDecodeError:
+        return None
+    had: bool = "dependencies" in expected
+    expected["dependencies"] = list(entries)
+    one_line: str = ("dependencies = ["
+                     + ", ".join(f'"{entry}"' for entry in entries) + "]")
+
+    # Replaced where it is, or added above the first table.
+    span: tuple[int, int] | None = dependencies_span(toml)
+    if span is not None:
+        array: str = (
+            one_line
+            if "\n" not in toml[span[0]:span[1]] and len(one_line) <= 77
+            else "dependencies = [\n"
+            + "".join(f'  "{entry}",\n' for entry in entries) + "]")
+        toml = toml[:span[0]] + array + toml[span[1]:]
+    elif had:
+        return None
+    else:
+        lines: list[str] = toml.split("\n")
+        table: int = next((index for index, line in enumerate(lines)
+                           if line.lstrip().startswith("[")), len(lines))
+        while table and not lines[table - 1].strip():
+            table -= 1
+        lines.insert(table, one_line)
+        toml = "\n".join(lines)
+
+    # Only the dependencies may have changed.
+    try:
+        if tomllib.loads(toml) != expected:
+            return None
+    except tomllib.TOMLDecodeError:
+        return None
+    return with_script_toml(text, found, toml)
+
+
+def dependency_lines(text: str) -> list[int] | None:
+    """Return the line of each entry in Part 1's `dependencies`.
+
+    For messages, which name the line an entry is on.
+
+    Arguments:
+    * `text` (`str`):
+      The program's source.
+
+    Returns:
+    * (`list[int] | None`): One line number per entry, in order, or
+      `None` when there is no array, or its strings cannot be counted.
+    """
+    # The block's TOML lines are the program's lines, one for one.
+    block: tuple[re.Match[str], str] | None = script_toml(text)
+    if block is None:
+        return None
+    found: re.Match[str]
+    toml: str
+    found, toml = block
+    span: tuple[int, int] | None = dependencies_span(toml)
+    if span is None:
+        return None
+    first: int = text.count("\n", 0, found.start("content")) + 1
+
+    # Each string starts an entry; comments are skipped.
+    starts: list[int] = []
+    index: int = toml.index("[", span[0]) + 1
+    while index < span[1]:
+        char: str = toml[index]
+        if char in "\"'":
+            starts.append(index)
+            index = toml.find(char, index + 1)
+            if index < 0:
+                return None
+        elif char == "#":
+            index = toml.find("\n", index)
+            if index < 0:
+                return None
+        index += 1
+    lines: list[int] = [first + toml.count("\n", 0, start)
+                        for start in starts]
+    try:
+        declared: object = tomllib.loads(toml).get("dependencies")
+    except tomllib.TOMLDecodeError:
+        return None
+    if not isinstance(declared, list) or len(declared) != len(lines):
+        return None
+    return lines
 
 
 def pin_dependencies(text: str, pins: Sequence[str]) -> str | None:
@@ -744,34 +908,13 @@ def pin_dependencies(text: str, pins: Sequence[str]) -> str | None:
     toml: str
     found, toml = block
 
-    # The array runs to the `]` that closes it, skipping over strings,
-    # which may hold a `]` of their own, as in `widget[extra]`.
-    key: re.Match[str] | None = re.search(
-        r"(?m)^dependencies\s*=\s*\[", toml)
-    if key is None:
-        return None
-    depth: int = 1
-    index: int = key.end()
-    while depth and index < len(toml):
-        char: str = toml[index]
-        if char in "\"'":
-            index = toml.find(char, index + 1)
-            if index < 0:
-                return None
-        elif char == "#":
-            index = toml.find("\n", index)
-            if index < 0:
-                return None
-        elif char == "[":
-            depth += 1
-        elif char == "]":
-            depth -= 1
-        index += 1
-    if depth:
+    # The array is replaced whole.
+    span: tuple[int, int] | None = dependencies_span(toml)
+    if span is None:
         return None
     array: str = ("dependencies = [\n"
                   + "".join(f'  "{pin}",\n' for pin in pins) + "]")
-    toml = toml[:key.start()] + array + toml[index:]
+    toml = toml[:span[0]] + array + toml[span[1]:]
     try:
         metadata: dict[str, Any] = tomllib.loads(toml)
     except tomllib.TOMLDecodeError:
@@ -788,6 +931,263 @@ def pin_dependencies(text: str, pins: Sequence[str]) -> str | None:
     if tomllib.loads(toml).get("dependencies") != list(pins):
         return None
     return with_script_toml(text, found, toml)
+
+
+def normal_name(name: str) -> str:
+    """Return a distribution name in one spelling.
+
+    PEP 503 compares names this way, so `PyYAML` and `pyyaml`, or
+    `python-dateutil` and `python_dateutil`, are one.
+
+    Arguments:
+    * `name` (`str`):
+      A distribution name.
+
+    Returns:
+    * (`str`): The name lowercased, with runs of `-`, `_` and `.` as `_`.
+    """
+    # The one rule, applied everywhere names are compared.
+    return re.sub(r"[-_.]+", "_", name).lower()
+
+
+def read_program(where: Path) -> tuple[str, str, bool]:
+    """Read a program for editing, noting how to write it back.
+
+    A program is not obliged to be UTF-8 with `\\n`, so its encoding
+    (byte order mark included) and line endings are kept.
+
+    Arguments:
+    * `where` (`Path`):
+      The program.
+
+    Returns:
+    * (`tuple[str, str, bool]`): The text with `\\n` line endings, its
+      encoding, and whether it used `\\r\\n`.
+
+    Raises:
+    * `OSError`:
+      If it cannot be read.
+    """
+    # The bytes decide the encoding, as Python itself decides it.
+    raw: bytes = where.read_bytes()
+    encoding: str = tokenize.detect_encoding(io.BytesIO(raw).readline)[0]
+    text: str = raw.decode(encoding)
+    return text.replace("\r\n", "\n"), encoding, "\r\n" in text
+
+
+def write_program(where: Path, text: str, encoding: str,
+                  crlf: bool) -> None:
+    """Write a program back the way `read_program` found it.
+
+    Arguments:
+    * `where` (`Path`):
+      The program.
+    * `text` (`str`):
+      Its new text, with `\\n` line endings.
+    * `encoding` (`str`):
+      Its encoding, from `read_program`.
+    * `crlf` (`bool`):
+      Whether it used `\\r\\n`, from `read_program`.
+
+    Raises:
+    * `OSError`:
+      If it cannot be written.
+    """
+    # Line endings first, then the encoding.
+    if crlf:
+        text = text.replace("\n", "\r\n")
+    where.write_bytes(text.encode(encoding))
+
+
+def every_import(text: str) -> list[tuple[str, int, bool]]:
+    """Return every top-level module a program imports, in order.
+
+    Unlike `program_imports`, imports the program is ready to see fail
+    -- in a `try` that catches `ImportError`, or under `if
+    TYPE_CHECKING:` -- are included, marked optional: such an import
+    never demands a package, but a declared package it uses is not
+    unused.  Relative imports are left out.  See `T.kdaiis`.
+
+    Arguments:
+    * `text` (`str`):
+      The program's source.
+
+    Returns:
+    * (`list[tuple[str, int, bool]]`): Each module once, its first
+      line, and whether every import of it is optional, ordered by
+      that line.
+
+    Raises:
+    * `SyntaxError`:
+      If the program does not parse.
+    """
+    # The ones that must succeed, and then everything.
+    required: set[str] = {module for module, _, _
+                          in program_imports(text)}
+    first: dict[str, int] = {}
+    node: ast.AST
+    for node in ast.walk(ast.parse(text)):
+        names: list[str] = []
+        if isinstance(node, ast.Import):
+            names = [alias.name for alias in node.names]
+        elif isinstance(node, ast.ImportFrom) and not node.level:
+            names = [node.module or ""]
+        name: str
+        for name in names:
+            top: str = name.split(".")[0]
+            if top and node.lineno < first.get(top, node.lineno + 1):
+                first[top] = node.lineno
+    return sorted(((module, line, module not in required)
+                   for module, line in first.items()),
+                  key=lambda one: one[1])
+
+
+def wheel_modules(wheel: Path) -> set[str]:
+    """Return the top-level names a wheel makes importable.
+
+    Read from the zip's member names, so nothing in it runs.  A file
+    under `.data/purelib` or `.data/platlib` counts where it will be
+    unpacked, beside the others; see `EZPkg.unpack`.
+
+    Arguments:
+    * `wheel` (`Path`):
+      The wheel.
+
+    Returns:
+    * (`set[str]`): Packages, modules and extension modules, such as
+      `{"yaml", "_yaml"}`.
+    """
+    # The first part of each path, after `.data` is moved into place.
+    names: set[str] = set()
+    archive: zipfile.ZipFile
+    member: str
+    with zipfile.ZipFile(wheel) as archive:
+        for member in archive.namelist():
+            parts: list[str] = member.split("/")
+            if parts[0].endswith(".dist-info"):
+                continue
+            if parts[0].endswith(".data"):
+                if len(parts) < 3 or parts[1] not in ("purelib", "platlib"):
+                    continue
+                parts = parts[2:]
+            if len(parts) > 1:
+                names.add(parts[0])
+            elif parts[0].endswith((".py", ".so", ".pyd")):
+                names.add(parts[0].split(".")[0])
+    return names
+
+
+# A comment that tells `mypy` to accept an import it cannot follow, in
+# any of its spellings: `# type: ignore`, `# type: ignore[import-not-found]`
+# and so on, perhaps with the author's own note after it.
+TYPE_IGNORE: re.Pattern[str] = re.compile(r"#\s*type:\s*ignore\b")
+
+
+def with_type_ignores(text: str, adding: Collection[str],
+                      others: Collection[str]) -> tuple[str, list[str]]:
+    """Give new imports the `mypy` comment the author's others carry.
+
+    An author who checks a program with `mypy` marks each import of a
+    fetched package `# type: ignore[import-not-found]`, as the Quick
+    Start does, since `mypy` cannot see into the cache.  When the
+    imports of declared packages (`others`) carry such a comment, the
+    imports whose packages were just added (`adding`) get the same
+    one, copied word for word from the nearest such import above, or
+    the first when none is above.  When none carries one, nothing is
+    added (Wayne, 2026-10-15).  A line that already has a `type:
+    ignore`, or continues with a backslash, is left alone; one with a
+    comment of its own gets this one first, since `mypy` reads only a
+    comment that starts with `type:`.  See `T.kdaiis`.
+
+    Arguments:
+    * `text` (`str`):
+      The program's source.
+    * `adding` (`Collection[str]`):
+      The modules whose imports may get the comment.
+    * `others` (`Collection[str]`):
+      The modules whose imports show the author's habit.
+
+    Returns:
+    * (`tuple[str, list[str]]`): The program, and the modules whose
+      imports were given the comment.
+    """
+    # Every comment, by line, with the column it starts at.
+    comments: dict[int, tuple[int, str]] = {}
+    token: tokenize.TokenInfo
+    try:
+        for token in tokenize.generate_tokens(io.StringIO(text).readline):
+            if token.type == tokenize.COMMENT:
+                comments[token.start[0]] = (token.start[1], token.string)
+    except (tokenize.TokenError, SyntaxError):
+        return text, []
+
+    # The author's own comments, in the order they appear.
+    imports: list[tuple[str, int, bool]] = program_imports(text)
+    habits: list[tuple[int, str]] = sorted(
+        (line, comments[line][1]) for module, line, _ in imports
+        if module in others and line in comments
+        and TYPE_IGNORE.match(comments[line][1]))
+    if not habits:
+        return text, []
+
+    # Each new import gets the nearest one above it.
+    lines: list[str] = text.split("\n")
+    given: list[str] = []
+    module: str
+    line: int
+    for module, line, _ in imports:
+        if module not in adding:
+            continue
+        written: str = lines[line - 1]
+        if written.rstrip().endswith("\\"):
+            continue
+        copied: str = next((comment for at, comment in reversed(habits)
+                            if at < line), habits[0][1])
+        if line in comments:
+            column: int
+            existing: str
+            column, existing = comments[line]
+            if TYPE_IGNORE.match(existing):
+                continue
+            lines[line - 1] = (written[:column] + copied + "  "
+                               + written[column:])
+        else:
+            lines[line - 1] = written.rstrip() + "  " + copied
+        comments[line] = (len(written), copied)
+        given.append(module)
+    return "\n".join(lines), given
+
+
+# The answers to a yes-or-no question.
+YES_NO: dict[str, str] = {"y": "yes", "yes": "yes", "n": "no", "no": "no"}
+
+
+# Imports whose package on PyPI has a different name, for the ones
+# that are not installed anywhere to ask.  Only well-known ones: any
+# other import is guessed to be its own package's name, and every guess
+# is then checked against the wheel that arrives (`wheel_modules`), so
+# a wrong guess, or a name somebody squatted, is refused rather than
+# installed.  See `T.kdaiis`.
+MODULE_PACKAGES: dict[str, str] = {
+    "attr": "attrs",
+    "bs4": "beautifulsoup4",
+    "Crypto": "pycryptodome",
+    "cv2": "opencv-python",
+    "dateutil": "python-dateutil",
+    "docx": "python-docx",
+    "dotenv": "python-dotenv",
+    "fitz": "PyMuPDF",
+    "git": "GitPython",
+    "jwt": "PyJWT",
+    "OpenSSL": "pyOpenSSL",
+    "PIL": "Pillow",
+    "pptx": "python-pptx",
+    "serial": "pyserial",
+    "skimage": "scikit-image",
+    "sklearn": "scikit-learn",
+    "usb": "pyusb",
+    "yaml": "PyYAML",
+}
 
 
 # The names an `if` test uses when it picks an import by platform, as in
@@ -1041,6 +1441,281 @@ def refresh(path: Path, text: str) -> None:
         path.write_text(text, encoding="utf-8")
 
 
+def unimported(text: str) -> list[str]:
+    """Return the packages a program keeps though nothing imports them.
+
+    Listed in Part 1 as `[tool.ezpkg] unimported = [...]`, which the
+    `k` answer writes: a plugin that another package loads for itself,
+    say.  See `T.kdaiis`.
+
+    Arguments:
+    * `text` (`str`):
+      The program's source.
+
+    Returns:
+    * (`list[str]`): The names, or an empty list for none or a block
+      that cannot be read.
+    """
+    # Anything malformed is simply nothing kept.
+    try:
+        metadata: dict[str, Any] | None = script_metadata(text)
+    except ValueError:
+        return []
+    tool: object = (metadata or {}).get("tool", {})
+    table: object = tool.get("ezpkg", {}) if isinstance(tool, dict) else {}
+    kept: object = (table.get("unimported", [])
+                    if isinstance(table, dict) else [])
+    return ([one for one in kept if isinstance(one, str)]
+            if isinstance(kept, list) else [])
+
+
+def dependency_fingerprint(text: str, entries: Sequence[str],
+                           approved: Collection[str]) -> str:
+    """Return a short fingerprint of what decides a program's target.
+
+    Its imports in order (optional or not), its `dependencies`, what it
+    keeps unimported and what its approvals cover: when none of these
+    has changed, neither has any discrepancy between them, so it is not
+    worked out again.  Eight hex digits, since it is only ever compared
+    with the last one for the same program (Wayne, 2026-10-15).
+
+    Arguments:
+    * `text` (`str`):
+      The program's source.
+    * `entries` (`Sequence[str]`):
+      Its `dependencies`.
+    * `approved` (`Collection[str]`):
+      The normalized names its approvals cover.
+
+    Returns:
+    * (`str`): Eight hex digits of a SHA-256.
+
+    Raises:
+    * `SyntaxError`:
+      If the program does not parse.
+    """
+    # Moving an import can change the target's order, so order counts.
+    key: str = json.dumps({
+        "imports": [[module, optional] for module, _, optional
+                    in every_import(text)],
+        "entries": list(entries),
+        "unimported": unimported(text),
+        "approved": sorted(approved)})
+    return hashlib.sha256(key.encode()).hexdigest()[:8]
+
+
+def line_list(numbers: Collection[int]) -> str:
+    """Return line numbers the way a message names them.
+
+    Arguments:
+    * `numbers` (`Collection[int]`):
+      Line numbers, in any order, perhaps repeated.
+
+    Returns:
+    * (`str`): Such as `line 5`, `lines 5-6` or `lines 5, 8-9`.
+    """
+    # Runs of consecutive lines become ranges.
+    ordered: list[int] = sorted(set(numbers))
+    runs: list[list[int]] = []
+    number: int
+    for number in ordered:
+        if runs and number == runs[-1][-1] + 1:
+            runs[-1].append(number)
+        else:
+            runs.append([number])
+    spelled: str = ", ".join(str(run[0]) if len(run) == 1
+                             else f"{run[0]}-{run[-1]}" for run in runs)
+    return ("line " if len(ordered) == 1 else "lines ") + spelled
+
+
+@dataclasses.dataclass
+class Discrepancy:
+    """How a program's `dependencies` differ from what its imports imply.
+
+    The target is the `dependencies` the imports imply: each imported
+    module's package, in the order of each module's first import.  An
+    entry no import explains -- one kept as `unimported`, or one whose
+    modules are unknown here, such as `pywin32` on Linux -- keeps its
+    place after the same neighbour.  Built by `EZPkg.discrepancy`.  See
+    `T.kdaiis` in `TASKS/`.
+
+    Attributes:
+    * `program` (`Path`):
+      The program.
+    * `entries` (`list[str]`):
+      Its `dependencies`, as written.
+    * `lines` (`list[int]`):
+      The line of each entry.
+    * `order` (`list[tuple[str, int, str]]`):
+      The target's skeleton, in import order: `("entry", index, "")`
+      for an entry an import places, `("add", 0, package)` for an
+      addition.
+    * `placed_by` (`dict[int, int]`):
+      For each entry an import places, that import's line.
+    * `additions` (`list[tuple[int, str, str]]`):
+      The line, module and package of each import that needs one.
+    * `removals` (`list[int]`):
+      The index of each entry nothing imports.
+    * `used` (`set[str]`):
+      The modules whose packages are declared, for
+      `with_type_ignores`.
+    """
+
+    program: Path
+    entries: list[str]
+    lines: list[int]
+    order: list[tuple[str, int, str]]
+    placed_by: dict[int, int]
+    additions: list[tuple[int, str, str]]
+    removals: list[int]
+    used: set[str]
+
+    def arrange(self, added: Collection[str],
+                removed: Collection[int]) -> list[str]:
+        """Return the `dependencies` with some changes made.
+
+        Arguments:
+        * `added` (`Collection[str]`):
+          The packages of the additions to make.
+        * `removed` (`Collection[int]`):
+          The indexes of the entries to remove.
+
+        Returns:
+        * (`list[str]`): The entries, in the target's order.
+        """
+        # What the imports place, then the rest after their neighbours.
+        result: list[tuple[str, int, str]] = [
+            item for item in self.order
+            if item[0] == "entry" or item[2] in added]
+        placed: set[int] = {item[1] for item in result
+                            if item[0] == "entry"}
+        front: int = 0
+        index: int
+        for index in range(len(self.entries)):
+            if index in placed or index in removed:
+                continue
+            before: list[tuple[int, int]] = [
+                (item[1], position) for position, item in enumerate(result)
+                if item[0] == "entry" and item[1] < index]
+            at: int
+            if before:
+                at = max(before)[1] + 1
+            else:
+                at = front
+                front += 1
+            result.insert(at, ("entry", index, ""))
+            placed.add(index)
+        return [self.entries[item[1]] if item[0] == "entry" else item[2]
+                for item in result]
+
+    def target(self) -> list[str]:
+        """Return the `dependencies` with every change made.
+
+        Returns:
+        * (`list[str]`): The target.
+        """
+        # Everything added, everything unexplained removed.
+        return self.arrange({package for _, _, package in self.additions},
+                            self.removals)
+
+    def summary(self) -> str:
+        """Return the line that says where the two disagree.
+
+        Returns:
+        * (`str`): Such as `EZPkg: prog.py: its dependencies (lines
+          5-6) and its imports (lines 14-15) disagree.`, wrapped.
+        """
+        # Moved entries count on both sides, as well as the changes.
+        target: list[str] = self.target()
+        moved: set[int] = set()
+        operation: str
+        first: int
+        last: int
+        for operation, first, last, _, _ in difflib.SequenceMatcher(
+                None, self.entries, target).get_opcodes():
+            if operation in ("replace", "delete"):
+                moved |= {index for index in range(first, last)
+                          if self.entries[index] in target}
+        declared: list[int] = [self.lines[index]
+                               for index in (*self.removals, *moved)]
+        imported: list[int] = [line for line, _, _ in self.additions]
+        imported += [self.placed_by[index] for index in moved
+                     if index in self.placed_by]
+        sides: str = (f"its `dependencies`"
+                      f"{f' ({line_list(declared)})' if declared else ''} "
+                      f"and its imports"
+                      f"{f' ({line_list(imported)})' if imported else ''}")
+        return textwrap.fill(f"EZPkg: {self.program.name}: {sides} "
+                             f"disagree.", 76)
+
+    def changes(self, final: Sequence[str], kept: Sequence[str]) -> str:
+        """Return the changes to `dependencies`, for approval.
+
+        One entry per line, like a diff: the nearest unchanged entry, or
+        the array's bracket, above and below each change as an anchor.
+        Line numbers are shown only when each entry has its own, since
+        an array on one line would give them all the same one (Wayne,
+        2026-10-15).
+
+        Arguments:
+        * `final` (`Sequence[str]`):
+          The `dependencies` afterwards.
+        * `kept` (`Sequence[str]`):
+          Entries to add to `[tool.ezpkg] unimported`.
+
+        Returns:
+        * (`str`): The lines, ending with a newline.
+        """
+        # The operations, then each shown with its label.
+        rows: list[str] = [f"dependencies in {self.program.name}:"]
+        numbered: bool = (0 not in self.lines
+                          and len(set(self.lines)) == len(self.lines))
+        opcodes: list[tuple[str, int, int, int, int]] = (
+            difflib.SequenceMatcher(None, self.entries,
+                                    list(final)).get_opcodes())
+
+        def row(label: str, entry: str) -> None:
+            """Add one line of the display."""
+            rows.append(f"   {label:<10} {entry}")
+        position: int
+        operation: str
+        first: int
+        last: int
+        start: int
+        end: int
+        index: int
+        for position, (operation, first, last, start, end) in enumerate(
+                opcodes):
+            if operation == "equal":
+                # Only the ends that touch a change, as anchors.
+                shown: list[int] = []
+                if position > 0:
+                    shown.append(first)
+                if position < len(opcodes) - 1:
+                    shown.append(last - 1)
+                for index in sorted(set(shown)):
+                    row(f"line {self.lines[index]}" if numbered else "",
+                        f'"{self.entries[index]}",')
+                continue
+            if position == 0:
+                row("", "[")
+            for index in range(first, last):
+                if self.entries[index] not in final:
+                    row("remove", f'"{self.entries[index]}",')
+            entry: str
+            for entry in final[start:end]:
+                if entry in self.entries:
+                    row(f"move ({self.lines[self.entries.index(entry)]})"
+                        if numbered else "move", f'"{entry}",')
+                else:
+                    row("add", f'"{entry}",')
+            if position == len(opcodes) - 1:
+                row("", "]")
+        for entry in kept:
+            row("keep", f'"{entry}" (added to [tool.ezpkg] unimported)')
+        return "\n".join(rows) + "\n"
+
+
 class EZPkg:
     """Fetch and import Python packages that are not preinstalled.
 
@@ -1101,6 +1776,10 @@ class EZPkg:
         * `scans/` records which programs have had their imports
           checked against what they declare, so that each is checked
           again only when its imports change.
+        * `develop/` remembers, one small file per program, what was
+          last said about differences between its imports and the
+          packages it declares, so that each is raised once.  Delete
+          a file to be asked again.
         * `pending/` is scratch space used while fetching and
           unpacking.  Anything left in it is litter from an interrupted
           run and is safe to remove.
@@ -1490,14 +2169,13 @@ class EZPkg:
         where: Path | None = main_path()
         if where is None:
             return ""
+        text: str
+        encoding: str
+        crlf: bool
         try:
-            raw: bytes = where.read_bytes()
+            text, encoding, crlf = read_program(where)
         except OSError:
             return ""
-        encoding: str = tokenize.detect_encoding(io.BytesIO(raw).readline)[0]
-        text: str = raw.decode(encoding)
-        crlf: bool = "\r\n" in text
-        text = text.replace("\r\n", "\n")
 
         # No block, no date and nothing to say.
         block: tuple[re.Match[str], str] | None = script_toml(text)
@@ -1523,10 +2201,7 @@ class EZPkg:
         if not self.ask(f"ezpkg: could I {verb} `{setting}` at line "
                         f"{line} of {where.name}?"):
             return f"{where} left as it was; to date it, {by_hand}"
-        text = edited
-        if crlf:
-            text = text.replace("\n", "\r\n")
-        where.write_bytes(text.encode(encoding))
+        write_program(where, edited, encoding, crlf)
         return f"resolution date {resolved} written to {where}"
 
     def request_for(self, asking: Sequence[str]) -> str:
@@ -1603,6 +2278,462 @@ class EZPkg:
             self.build_zipapp(asking, Path(target) if target else None)
         else:
             self.build_uv(Path(target) if target else None)
+
+    def sync_dependencies(self, asking: Sequence[str],
+                          argv: Sequence[str] = ()) -> list[str]:
+        """Offer to bring Part 1's `dependencies` in line with the imports.
+
+        Once per change of the program's imports or `dependencies`
+        (`dependency_fingerprint`), any discrepancy (`discrepancy`) is
+        named, and the person is asked whether to see the list.  Then
+        each addition and removal is asked about in line order, since
+        only the answer can say whether an import is coming or going;
+        the changes are shown and approved once; additions are fetched
+        and proved to contain their modules; and only then is the file
+        edited, once.  `EZPkg` edits `dependencies` and `[tool.ezpkg]`,
+        and never an import, except to copy the author's `mypy` comment
+        (`with_type_ignores`).  With no terminal, the discrepancy is
+        only named, once per change.  See `T.kdaiis` in `TASKS/`.
+
+        Arguments:
+        * `asking` (`Sequence[str]`):
+          The requirements the program declared, already provided.
+        * `argv` (`Sequence[str]`):
+          Extra arguments for `pip install`, as `install` documents.
+
+        Returns:
+        * (`list[str]`): The requirements now declared, for
+          `scan_imports`.
+        """
+        # Nothing has changed since this program was last looked at.
+        source: tuple[Path, str] | None = main_source()
+        if source is None:
+            return list(asking)
+        program: Path
+        text: str
+        program, text = source
+        approved: set[str] = {normal_name(wheel.split("-")[0])
+                              for wheel in self.approved() or {}}
+        try:
+            fingerprint: str = dependency_fingerprint(text, asking, approved)
+        except SyntaxError:
+            return list(asking)
+        record: Path
+        kept: dict[str, Any]
+        record, kept = self.development_record(program)
+        if kept.get("asked") == fingerprint:
+            return list(asking)
+
+        # Worked out only now, since it reads the installed metadata.
+        found: Discrepancy | None = self.discrepancy(program, text, asking)
+        answer: str = str(kept.get("answer", ""))
+        if found is None or found.target() == found.entries:
+            self.keep(record, kept, asked=fingerprint)
+            return list(asking)
+
+        # Named once per change; asked only on a terminal.
+        opened: tuple[IO[str], IO[str]] | None = (
+            None if answer == "never" else self.terminal())
+        if opened is None:
+            if kept.get("warned") != fingerprint:
+                print(found.summary(), file=sys.stderr)
+            self.keep(record, kept, warned=fingerprint,
+                      **({"asked": fingerprint} if answer == "never"
+                         else {}))
+            return list(asking)
+        writer: IO[str]
+        reader: IO[str]
+        writer, reader = opened
+        with writer, reader:
+            return self.reconcile(found, list(asking), argv, record, kept,
+                                  fingerprint, approved, opened)
+
+    def reconcile(self, found: Discrepancy, asking: list[str],
+                  argv: Sequence[str], record: Path, kept: dict[str, Any],
+                  fingerprint: str, approved: set[str],
+                  opened: tuple[IO[str], IO[str]]) -> list[str]:
+        """Talk a discrepancy through on the terminal, and fix it.
+
+        The conversation `sync_dependencies` describes, in Wayne's
+        design (2026-10-15).
+
+        Arguments:
+        * `found` (`Discrepancy`):
+          What disagrees.
+        * `asking` (`list[str]`):
+          The requirements the program declared.
+        * `argv` (`Sequence[str]`):
+          Extra arguments for `pip install`.
+        * `record` (`Path`):
+          The program's development record.
+        * `kept` (`dict[str, Any]`):
+          What the record holds.
+        * `fingerprint` (`str`):
+          The program's `dependency_fingerprint`.
+        * `approved` (`set[str]`):
+          The names its approvals cover.
+        * `opened` (`tuple[IO[str], IO[str]]`):
+          The terminal.
+
+        Returns:
+        * (`list[str]`): The requirements now declared.
+        """
+        # Whether to see the list at all, unless `a` said always.
+        writer: IO[str] = opened[0]
+        program: Path = found.program
+        answer: str = str(kept.get("answer", ""))
+        writer.write(found.summary() + "\n")
+        if answer != "always":
+            chosen: str = self.choose(
+                opened, "See the discrepancy list? "
+                "[o=>Once/a=>Always/n=>No/d=>Don't ask again] ",
+                {"o": "once", "once": "once", "a": "always",
+                 "always": "always", "n": "no", "no": "no",
+                 "d": "never"})
+            really: str = {
+                "always": "Really show the list from now on, without "
+                          "asking?",
+                "never": f"Really never ask about {program.name} "
+                         f"again?"}.get(chosen, "")
+            if really:
+                if self.choose(opened, f"{really} [y=>Yes/n=>No] ",
+                               YES_NO) != "yes":
+                    chosen = "no"
+                else:
+                    writer.write(f"To be asked again, delete\n{record}\n")
+                    answer = chosen
+            if chosen in ("", "no", "never"):
+                self.keep(record, kept, asked=fingerprint, answer=answer)
+                return asking
+
+        # Each addition and removal, in line order.
+        writer.write("\n")
+        added: set[str] = set()
+        removed: set[int] = set()
+        keeping: list[str] = []
+        items: list[tuple[int, str, int]] = sorted(
+            [(line, "add", position) for position, (line, _, _)
+             in enumerate(found.additions)]
+            + [(found.lines[index], "remove", index)
+               for index in found.removals])
+        line: int
+        kind: str
+        which: int
+        module: str
+        package: str
+        for line, kind, which in items:
+            reply: str
+            if kind == "add":
+                _, module, package = found.additions[which]
+                reply = self.choose(
+                    opened, f"line {line}: `{module}` is imported, but not "
+                    f'in dependencies.\nAdd "{package}"? [y=>Yes/n=>No] ',
+                    YES_NO)
+                if reply == "yes":
+                    added.add(package)
+            else:
+                entry: str = found.entries[which]
+                reply = self.choose(
+                    opened, f'line {line}: "{entry}" is in dependencies, '
+                    f"but nothing imports it.\nRemove it? [y=>Yes/n=>No/"
+                    f"k=>Keep it, and stop asking] ",
+                    {**YES_NO, "k": "keep", "keep": "keep"})
+                if reply == "yes":
+                    removed.add(which)
+                elif reply == "keep":
+                    keeping.append(requirement_name(entry))
+            if not reply:
+                return asking
+
+        # The whole edit, worked out before it is shown.
+        final: list[str] = found.arrange(added, removed)
+        if final == found.entries and not keeping:
+            writer.write("Nothing to change.\n")
+            self.keep(record, kept, asked=fingerprint, answer=answer)
+            return asking
+        source: str
+        encoding: str
+        crlf: bool
+        try:
+            source, encoding, crlf = read_program(program)
+        except OSError as error:
+            writer.write(f"ezpkg: {program.name}: cannot read it: {error}\n")
+            return asking
+        edited: str | None = with_dependency_list(source, final)
+        if edited is not None and keeping:
+            edited = self.with_unimported(edited, keeping)
+        if edited is None:
+            writer.write(f"ezpkg: {program.name}: cannot edit its script "
+                         f"block; change `dependencies` by hand\n")
+            return asking
+        modules: dict[str, str] = {package: module for _, module, package
+                                   in found.additions if package in added}
+        commented: list[str]
+        edited, commented = with_type_ignores(
+            edited, set(modules.values()), found.used)
+        writer.write("\n" + found.changes(final, keeping))
+        if commented:
+            writer.write(f"   and the mypy comment on its import of "
+                         f"{', '.join(commented)}\n")
+        if self.choose(opened, "Make these changes? [y=>Yes/n=>No] ",
+                       YES_NO) != "yes":
+            self.keep(record, kept, asked=fingerprint, answer=answer)
+            return asking
+
+        # Fetched and proved, then written once.
+        try:
+            self.provide(final, argv, {normal_name(package): module
+                                       for package, module in modules.items()})
+            write_program(program, edited, encoding, crlf)
+        except (RuntimeError, ValueError, OSError) as error:
+            reason: str = (str(error).strip().splitlines() or ["failed"])[0]
+            hint: str = ("; with an approvals file, run it with "
+                         "EZPKG_APPROVE=write" if self.approved() else "")
+            writer.write(f"ezpkg: {program.name}: nothing changed: "
+                         f"{reason}{hint}\n")
+            self.keep(record, kept, asked=fingerprint, answer=answer)
+            return asking
+
+        # Reported, and remembered as settled.
+        index: int
+        for index in sorted(removed):
+            writer.write(f'ezpkg: {program.name}: removed '
+                         f'"{found.entries[index]}" from dependencies\n')
+        for package, module in modules.items():
+            why: str = ("" if normal_name(package) == normal_name(module)
+                        else f" (for {module})")
+            also: str = (", and its mypy comment" if module in commented
+                         else "")
+            writer.write(f'ezpkg: {program.name}: added "{package}" to '
+                         f"dependencies{why}{also}\n")
+        for entry in keeping:
+            writer.write(f'ezpkg: {program.name}: kept "{entry}" as '
+                         f"unimported\n")
+        common: list[str] = [entry for entry in found.entries
+                             if entry in final]
+        if [entry for entry in final if entry in common] != common:
+            writer.write(f"ezpkg: {program.name}: put dependencies in the "
+                         f"order of their imports\n")
+        try:
+            settled: str = dependency_fingerprint(edited, final, approved)
+        except SyntaxError:
+            settled = fingerprint
+        self.keep(record, kept, asked=settled, answer=answer)
+        return final
+
+    def discrepancy(self, program: Path, text: str,
+                    asking: Sequence[str]) -> Discrepancy | None:
+        """Work out how `dependencies` differ from what the imports imply.
+
+        Each import, in order, is placed by the declared entry that
+        provides it, if there is one.  Otherwise it needs a package,
+        unless it is optional (`every_import`), the standard library or
+        local (`exempt`), or covered by the approvals; that package is
+        named from the installed metadata, else `MODULE_PACKAGES`, else
+        the module's own name.  An entry no import places is unused if
+        its package is installed here, so that its modules are known,
+        and it is not kept as `unimported`.  See `T.kdaiis`.
+
+        Arguments:
+        * `program` (`Path`):
+          The program.
+        * `text` (`str`):
+          Its source.
+        * `asking` (`Sequence[str]`):
+          Its `dependencies`.
+
+        Returns:
+        * (`Discrepancy | None`): What disagrees, which may be nothing,
+          or `None` when the program does not parse.
+        """
+        # What is declared, what is kept, what is installed.
+        try:
+            imports: list[tuple[str, int, bool]] = every_import(text)
+        except SyntaxError:
+            return None
+        entries: list[str] = list(asking)
+        lines: list[int] = dependency_lines(text) or [0] * len(entries)
+        names: list[str] = [normal_name(requirement_name(entry))
+                            for entry in entries]
+        keep: set[str] = {normal_name(name) for name in unimported(text)}
+        approved: set[str] = {normal_name(wheel.split("-")[0])
+                              for wheel in self.approved() or {}}
+        providers: Mapping[str, list[str]] = (
+            importlib.metadata.packages_distributions())
+        installed: set[str] = {normal_name(name) for found in
+                               providers.values() for name in found}
+
+        # Each import, in order.
+        order: list[tuple[str, int, str]] = []
+        placed_by: dict[int, int] = {}
+        additions: list[tuple[int, str, str]] = []
+        used: set[str] = set()
+        adding: set[str] = set()
+        module: str
+        line: int
+        optional: bool
+        for module, line, optional in imports:
+            if self.exempt(program, module):
+                continue
+            packages: list[str] = sorted(set(providers.get(module, [])))
+            normal: set[str] = {normal_name(name) for name in packages}
+            index: int | None = next(
+                (index for index, name in enumerate(names)
+                 if name in normal), None)
+            if index is None and not packages:
+                spec: Any
+                try:
+                    spec = importlib.util.find_spec(module)
+                except (ImportError, ValueError):
+                    spec = None
+                if spec is not None:
+                    continue
+                guess: str = MODULE_PACKAGES.get(module, module)
+                if normal_name(guess) in names:
+                    index = names.index(normal_name(guess))
+                else:
+                    packages = [guess]
+                    normal = {normal_name(guess)}
+            if index is not None:
+                used.add(module)
+                if index not in placed_by:
+                    placed_by[index] = line
+                    order.append(("entry", index, ""))
+                continue
+            if optional or normal & approved or len(packages) != 1:
+                continue
+            if normal_name(packages[0]) not in adding:
+                adding.add(normal_name(packages[0]))
+                order.append(("add", 0, packages[0]))
+                additions.append((line, module, packages[0]))
+
+        # Unused only when its modules are known and it is not kept.
+        removals: list[int] = [
+            index for index, name in enumerate(names)
+            if index not in placed_by and name in installed
+            and name not in keep]
+        return Discrepancy(program, entries, lines, order, placed_by,
+                           additions, removals, used)
+
+    def with_unimported(self, text: str, adding: Sequence[str]) -> str | None:
+        """Return a program with names added to `[tool.ezpkg] unimported`.
+
+        Arguments:
+        * `text` (`str`):
+          The program's source.
+        * `adding` (`Sequence[str]`):
+          The package names to keep.
+
+        Returns:
+        * (`str | None`): The program, or `None` when its block cannot
+          be edited safely.
+        """
+        # The table is made if need be, by `uv_setting`.
+        block: tuple[re.Match[str], str] | None = script_toml(text)
+        if block is None:
+            return None
+        names: list[str] = unimported(text)
+        names += [name for name in adding if name not in names]
+        toml: str | None = uv_setting(
+            block[1], "unimported",
+            "[" + ", ".join(f'"{name}"' for name in names) + "]", "ezpkg")
+        return None if toml is None else with_script_toml(
+            text, block[0], toml)
+
+    def development_record(self, program: Path
+                           ) -> tuple[Path, dict[str, Any]]:
+        """Return a program's record under `develop/`, and what it holds.
+
+        It holds the program's path, the fingerprint last dealt with on
+        a terminal (`asked`) and without one (`warned`), and the
+        answer that outlives a run, `always` or `never`.  Touched on
+        use, so that `stale` ages out only records nothing uses.
+
+        Arguments:
+        * `program` (`Path`):
+          The program.
+
+        Returns:
+        * (`tuple[Path, dict[str, Any]]`): The record, and its contents,
+          empty when there is none yet.
+        """
+        # Named by the program's path, which it also holds.
+        where: str = str(program.resolve())
+        record: Path = (self.root / "develop"
+                        / f"{hashlib.sha256(where.encode()).hexdigest()[:16]}"
+                          ".json")
+        kept: dict[str, Any] = {"program": where}
+        try:
+            loaded: object = json.loads(record.read_text())
+            if isinstance(loaded, dict) and loaded.get("program") == where:
+                kept = loaded
+                record.touch()
+        except (OSError, ValueError):
+            pass
+        return record, kept
+
+    def keep(self, record: Path, kept: dict[str, Any],
+             **changes: str) -> None:
+        """Update a development record, the way `scan_imports` writes.
+
+        Arguments:
+        * `record` (`Path`):
+          The record, under `develop/`.
+        * `kept` (`dict[str, Any]`):
+          What it held, which is updated too.
+        * `changes` (`str`):
+          `asked`, `warned` or `answer`.
+        """
+        # Atomically, and quietly: a record is a convenience.
+        kept.update(changes)
+        handle: int
+        temporary: str
+        try:
+            record.parent.mkdir(parents=True, exist_ok=True)
+            handle, temporary = tempfile.mkstemp(dir=record.parent)
+            with os.fdopen(handle, "w") as opened:
+                json.dump(kept, opened, indent=1, sort_keys=True)
+            Path(temporary).replace(record)
+        except OSError:
+            pass
+
+    def choose(self, opened: tuple[IO[str], IO[str]], question: str,
+               answers: Mapping[str, str]) -> str:
+        """Ask a question on the terminal until it is answered.
+
+        Anything that is not an answer is asked about again, up to
+        `ATTEMPTS` times; there is no default, as for the download
+        prompt.
+
+        Arguments:
+        * `opened` (`tuple[IO[str], IO[str]]`):
+          The terminal.
+        * `question` (`str`):
+          The question, with its answers spelled out.
+        * `answers` (`Mapping[str, str]`):
+          What each reply means, lowercased.
+
+        Returns:
+        * (`str`): The meaning, or empty when the terminal went away
+          or nothing sensible was said.
+        """
+        # A terminal that has gone away reads as empty.
+        writer: IO[str]
+        reader: IO[str]
+        writer, reader = opened
+        attempt: int
+        for attempt in range(ATTEMPTS):
+            writer.write(question if not attempt
+                         else "Please answer with one of the letters.\n"
+                         + question)
+            writer.flush()
+            reply: str = reader.readline()
+            if not reply:
+                return ""
+            meaning: str | None = answers.get(reply.strip().lower())
+            if meaning is not None:
+                return meaning
+        return ""
 
     def check_imports(self, asking: Sequence[str]) -> None:
         """Refuse an export whose imports Part 1 does not cover.
@@ -1729,16 +2860,9 @@ class EZPkg:
         """Find the running program's imports Part 1 does not cover.
 
         The finding that `check_imports` refuses on and `scan_imports`
-        warns about.  Each module `program_imports` finds is accepted
-        when it is in the standard library, is `ezpkg` itself (the
-        bootstrap's business), is a file or directory beside the
-        program, or comes from a distribution that Part 1 declares or
-        that the approvals record, which covers the packages that came
-        along.  Which distribution provides a module is read from the
-        installed metadata and never guessed, and only when some module
-        needs it, since reading it is the slow part.  An import above
-        the bootstrap is a problem of its own; see
-        `imports_above_bootstrap`.
+        warns about: one line for each import `uncovered_imports`
+        finds, and one for each import above the bootstrap, which is a
+        problem of its own; see `imports_above_bootstrap`.
 
         Arguments:
         * `asking` (`Sequence[str]`):
@@ -1749,6 +2873,70 @@ class EZPkg:
           per problem, in order, or `None` when there is no program
           file to read or it does not parse.
         """
+        # What Part 1 misses, and what runs too early.
+        found: tuple[Path, str, list[tuple[int, str, list[str] | None]]
+                     ] | None = self.uncovered_imports(asking)
+        if found is None:
+            return None
+        program: Path
+        text: str
+        uncovered: list[tuple[int, str, list[str] | None]]
+        program, text, uncovered = found
+        problems: list[tuple[int, str]] = []
+        line: int
+        module: str
+        names: list[str] | None
+        for line, module, names in uncovered:
+            if names is None:
+                problem: str = (f"`{module}` is not importable here; "
+                                f"add its package to Part 1")
+            elif not names:
+                problem = (f"`{module}` comes from "
+                           f"{self.module_origin(module)}, which no "
+                           f"package provides; it cannot travel with "
+                           f"the program")
+            else:
+                problem = (f"`{module}` comes from {' or '.join(names)}, "
+                           f"which Part 1 does not declare; add it to "
+                           f"`dependencies`")
+            problems.append((line, f"line {line}: {problem}"))
+
+        # On a machine with an empty cache, these run before anything
+        # has been fetched.
+        for module, line in imports_above_bootstrap(text):
+            problem = (f"`{module}` is imported above the bootstrap; "
+                       f"move it below, with the other imports")
+            problems.append((line, f"line {line}: {problem}"))
+        return program, [problem for _, problem in sorted(
+            problems, key=lambda one: one[0])]
+
+    def uncovered_imports(self, asking: Sequence[str]) -> tuple[
+            Path, str, list[tuple[int, str, list[str] | None]]] | None:
+        """Find the running program's imports that Part 1 does not cover.
+
+        Each module `program_imports` finds is accepted when it is in
+        the standard library, is `ezpkg` itself (the bootstrap's
+        business), is a file or directory beside the program, or comes
+        from a distribution that Part 1 declares or that the approvals
+        record, which covers the packages that came along.  Which
+        distribution provides a module is read from the installed
+        metadata and never guessed, and only when some module needs it,
+        since reading it is the slow part.  An import guarded by
+        `except ImportError` that finds nothing is accepted too.
+
+        Arguments:
+        * `asking` (`Sequence[str]`):
+          The requirements the program declared.
+
+        Returns:
+        * (`tuple[Path, str, list[tuple[int, str, list[str] | None]]]
+          | None`): The program, its text, and for each uncovered
+          import its line, its module, and the distributions that
+          provide it here: `None` when it is not importable at all,
+          and an empty list when it is but no package provides it.
+          `None` when there is no program file to read or it does not
+          parse.
+        """
         # A program with no file has no imports to read.
         source: tuple[Path, str] | None = main_source()
         if source is None:
@@ -1758,34 +2946,23 @@ class EZPkg:
         program, text = source
         try:
             imports: list[tuple[str, int, bool]] = program_imports(text)
-            above: list[tuple[str, int]] = imports_above_bootstrap(text)
         except SyntaxError:
             return None
 
-        # Distributions are compared by normalized name, the way PEP 503
-        # compares them, so `PyYAML` and `pyyaml` are one.
-        def normal(name: str) -> str:
-            """Return a distribution name in one spelling."""
-            return re.sub(r"[-_.]+", "_", name).lower()
-        covered: set[str] = {normal(requirement_name(one))
+        # Distributions are compared by normalized name.
+        covered: set[str] = {normal_name(requirement_name(one))
                              for one in asking}
-        covered |= {normal(wheel.split("-")[0])
+        covered |= {normal_name(wheel.split("-")[0])
                     for wheel in self.approved() or {}}
         providers: Mapping[str, list[str]] | None = None
 
         # Everything left after the exemptions has to be covered.
-        problems: list[tuple[int, str]] = []
-
-        def add(line: int, problem: str) -> None:
-            """Record a problem under the line it is about."""
-            problems.append((line, f"line {line}: {problem}"))
+        uncovered: list[tuple[int, str, list[str] | None]] = []
         module: str
         line: int
         guarded: bool
         for module, line, guarded in imports:
-            if (module in sys.stdlib_module_names or module == "ezpkg"
-                    or (program.parent / f"{module}.py").is_file()
-                    or (program.parent / module).is_dir()):
+            if self.exempt(program, module):
                 continue
             spec: Any
             try:
@@ -1794,28 +2971,55 @@ class EZPkg:
                 spec = None
             if spec is None:
                 if not guarded:
-                    add(line, f"`{module}` is not importable here; "
-                        f"add its package to Part 1")
+                    uncovered.append((line, module, None))
                 continue
             if providers is None:
                 providers = importlib.metadata.packages_distributions()
             names: list[str] = sorted(set(providers.get(module, [])))
-            if not names:
-                add(line, f"`{module}` comes from "
-                    f"{spec.origin or 'somewhere'}, which no package "
-                    f"provides; it cannot travel with the program")
-            elif not covered & {normal(name) for name in names}:
-                add(line, f"`{module}` comes from {' or '.join(names)}, "
-                    f"which Part 1 does not declare; add it to "
-                    f"`dependencies`")
+            if not names or not covered & {normal_name(name)
+                                           for name in names}:
+                uncovered.append((line, module, names))
+        return program, text, uncovered
 
-        # On a machine with an empty cache, these run before anything
-        # has been fetched.
-        for module, line in above:
-            add(line, f"`{module}` is imported above the bootstrap; "
-                f"move it below, with the other imports")
-        return program, [problem for _, problem in sorted(
-            problems, key=lambda one: one[0])]
+    @staticmethod
+    def exempt(program: Path, module: str) -> bool:
+        """Say whether an import needs no package from Part 1.
+
+        The standard library, `ezpkg` itself (the bootstrap's
+        business), and a file or directory beside the program.
+
+        Arguments:
+        * `program` (`Path`):
+          The program.
+        * `module` (`str`):
+          A top-level module it imports.
+
+        Returns:
+        * (`bool`): True when Part 1 has nothing to do with it.
+        """
+        # Three kinds of import that never travel as packages.
+        return (module in sys.stdlib_module_names or module == "ezpkg"
+                or (program.parent / f"{module}.py").is_file()
+                or (program.parent / module).is_dir())
+
+    @staticmethod
+    def module_origin(module: str) -> str:
+        """Return where an importable module comes from, for a message.
+
+        Arguments:
+        * `module` (`str`):
+          A top-level module that `find_spec` can find.
+
+        Returns:
+        * (`str`): Its file, or `somewhere` when it has none.
+        """
+        # A namespace package has no single file.
+        spec: Any
+        try:
+            spec = importlib.util.find_spec(module)
+        except (ImportError, ValueError):
+            spec = None
+        return getattr(spec, "origin", None) or "somewhere"
 
     def build_zipapp(self, asking: Sequence[str],
                      target: Path | None = None) -> Path:
@@ -3006,9 +4210,11 @@ class EZPkg:
                 self.export(form, asked)
                 sys.exit(0)
 
-            # An ordinary run warns about every uncovered import at
-            # once, now that the declared packages can be found.
-            self.scan_imports(asked)
+            # An ordinary run keeps Part 1 in step with the imports for
+            # somebody developing the program, then warns about every
+            # import still uncovered, now that the declared packages
+            # can be found.
+            self.scan_imports(self.sync_dependencies(asked, argv))
             return None
 
         # One string is the simple case, and it returns one module.
@@ -3174,8 +4380,8 @@ class EZPkg:
                 f"not {declared!r}")
         return list(declared)
 
-    def provide(self, asking: list[str],
-                argv: Sequence[str] = ()) -> list[Path]:
+    def provide(self, asking: list[str], argv: Sequence[str] = (),
+                expect: Mapping[str, str] | None = None) -> list[Path]:
         """Fetch whatever of `asking` is missing, and make it importable.
 
         The engine both forms of `install` share: it fetches, verifies,
@@ -3189,6 +4395,11 @@ class EZPkg:
           not an error and does nothing at all, not even a `pip` run.
         * `argv` (`Sequence[str]`):
           Extra arguments for `pip install`, as `install` documents.
+        * `expect` (`Mapping[str, str] | None`):
+          For packages whose names were guessed, the module each must
+          provide, keyed by `normal_name` of the package.  A wheel that
+          arrives without its module is refused before anything is
+          unpacked; see `sync_dependencies`.
 
         Returns:
         * (`list[Path]`): The version trees put on `sys.path`, which is
@@ -3267,6 +4478,20 @@ class EZPkg:
                 # when it printed `1 requested, 0 downloaded`.
                 if not arrived:
                     return []
+
+                # A guessed name must prove itself before anything else
+                # happens to it: a package that does not contain the
+                # module it was guessed for is the wrong package, or a
+                # squatter's.  See `T.kdaiis`.
+                wheel: Path
+                for wheel in arrived:
+                    module: str | None = (expect or {}).get(
+                        normal_name(wheel.name.split("-")[0]))
+                    if module is not None and (
+                            module not in wheel_modules(wheel)):
+                        raise RuntimeError(
+                            f"{wheel.name} does not provide `{module}`, "
+                            f"so it is not the package that import wants")
 
                 # Say what turned up, then check it against what the
                 # author approved, and only then unpack.  Nothing in a
@@ -3397,7 +4622,8 @@ class EZPkg:
         used this morning is not stale.
 
         Scan records in `scans/` age the same way, since `scan_imports`
-        touches them too, and nothing else names them.
+        touches them too, and nothing else names them; so do the
+        records in `develop/`, which `development_record` touches.
 
         Nothing else is aged.  Trees are kept or dropped by whether a
         record still names them, so removing a record is what makes its
@@ -3417,7 +4643,8 @@ class EZPkg:
         found: list[Path] = []
         record: Path
         for record in [*self.paths()[3].glob("*.json"),
-                       *(self.root / "scans").glob("*.json")]:
+                       *(self.root / "scans").glob("*.json"),
+                       *(self.root / "develop").glob("*.json")]:
             try:
                 if record.stat().st_mtime < cutoff:
                     found.append(record)

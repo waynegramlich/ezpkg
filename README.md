@@ -13,7 +13,9 @@ your program and go.  After that, `EZPkg` fetches your packages over the
 net on demand, without a virtual environment or the right to install
 packages.  Get everything working with `EZPkg` first, then either email
 the single `.py` file to a friend or let `EZPkg` package it up in `zipapp`
-or `uv` format.  You can remove the bootstrap at any time.
+or `uv` format.  You can remove the bootstrap `try` block at any time.
+Once the bootstrap is gone, you *can* remove the metadata, but there is
+really no particular reason to do so, and `uv run` still reads it.
 
 ## Quick Start
 
@@ -105,7 +107,9 @@ since the next run simply fetches it again.
 Python 3.11 or later and a network connection are all that is needed.
 
 The `# type: ignore` comment on `import cowsay` is only for `mypy`; leave
-such comments out of your own programs if you do not use `mypy`.
+such comments out of your own programs if you do not use `mypy`.  If you
+do use them, `EZPkg` copies one onto each import it adds for you (see
+[Keeping `dependencies` in Sync](#keeping-dependencies-in-sync)).
 
 ## Download Prompt
 
@@ -148,6 +152,12 @@ Some programs are run without access to terminal input (e.g. `cron`).  When
 this happens, the download prompt is skipped and the answer is taken to be
 `Yes`, for that run only: no `FOREVER_APPROVE` file is written, so a later
 run from a terminal still asks.
+
+A package is code, and installing one can run some of it: a `.pth` file
+in a package runs when the package is put on `sys.path`, before your
+program's own code.  Anybody can publish a package to PyPI, so list
+only packages you trust in `dependencies`, and check the spelling of
+each name, since look-alike names are a known trick.
 
 ## Enabling `EZPkg` for Your Program
 
@@ -214,11 +224,11 @@ To use `EZPkg` in your own program, new or preexisting:
 3. Put all of your imports after the bootstrap, even ones from the standard
    library, such as `import os`.  An import placed above the bootstrap is
    reported when you run your program.
-4. Run your program.  `EZPkg` lists every import that `dependencies`
-   does not cover, all at once, including a package your own Python
-   happens to have that your friends' will not.  Add each one to
-   `dependencies` and run it again.  The list is shown once, and again
-   only when your imports or `dependencies` change.
+4. Run your program.  If its imports and `dependencies` disagree,
+   `EZPkg` says so and offers to fix `dependencies` for you; see
+   [Keeping `dependencies` in Sync](#keeping-dependencies-in-sync)
+   below.  This also catches a package your own Python happens to have, but
+   that your friends' will not.
 
 That's it.
 
@@ -229,12 +239,68 @@ PyPI and installed, and it is the package's name that goes in
 `import yaml` from `PyYAML`.  One package can also provide several
 modules, so one `dependencies` line can cover more than one import.
 
-An import that works only because your own Python happens to have the
-package never fails, which is why step 4 lists it.  If you leave it out
-of `dependencies` anyway, then when you release your program (see
-[Releasing a Program](#releasing-a-program) below), `EZPkg` lists it
-again, with its line number, and refuses to make the release until you
-add it.
+### Keeping `dependencies` in Sync
+
+`EZPkg` keeps `dependencies` in step with your imports: one package for
+each module you import, in the order the modules are first imported.
+Whenever your imports or `dependencies` change and the two disagree (a
+package is missing, one is no longer imported, or the order differs),
+`EZPkg` says so once and asks:
+
+```
+EZPkg: prog.py: its `dependencies` (line 6) and its imports (lines 14-15)
+disagree.
+See the discrepancy list? [o=>Once/a=>Always/n=>No/d=>Don't ask again]
+```
+
+* **`o=>Once`** - This shows the list this time.
+* **`a=>Always`** - This shows the list now, and from now on without
+  asking first, after `Really show the list from now on, without
+  asking?` (`n` goes back to the question).
+* **`n=>No`** - This changes nothing; you are asked again the next time
+  your imports or `dependencies` change.
+* **`d=>Don't ask again`** - This never asks about this program again,
+  after `Really never ask about prog.py again?`.
+
+The list goes through each difference in line order, since only you
+know whether an import is coming or going:
+
+```
+line 6: "rich" is in dependencies, but nothing imports it.
+Remove it? [y=>Yes/n=>No/k=>Keep it, and stop asking] y
+line 14: `requests` is imported, but not in dependencies.
+Add "requests"? [y=>Yes/n=>No] y
+line 15: `yaml` is imported, but not in dependencies.
+Add "PyYAML"? [y=>Yes/n=>No] y
+```
+
+`k` is for a package your program needs but never imports, such as a
+plugin that another package loads for itself.  It is listed in Part 1
+as `[tool.ezpkg] unimported`, and is not raised again.
+
+Then the changes to `dependencies` are shown, next to the unchanged
+entries around them, and you approve them once:
+
+```
+dependencies in prog.py:
+   line 5     "widget",
+   remove     "rich",
+   add        "requests",
+   add        "PyYAML",
+              ]
+Make these changes? [y=>Yes/n=>No] y
+ezpkg: prog.py: removed "rich" from dependencies
+ezpkg: prog.py: added "requests" to dependencies
+ezpkg: prog.py: added "PyYAML" to dependencies (for yaml)
+```
+
+`EZPkg` only ever changes `dependencies`, never your imports, with one
+exception: if your other imports carry a `# type: ignore` comment for
+`mypy`, an import whose package is added gets the same comment.  If
+`EZPkg` cannot find the right package for an import, it says so and
+leaves your program alone; add that one by hand.  To undo `a` or `d`,
+delete the file it names.  Without a terminal (e.g. under `cron`), the
+disagreement is reported once and nothing is changed.
 
 ### Choosing Versions
 
@@ -279,8 +345,12 @@ hand.
 Once your program starts to work, you may want to share it with a friend.  If
 it fits into a single Python file, you can literally email it to them.  Your
 friend saves the file and runs it, and the `EZPkg` bootstrap takes care of
-the rest.  (They will have to get through the `EZPkg` download prompt
-first.)  For a friend, it is super easy and convenient.
+the rest.  They will have to get through the `EZPkg` download prompt
+first.  For a friend, it is super easy and convenient.  If you send
+`YOUR_PROG.ezpkg` (described below) along with it, your friend gets
+exactly the package versions you approved, each checked against its
+SHA-256, and is not asked the download prompt, since you have already
+approved them.
 
 If you want to use another packaging solution, please read on.
 
@@ -317,6 +387,19 @@ new package introduces a bug, you can determine that it is a problem in
 a package rather than in your code.  This file is the foundation for making
 releases in other formats (e.g. `zipapp` and `uv`).
 
+Once `YOUR_PROG.ezpkg` exists, every ordinary run of `YOUR_PROG.py`
+fetches exactly the versions it records, checks each against its SHA-256,
+and refuses any package it does not record.  So after you change
+`dependencies`, or accept a change offered by [Keeping `dependencies` in
+Sync](#keeping-dependencies-in-sync), run with `EZPKG_APPROVE=write`
+again to record the new set.
+
+Making either release does not run your program.  Instead, `EZPkg`
+first checks that every package your program imports is listed in
+`dependencies`.  A package your own Python happens to have, which you
+declined to add, is caught here: `EZPkg` names it, with its line number,
+and refuses to make the release until you add it.
+
 ### Using `zipapp`
 
 A `zipapp` cannot carry a package that contains compiled code, such as
@@ -328,9 +411,7 @@ Make the release by running your program like this:
 * Windows (PowerShell):
   `powershell -Command { $env:EZPKG_EXPORT="zipapp"; & python YOUR_PROG.py }`
 
-Your program does not actually run.  Instead, `EZPkg` checks that every
-package your program imports is listed in `dependencies` (naming the
-line of any that is not), and then writes `YOUR_PROG.pyz` beside
+After checking your imports, `EZPkg` writes `YOUR_PROG.pyz` beside
 `YOUR_PROG.py`.
 `EZPKG_EXPORT=zipapp:ELSEWHERE.pyz` writes it elsewhere.
 
@@ -354,9 +435,7 @@ Make the release by running your program like this:
 * Windows (PowerShell):
   `powershell -Command { $env:EZPKG_EXPORT="uv"; & python YOUR_PROG.py }`
 
-Your program does not actually run.  Instead, `EZPkg` checks that every
-package your program imports is listed in `dependencies` (naming the
-line of any that is not), and then writes `YOUR_PROG-uv.py` beside
+After checking your imports, `EZPkg` writes `YOUR_PROG-uv.py` beside
 `YOUR_PROG.py`, with its lock file, `YOUR_PROG-uv.py.lock`, beside it.
 `EZPKG_EXPORT=uv:ELSEWHERE.py` writes them elsewhere, named after
 `ELSEWHERE.py`.
