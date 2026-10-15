@@ -47,5 +47,5 @@
 
 * The token plan above is superseded: the upload goes through the
   release workflow (`T.wrw`) after hardware 2FA (`T.suh2`), so that it
-  rehearses the pypi.org upload (`T.utp`).  The dry run and the
+  rehearses the pypi.org upload (`T.utpat`).  The dry run and the
   fetch-back plan still stand.

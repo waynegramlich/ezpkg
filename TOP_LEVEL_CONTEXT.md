@@ -53,6 +53,6 @@ new `nopipN` name and its fingerprint added to the end of `BOOTSTRAPS` in
   notes, and open items are `<!-- Issue: ... -->` comments.  Re-read
   the file before editing, since Wayne edits it between turns.
 * Wayne does his own end-to-end reads of `README.md`.
-* `ezpkg` is not on PyPI yet (`T.utt`, then `T.utp`), so the Quick Start
-  cannot work for a new user; dogfood runs use `PYTHONPATH` pointing at
-  the project.
+* `ezpkg` is not on PyPI yet (`T.uttat`, then `T.utpat`), so the Quick
+  Start cannot work for a new user; dogfood runs use `PYTHONPATH`
+  pointing at the project.

@@ -1,7 +1,13 @@
 # 7.3 Write the release workflow
 
+Here are some references:
+* [Configuring OpenID Connect in PyPI](
+  https://docs.github.com/en/actions/how-tos/secure-your-work/security-harden-deployments/oidc-in-pypi)
+* [PyPI publish GitHub Action](
+  https://github.com/marketplace/actions/pypi-publish)
+
 A GitHub Actions workflow that publishes with Trusted Publishing, the
-same for test.pypi.org (`T.utt`) and pypi.org (`T.utp`) except for the
+same for test.pypi.org (`T.uttat`) and pypi.org (`T.utpat`) except for the
 target and the environment.
 
 ## The Plan
