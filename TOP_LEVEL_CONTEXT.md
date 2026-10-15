@@ -22,6 +22,11 @@ needs live here instead.
   Publishing, after Wayne approves on GitHub (`T.wrw`).
 * `release_check.py`: Runs the Quick Start as a new user against a
   published `ezpkg` (`./release_check.py testpypi|pypi`).
+* `git_hooks/`: `prepare-commit-msg` adds `Assisted-by: Claude
+  Code:claude-opus-5-5` to Wayne's commit messages (deletable in the
+  editor), and `commit-msg` refuses a message that is only that
+  trailer.  On per clone with `git config core.hooksPath git_hooks`.
+  Update the trailer when the model changes.
 
 ## The Bootstrap Has Four Copies
 
