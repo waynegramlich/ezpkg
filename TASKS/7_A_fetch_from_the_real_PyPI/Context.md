@@ -20,3 +20,9 @@
   test.pypi.org is configured separately.  `pypa/gh-action-pypi-publish`
   also attaches attestations.  From Claude's knowledge, not yet checked
   against docs.pypi.org/trusted-publishers.
+
+## 2026-10-14
+
+* `T.suh2` and `T.p2rc` are closed.  Most Trusted Publishing facts above
+  were checked against docs.pypi.org (not the 15-minute token or the
+  attestations); see `T.wrw`'s `Context.md`.

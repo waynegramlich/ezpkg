@@ -1,6 +1,7 @@
 @7_A_fetch_from_the_real_PyPI/Details.md
 @7_A_fetch_from_the_real_PyPI/Context.md
 @7.3_Write_the_release_workflow/Details.md
+@7.3_Write_the_release_workflow/Context.md
 @7.4_Upload_to_test.pypi/Details.md
 @7.5_Upload_to_pypi/Details.md
 @../ISSUES/1_The_bootstrap_trusts_only_system_certificates/Details.md
