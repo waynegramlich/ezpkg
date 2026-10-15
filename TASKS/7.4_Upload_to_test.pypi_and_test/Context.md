@@ -49,3 +49,26 @@
   release workflow (`T.wrw`) after hardware 2FA (`T.suh2`), so that it
   rehearses the pypi.org upload (`T.utpat`).  The dry run and the
   fetch-back plan still stand.
+
+## 2026-10-15: The Quick Start works from test.pypi.org
+
+* `ezpkg 0.0.1.dev202610151838` was uploaded by `T.wrw`'s workflow.
+* test.pypi.org has a `cowsay` 6.1.2 by an unknown author, newer than
+  pypi.org's real 6.1, so `PIP_EXTRA_INDEX_URL=https://test.pypi.org/simple/`
+  would fetch a stranger's code.  Never mix the two indexes.
+* Instead: the `ezpkg` wheel was fetched from test.pypi.org's JSON API
+  (SHA-256 checked) into a directory, and `quick_start.py` was run from
+  a copy outside the project with a fresh `HOME`, no `PYTHONPATH` and
+  `PIP_FIND_LINKS` naming that directory, everything else from
+  pypi.org.  It fetched `pip`, installed `ezpkg` from the wheel, fetched
+  `cowsay 6.1` and printed the cow; exit 0.
+* The existing suite tests the project's own `ezpkg.py` against its
+  local index, so running it says nothing about the published wheel.
+  Proposed to Wayne: a release check that does the run above, for
+  `testpypi` or `pypi`.
+* Wayne: "make it really easy".  `./release_check.py testpypi|pypi
+  [VERSION]` does the run above in a temporary directory, pins `ezpkg`
+  with `PIP_CONSTRAINT` (so a newer pypi.org release cannot win), and
+  passes on exit 0, the cow, and the right `ezpkg-*.dist-info`.
+  Passed for `testpypi` 0.0.1.dev202610151838; `pypi` says "no ezpkg
+  on pypi" until `T.utpat`.  On failure it leaves the directory.

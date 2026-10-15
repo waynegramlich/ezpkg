@@ -16,6 +16,12 @@ needs live here instead.
 * `ezpkg_coverage.py`: Coverage with the standard library `trace`
   (`trace_hook/` carries it into child processes).
 * `README.md`: The user documentation.
+* `release.py`: Builds the wheel to publish (`./release.py
+  testpypi|pypi DIR`), using `release_wheel` from `ezpkg_test.py`.
+* `.github/workflows/release.yml`: Publishes it with Trusted
+  Publishing, after Wayne approves on GitHub (`T.wrw`).
+* `release_check.py`: Runs the Quick Start as a new user against a
+  published `ezpkg` (`./release_check.py testpypi|pypi`).
 
 ## The Bootstrap Has Four Copies
 
@@ -53,6 +59,7 @@ new `nopipN` name and its fingerprint added to the end of `BOOTSTRAPS` in
   notes, and open items are `<!-- Issue: ... -->` comments.  Re-read
   the file before editing, since Wayne edits it between turns.
 * Wayne does his own end-to-end reads of `README.md`.
-* `ezpkg` is not on PyPI yet (`T.uttat`, then `T.utpat`), so the Quick
-  Start cannot work for a new user; dogfood runs use `PYTHONPATH`
-  pointing at the project.
+* `ezpkg` is on test.pypi.org (`T.uttat`) but not yet on pypi.org
+  (`T.utpat`), so the Quick Start does not yet work for a new user;
+  dogfood runs use `PYTHONPATH` pointing at the project, and
+  `release_check.py` checks what was published.

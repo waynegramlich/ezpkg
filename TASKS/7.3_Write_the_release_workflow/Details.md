@@ -45,7 +45,8 @@ build the same wheel.
 
 * On GitHub (repository Settings):
   * Environments `testpypi` and `pypi`, each with Wayne as a required
-    reviewer and deployments limited to tags matching `v*`.
+    reviewer.  `testpypi` deploys only from branch `main` (rehearsals
+    are untagged); `pypi` deploys only from tags matching `v*`.
   * A tag ruleset so that only Wayne can create `v*` tags.
 * On test.pypi.org and pypi.org (account, "Publishing", "Add a new
   pending publisher"):
@@ -77,19 +78,15 @@ So rehearsals use versions that can be thrown away:
 * Target `pypi` uploads the tagged `X.Y.Z` itself.  Everything else
   is the same steps.
 
-Watching it install: the bootstrap fetches `pip` from pypi.org and then
-runs it, and `pip` obeys `PIP_INDEX_URL`, so the Quick Start can
-probably be tried against test.pypi.org with
-`PIP_INDEX_URL=https://test.pypi.org/simple/` and
-`PIP_EXTRA_INDEX_URL=https://pypi.org/simple/` (for `cowsay`).  Not yet
-tried.  Against pypi.org it needs no flags at all.
+Watching it install: `./release_check.py testpypi` runs the Quick
+Start as a new user with the `ezpkg` wheel from test.pypi.org, and
+everything else from pypi.org (`T.uttat`).  Never point `pip` at both
+indexes together: anybody can upload to test.pypi.org, and its `cowsay`
+is a stranger's 6.1.2, newer than the real 6.1.
 
-## Open Questions
+## Decisions
 
-* **Which name goes to test.pypi.org?**  `release_wheel` defaults to
-  the rehearsal name `ezpkg_trial`.  Claude recommends `ezpkg` on both
-  indexes: they are separate, and the rehearsal should publish exactly
-  what the real upload will.
-* **Should the build job run the tests?**  `ruff check .` and `mypy .`
-  are cheap.  The quick suite reaches the real PyPI and takes about two
-  minutes; Claude would leave it to Wayne's machine.
+* `ezpkg` is the name on both indexes, so the rehearsal publishes
+  exactly what the real upload will (Wayne, 2026-10-15).
+* The build job runs `ruff check .` and `mypy .` only; the test suite
+  stays on Wayne's machine (Wayne, 2026-10-15).
