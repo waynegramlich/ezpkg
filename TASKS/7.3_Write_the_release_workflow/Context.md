@@ -26,3 +26,21 @@
 * Next: ask Wayne those two, then write `release.py` and
   `.github/workflows/release.yml`.  Nothing is written yet, and
   nothing is set up on GitHub, test.pypi.org or pypi.org.
+
+## 2026-10-15: Written
+
+* Wayne settled both questions: `ezpkg` on both indexes (`release.py`
+  passes `distribution="ezpkg"`; `RELEASE_DISTRIBUTION` in the tests
+  stays `ezpkg_trial`), and the build job runs only `ruff` (0.17.0) and
+  `mypy` (1.9.0), pinned to Wayne's versions.
+* `release.py` and `.github/workflows/release.yml` written.  Locally:
+  `ruff`, `mypy` pass; `./release.py testpypi DIR` builds
+  `ezpkg-0.0.1.devN-py3-none-any.whl`, which `twine check --strict`
+  passes; `pypi` refuses an untagged HEAD.  `dist/` is git-ignored.
+* `release_wheel` writes a module copy beside the wheel, so `release.py`
+  builds in a temporary directory and copies only the wheel out.
+* The reordered procedure (`T.ffrp`) means `testpypi` runs from untagged
+  commits, so its environment allows branch `main`, not tags `v*`.  The
+  `pypi` environment is limited to `v*` tags.
+* Next: Wayne commits and pushes, sets up the `testpypi` environment and
+  the test.pypi.org pending publisher, and runs it (`T.uttat`).

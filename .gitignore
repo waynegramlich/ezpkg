@@ -28,3 +28,6 @@ python_with_markdown.md
 aic
 ai_contexts
 claude_notes.md
+
+# Wheels built by release.py.
+dist/
