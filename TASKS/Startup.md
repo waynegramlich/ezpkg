@@ -6,7 +6,6 @@
 @7.5_Keep_dependencies_and_imports_in_sync/Context.md
 @7.6_Test_on_Windows_and_macOS/Details.md
 @7.6.1_GitHub_Actions_runners/Details.md
-@7.6.2_QEMU_virtual_machines/Details.md
 @7.6.3_Friends_with_real_machines/Details.md
 @7.7_Upload_to_pypi_and_test/Details.md
 @../ISSUES/1_The_bootstrap_trusts_only_system_certificates/Details.md
@@ -14,6 +13,7 @@
 @../ISSUES/3_Reviewer_thoughts_have_two_formats/Details.md
 @../ISSUES/19_How_to_deal_with_compiled_packages/Details.md
 @../ISSUES/20_A_uv_export_drops_an_ezpkg_the_program_imports/Details.md
+@7.6.2_QEMU_virtual_machines/Summary.md
 @7.4_Upload_to_test.pypi_and_test/Summary.md
 @7.8_Print_the_2FA_recovery_codes/Summary.md
 @7.2_Set_up_hardware_2FA/Summary.md
@@ -63,4 +63,4 @@
 @../ISSUES/15_Nothing_identifies_a_cache_as_valid/Summary.md
 @../ISSUES/16_Pip._internal_is_not_a_public_API/Summary.md
 @../ISSUES/17_What_happens_with_no_network/Summary.md
-@../ISSUES/18_The_cache_check_tests_for_a_directory/Summary.md
+@Closed.md

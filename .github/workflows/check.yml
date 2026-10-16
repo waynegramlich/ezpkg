@@ -66,3 +66,45 @@ jobs:
           name: scratch-${{ matrix.os }}-${{ matrix.python }}
           path: ${{ runner.temp }}/release_check-*
           include-hidden-files: true
+
+  # python.org's macOS Python reads no Keychain and has no certificates
+  # until its `Install Certificates.command` is run, which many people
+  # never do (`I.btosc`).  Allowed to fail until that is settled.
+  python-org:
+    continue-on-error: true
+    strategy:
+      fail-fast: false
+      matrix:
+        version: ["3.14.8", "3.15.0"]
+    runs-on: macos-latest
+    env:
+      VERSION: ${{ matrix.version }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      # `release_check.py` itself fetches with `urllib`, so it runs on
+      # a Python with certificates, and hands the Quick Start the other.
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Install python.org's Python, without its certificates
+        run: |
+          curl -fsSLO "https://www.python.org/ftp/python/$VERSION/python-$VERSION-macos11.pkg"
+          sudo installer -pkg "python-$VERSION-macos11.pkg" -target /
+      - name: Show where it looks for certificates
+        run: |
+          PY="/Library/Frameworks/Python.framework/Versions/${VERSION%.*}/bin/python3"
+          "$PY" --version
+          "$PY" -c "import ssl; print(ssl.get_default_verify_paths())"
+          ls -l "$(dirname "$PY")/../etc/openssl/" || true
+          env | grep '^SSL_' || echo "no SSL_ variables"
+      - run: |
+          unset SSL_CERT_FILE SSL_CERT_DIR
+          python release_check.py \
+            --python "/Library/Frameworks/Python.framework/Versions/${VERSION%.*}/bin/python3" \
+            "$TARGET" $CHECKED
+        env:
+          TARGET: ${{ inputs.target }}
+          CHECKED: ${{ inputs.version }}
+          GH_TOKEN: ${{ github.token }}

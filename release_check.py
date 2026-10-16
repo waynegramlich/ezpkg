@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Check a published `ezpkg` by running the Quick Start as a new user.
 
-Run as `./release_check.py TARGET [VERSION]`, where `TARGET` is
-`testpypi` or `pypi`.  `VERSION` defaults to the one the newest
+Run as `./release_check.py [--python PYTHON] TARGET [VERSION]`, where
+`TARGET` is `testpypi` or `pypi`.  `VERSION` defaults to the one the newest
 successful `release` run for `TARGET` built, found with `gh`; not the
 index's own newest, which is cached for up to 15 minutes and so names
 the previous upload just when a check is wanted.  A copy of `quick_start.py` runs outside the project, with a
@@ -10,6 +10,11 @@ fresh `HOME`, no `PYTHONPATH` and no `PIP_*` settings, so nothing of
 this project's can stand in for what was published.  It passes when
 the cow appears and the `ezpkg` installed is the version asked for.
 See `T.uttat`.
+
+`--python` runs the Quick Start with another interpreter than the one
+running this script, such as python.org's macOS Python before its
+`Install Certificates.command`, which cannot fetch from the indexes
+the way this script must (`I.btosc`, `T.gar`).
 
 * `pypi`:
   Exactly what a stranger gets: the bootstrap fetches `ezpkg` itself.
@@ -147,11 +152,15 @@ def main() -> int:
     Returns:
     * (`int`): The exit status.
     """
-    # A target, and perhaps a version.
+    # Perhaps a Python, then a target, and perhaps a version.
     arguments: list[str] = sys.argv[1:]
+    python: str = sys.executable
+    if arguments[:1] == ["--python"] and len(arguments) >= 2:
+        python = arguments[1]
+        arguments = arguments[2:]
     if not 1 <= len(arguments) <= 2 or arguments[0] not in JSON_APIS:
-        print("usage: release_check.py {testpypi|pypi} [VERSION]",
-              file=sys.stderr)
+        print("usage: release_check.py [--python PYTHON] "
+              "{testpypi|pypi} [VERSION]", file=sys.stderr)
         return 2
     target: str = arguments[0]
     info: dict[str, Any]
@@ -205,7 +214,7 @@ def main() -> int:
 
     # No terminal, so the download prompt answers yes by itself.
     done: subprocess.CompletedProcess[str] = subprocess.run(
-        [sys.executable, "quick_start.py"], cwd=run, env=environment,
+        [python, "quick_start.py"], cwd=run, env=environment,
         stdin=subprocess.DEVNULL, capture_output=True, text=True,
         check=False)
     sys.stderr.write(done.stderr)

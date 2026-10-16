@@ -34,3 +34,18 @@
   `D:\a\_temp\release_check-*\home\.ezpkg\versions\...-win-amd64`, so
   `USERPROFILE` gave it the fresh home.  The prompt answered itself, as
   expected with no terminal (and on Windows, always: `T.qvm`).
+
+## 2026-10-16: A job for `I.btosc`
+
+* Wayne: find out whether python.org's macOS Python really fails, then
+  replan.  `check.yml` job `python-org` (`macos-latest`,
+  `continue-on-error`): installs python.org's `python-3.14.8` and
+  `3.15.0` `macos11.pkg` with `sudo installer`, never runs `Install
+  Certificates.command`, prints `ssl.get_default_verify_paths()`, the
+  framework's `etc/openssl/` and any `SSL_` variables, then unsets
+  `SSL_CERT_FILE`/`SSL_CERT_DIR` and runs `release_check.py --python`
+  that Python.  `--python` is new: `release_check.py` fetches with
+  `urllib` itself, so it runs on `setup-python`'s 3.12.
+* Proposed fix if it fails (not decided): `nopip6` falls back to
+  `curl` (Keychain) when `urlopen` fails; about three lines.
+* Python 3.15.0 is out; the main matrix stops at 3.14.
