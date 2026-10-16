@@ -25,3 +25,5 @@ Every release of `EZPkg` follows the same procedure:
    (`gh workflow run release.yml --ref vX.Y.Z -f target=pypi`, then
    approval), and `./release_check.py pypi` verifies that nothing
    changed (`T.utpat`).
+
+Steps 3 and 5 run on Windows and macOS as well as Linux (`T.towam`).
