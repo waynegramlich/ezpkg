@@ -24,3 +24,13 @@
 * Next: Wayne commits and pushes (a `workflow_dispatch` workflow must
   be on `main` to start), then `gh workflow run check.yml -f
   target=testpypi`.
+
+## 2026-10-16: The first run passed everywhere
+
+* Wayne committed and pushed (`3b192ab`).  Run 38973983823 (`gh
+  workflow run check.yml -f target=testpypi`), `ezpkg
+  0.0.1.dev202610160145`: all 16 jobs passed, in under a minute.
+* Checked in the `windows-latest` 3.11 log: `cowsay 6.1` loaded from
+  `D:\a\_temp\release_check-*\home\.ezpkg\versions\...-win-amd64`, so
+  `USERPROFILE` gave it the fresh home.  The prompt answered itself, as
+  expected with no terminal (and on Windows, always: `T.qvm`).
