@@ -48,3 +48,22 @@
 * Wayne: `I.wmau` (Windows and macOS are untried) has to be closed
   before shipping to pypi.org (`T.utpat`).  Work on it starts after
   `T.kdaiis` closes.
+
+## 2026-10-15: State at the end of the day
+
+* Children: `T.rtg` 7.1, `T.suh2` 7.2, `T.uttat` 7.4 and `T.p2rc` 7.7
+  closed; `T.wrw` 7.3 open (Wayne keeps it open; the `pypi`
+  environment, tag ruleset and pypi.org publisher belong to
+  `T.utpat`); `T.kdaiis` 7.5 open, nearly done (see its
+  `Context.md`); `T.utpat` 7.6 pending.
+* Release procedure (this `Details.md`) works end to end on
+  test.pypi.org: six rehearsal uploads so far, newest
+  `0.0.1.dev202610160145`.  Claude starts and approves `testpypi` runs
+  on its own (Wayne, 2026-10-15); a `pypi` run needs Wayne's approval.
+* Before `T.utpat`: `I.wmau` (Windows and macOS) must be closed
+  (Wayne).
+* `PyPI_Via_GitHub.md` (git-ignored) is the reusable write-up; keep
+  it current.
+* Commits now carry `Assisted-by: Claude Code:claude-opus-5-5` from
+  `git_hooks/` (`core.hooksPath`); update the model there when it
+  changes.
