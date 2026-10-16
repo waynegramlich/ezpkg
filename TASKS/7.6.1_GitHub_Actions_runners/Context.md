@@ -8,3 +8,19 @@
 * Needs a way to answer the download prompt without a terminal.
 * Runners' Pythons come with certificates, so `I.btosc` still needs a
   real Mac (`T.fwrm`).
+
+## 2026-10-16: Written
+
+* `.github/workflows/check.yml`: by hand only (Wayne: keep release runs
+  at two minutes for now).  Matrix `ubuntu-latest`, `windows-latest`,
+  `macos-latest`, `macos-15-intel` (macOS 13 runners were retired
+  December 2025; Intel ends with macOS 15 in fall 2027) by Python
+  3.11-3.14, `fail-fast: false`.  Inputs reach the script through
+  `env`.  `TMPDIR` is `runner.temp`, so a failure uploads
+  `release_check-*` (with `include-hidden-files`, for `.ezpkg`).
+  `GH_TOKEN` and `actions: read` let an empty `version` use `gh`.
+* `release_check.py` sets `USERPROFILE` as well as `HOME`.  Still
+  passes locally against test.pypi.org.
+* Next: Wayne commits and pushes (a `workflow_dispatch` workflow must
+  be on `main` to start), then `gh workflow run check.yml -f
+  target=testpypi`.

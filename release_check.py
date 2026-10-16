@@ -183,7 +183,10 @@ def main() -> int:
         and key not in ("PYTHONPATH", "VIRTUAL_ENV")}
     constraint: Path = scratch / "constraint.txt"
     constraint.write_text(f"ezpkg=={version}\n", encoding="utf-8")
-    environment.update(HOME=str(home), PIP_CONSTRAINT=str(constraint))
+    # `Path.home()` reads `HOME`, except on Windows, where it reads
+    # `USERPROFILE`.
+    environment.update(HOME=str(home), USERPROFILE=str(home),
+                       PIP_CONSTRAINT=str(constraint))
 
     # For test.pypi.org, the one wheel is fetched here and offered to
     # `pip` as a local file.

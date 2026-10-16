@@ -1,0 +1,68 @@
+# Run the Quick Start as a new user on Linux, Windows and macOS, for
+# every supported Python, against a published `ezpkg`.
+#
+# Started by hand, from the Actions tab or with
+#     gh workflow run check.yml -f target=testpypi -f version=VERSION
+# With no `version`, `release_check.py` asks `gh` which version the
+# newest successful `release TARGET` run built.  Uploads nothing, so it
+# needs no environment and no approval.  See `T.gar`.
+
+name: check
+run-name: check ${{ inputs.target }} ${{ inputs.version }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: Which index to check
+        required: true
+        type: choice
+        options:
+          - testpypi
+          - pypi
+      version:
+        description: The ezpkg version (default the newest release run's)
+        required: false
+        type: string
+
+# Reading the repository, and the release runs for `gh run download`.
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  quick-start:
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - windows-latest
+          - macos-latest     # Apple Silicon.
+          - macos-15-intel   # The last Intel image, until fall 2027.
+        python: ["3.11", "3.12", "3.13", "3.14"]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python }}
+      # The inputs pass through the environment, never into the script.
+      # `TMPDIR` puts the scratch directory where a failure can keep it.
+      - run: python release_check.py "$TARGET" $VERSION
+        shell: bash
+        env:
+          TARGET: ${{ inputs.target }}
+          VERSION: ${{ inputs.version }}
+          GH_TOKEN: ${{ github.token }}
+          TMPDIR: ${{ runner.temp }}
+      # `release_check.py` leaves its scratch directory when it fails;
+      # `.ezpkg` is hidden, hence `include-hidden-files`.
+      - if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: scratch-${{ matrix.os }}-${{ matrix.python }}
+          path: ${{ runner.temp }}/release_check-*
+          include-hidden-files: true
