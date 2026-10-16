@@ -5328,6 +5328,25 @@ class InstallTest(unittest.TestCase):
         self.assertIn("disagree", seen)
         self.assertEqual(program.read_text(), before)
 
+    def test_a_name_the_index_lacks_is_not_offered(self) -> None:
+        """A misspelt import is caught before anything is offered.
+
+        The index is asked first, so no question is asked about a
+        package that does not exist (Wayne's dogfood, 2026-10-15).
+        """
+        # Nothing to answer but the first question.
+        program: Path = self.synced_program(
+            "misspelt", '["widget"]', "import bogus_package")
+        before: str = program.read_text()
+        seen: str = self.answer_on_a_terminal(program, b"o\n")
+        flat: str = " ".join(seen.split())
+        self.assertIn("line 12: `bogus_package` is imported, but no package "
+                      "of that name is on the index; check the spelling",
+                      flat)
+        self.assertNotIn('Add "bogus_package"?', flat)
+        self.assertIn("Nothing to change.", seen)
+        self.assertEqual(program.read_text(), before)
+
     def test_a_wrong_guess_changes_nothing(self) -> None:
         """A package that is not what its name says is refused.
 
@@ -6566,6 +6585,24 @@ class MetadataTest(unittest.TestCase):
         self.assertIsNone(ezpkg.pin_dependencies("print('ran')\n", pins))
         self.assertIsNone(ezpkg.pin_dependencies(
             '# /// script\n# requires-python = ">=3.11"\n# ///\n', pins))
+
+    def test_failure_reason_finds_pips_error(self) -> None:
+        """`pip`'s `ERROR:` line, not a warning ahead of it.
+
+        Found dogfooding: an old `.egg` on the system made `pip` warn
+        first, and that warning was shown as the reason.
+        """
+        # A warning, then the error that matters.
+        error: RuntimeError = RuntimeError(
+            "could not fetch bogus into /tmp/x: DEPRECATION: Loading egg "
+            "at /usr/lib/old.egg is deprecated.\n"
+            "ERROR: Could not find a version that satisfies the "
+            "requirement bogus\n"
+            "ERROR: No matching distribution found for bogus")
+        self.assertEqual(ezpkg.failure_reason(error),
+                         "ERROR: No matching distribution found for bogus")
+        self.assertEqual(ezpkg.failure_reason(RuntimeError("one\ntwo")),
+                         "one")
 
     def test_with_dependency_list_replaces_the_array(self) -> None:
         """A short array stays on one line; a long one, one per line.

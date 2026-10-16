@@ -58,6 +58,8 @@ import textwrap
 import time
 import tokenize
 import tomllib
+import urllib.error
+import urllib.request
 import zipapp
 import zipfile
 from collections.abc import Collection, Mapping, Sequence
@@ -1158,6 +1160,66 @@ def with_type_ignores(text: str, adding: Collection[str],
     return "\n".join(lines), given
 
 
+def index_has(name: str) -> bool | None:
+    """Ask the package index whether it has a project of this name.
+
+    The index is the one `pip` would use: `PIP_INDEX_URL`, else PyPI,
+    then any `PIP_EXTRA_INDEX_URL`.  Asked before offering to add a
+    package whose name was only guessed, so that a misspelt import is
+    caught before anything is promised (Wayne's dogfood, 2026-10-15).
+    See `T.kdaiis`.
+
+    Arguments:
+    * `name` (`str`):
+      A distribution name.
+
+    Returns:
+    * (`bool | None`): True if some index has it, False if every one
+      said it has not, and `None` when that could not be found out,
+      as with no network.
+    """
+    # PEP 503 project pages, one per index, until one has it.
+    indexes: list[str] = [os.environ.get("PIP_INDEX_URL", "")
+                          or "https://pypi.org/simple"]
+    indexes += os.environ.get("PIP_EXTRA_INDEX_URL", "").split()
+    project: str = re.sub(r"[-_.]+", "-", name).lower()
+    answer: bool | None = False
+    index: str
+    for index in indexes:
+        try:
+            with urllib.request.urlopen(
+                    f"{index.rstrip('/')}/{project}/", timeout=10):
+                return True
+        except urllib.error.HTTPError as error:
+            if error.code != 404:
+                answer = None
+        except (OSError, ValueError):
+            answer = None
+    return answer
+
+
+def failure_reason(error: BaseException) -> str:
+    """Return the line of a failure that says why, for a message.
+
+    `pip` puts warnings ahead of its error, such as one about an old
+    `.egg` somewhere in the system's Python, so the first line is often
+    not the reason; its `ERROR:` line is.
+
+    Arguments:
+    * `error` (`BaseException`):
+      What was raised, perhaps with `pip`'s output in it.
+
+    Returns:
+    * (`str`): The last `ERROR:` line, else the first line.
+    """
+    # `pip` says `ERROR:` before the reason that matters.
+    lines: list[str] = [line.strip() for line in str(error).splitlines()
+                        if line.strip()]
+    errors: list[str] = [line[line.index("ERROR:"):] for line in lines
+                         if "ERROR:" in line]
+    return (errors or lines or ["failed"])[-1 if errors else 0]
+
+
 # The answers to a yes-or-no question.
 YES_NO: dict[str, str] = {"y": "yes", "yes": "yes", "n": "no", "no": "no"}
 
@@ -1559,6 +1621,9 @@ class Discrepancy:
     * `used` (`set[str]`):
       The modules whose packages are declared, for
       `with_type_ignores`.
+    * `guessed` (`set[str]`):
+      The additions whose package names were guessed, which the index
+      is asked about before they are offered.
     """
 
     program: Path
@@ -1569,6 +1634,7 @@ class Discrepancy:
     additions: list[tuple[int, str, str]]
     removals: list[int]
     used: set[str]
+    guessed: set[str] = dataclasses.field(default_factory=set)
 
     def arrange(self, added: Collection[str],
                 removed: Collection[int]) -> list[str]:
@@ -2425,6 +2491,14 @@ class EZPkg:
             reply: str
             if kind == "add":
                 _, module, package = found.additions[which]
+                if (package in found.guessed
+                        and index_has(package) is False):
+                    writer.write(
+                        f"line {line}: `{module}` is imported, but no "
+                        f"package of that name\nis on the index; check "
+                        f"the spelling, or add the right package to\n"
+                        f"dependencies by hand.\n")
+                    continue
                 reply = self.choose(
                     opened, f"line {line}: `{module}` is imported, but not "
                     f'in dependencies.\nAdd "{package}"? [y=>Yes/n=>No] ',
@@ -2486,7 +2560,7 @@ class EZPkg:
                                        for package, module in modules.items()})
             write_program(program, edited, encoding, crlf)
         except (RuntimeError, ValueError, OSError) as error:
-            reason: str = (str(error).strip().splitlines() or ["failed"])[0]
+            reason: str = failure_reason(error)
             hint: str = ("; with an approvals file, run it with "
                          "EZPKG_APPROVE=write" if self.approved() else "")
             writer.write(f"ezpkg: {program.name}: nothing changed: "
@@ -2569,6 +2643,7 @@ class EZPkg:
         additions: list[tuple[int, str, str]] = []
         used: set[str] = set()
         adding: set[str] = set()
+        guessed: set[str] = set()
         module: str
         line: int
         optional: bool
@@ -2594,6 +2669,7 @@ class EZPkg:
                 else:
                     packages = [guess]
                     normal = {normal_name(guess)}
+                    guessed.add(guess)
             if index is not None:
                 used.add(module)
                 if index not in placed_by:
@@ -2613,7 +2689,7 @@ class EZPkg:
             if index not in placed_by and name in installed
             and name not in keep]
         return Discrepancy(program, entries, lines, order, placed_by,
-                           additions, removals, used)
+                           additions, removals, used, guessed)
 
     def with_unimported(self, text: str, adding: Sequence[str]) -> str | None:
         """Return a program with names added to `[tool.ezpkg] unimported`.

@@ -52,3 +52,18 @@
 * README rewritten for the new design and applied (Wayne edited step
   4).  Open: the 85-column question line (choices on their own line?),
   and "which is why step 4 lists it" in the paragraph after "That's it".
+
+## 2026-10-15: Dogfood fixes
+
+* Wayne's dogfood (`import bogus_package`): the guess was offered and
+  fetched before anyone knew it did not exist, and the failure showed
+  `pip`'s first line, a DEPRECATION warning about an old `.egg` in the
+  system Python, instead of its `ERROR:` line.  Fixed: `index_has`
+  asks the index (PIP_INDEX_URL, else PyPI, then extras) before a
+  guessed addition is offered, and says "no package of that name is on
+  the index" instead of asking; `failure_reason` picks the `ERROR:`
+  line.  Tests: `test_a_name_the_index_lacks_is_not_offered`,
+  `test_failure_reason_finds_pips_error`.
+* The `yaml` case worked in Wayne's run: `"PyYAML"` added, the mypy
+  comment copied.  He dogfooded on the project's `quick_start.py`,
+  which he will restore.
