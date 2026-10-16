@@ -68,5 +68,12 @@ after asking, keeping encoding and line endings (`T.srdisb`).
 9. **With an approvals file**, an addition is refused by the approvals
    check like any new package; the message points to
    `EZPKG_APPROVE=write`.
+11. **Version ranges (Wayne, 2026-10-15).**  An entry `EZPkg` adds
+    gets a range from the version it ran with: always a floor
+    (`>=X.Y.Z`), and a conservative cap: `<0.(x+1)` for `0.x`,
+    `<(major+1)` for majors 1-9, none from 10 (calendar versions such as
+    `pip 25.2` and `certifi 2025.8.3`).  So additions are fetched and
+    proved before the changes are shown, and the display shows the real
+    range.  Entries the author wrote are never changed.
 10. **The bootstrap does not change.**  Shipped through test.pypi.org
     (`./release_check.py testpypi`), then `T.utpat`.

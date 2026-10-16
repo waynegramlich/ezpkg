@@ -1220,6 +1220,39 @@ def failure_reason(error: BaseException) -> str:
     return (errors or lines or ["failed"])[-1 if errors else 0]
 
 
+def version_range(name: str, version: str) -> str:
+    """Return a requirement for a package, from the version it ran with.
+
+    The floor is the version fetched, so a program never meets an older
+    one than it was written against.  The cap is conservative (Wayne,
+    2026-10-15): the next minor release for `0.x`, where minor releases
+    may break things, and the next major for majors 1 to 9.  A major of
+    10 or more gets no cap, since that is where calendar versions live
+    (`pip 25.2`, `certifi 2025.8.3`) and fast-moving projects
+    (`setuptools 80`), whose next "major" is no warning.  See
+    `T.kdaiis`.
+
+    Arguments:
+    * `name` (`str`):
+      The distribution name, as it will be written.
+    * `version` (`str`):
+      The version that was fetched, such as `2.32.3`.
+
+    Returns:
+    * (`str`): Such as `requests>=2.32.3,<3`, or the name alone when the
+      version cannot be read.
+    """
+    # Only the leading release numbers decide the cap.
+    found: re.Match[str] | None = re.match(r"(\d+)(?:\.(\d+))?", version)
+    if found is None:
+        return name
+    major: int = int(found.group(1))
+    minor: int = int(found.group(2) or 0)
+    cap: str = (f",<0.{minor + 1}" if major == 0
+                else f",<{major + 1}" if major < 10 else "")
+    return f"{name}>={version}{cap}"
+
+
 # The answers to a yes-or-no question.
 YES_NO: dict[str, str] = {"y": "yes", "yes": "yes", "n": "no", "no": "no"}
 
@@ -2549,12 +2582,39 @@ class EZPkg:
             if not reply:
                 return asking
 
-        # The whole edit, worked out before it is shown.
+        # The additions are fetched and proved first, since the versions
+        # that arrive decide what is written: each gets a range from the
+        # version it ran with (`version_range`).
         final: list[str] = found.arrange(added, removed)
         if final == found.entries and not keeping and not comment:
             writer.write("Nothing to change.\n")
             self.keep(record, kept, asked=fingerprint, answer=answer)
             return asking
+        modules: dict[str, str] = {package: module for _, module, package
+                                   in found.additions if package in added}
+        try:
+            self.provide(final, argv, {normal_name(package): module
+                                       for package, module in modules.items()})
+        except (RuntimeError, ValueError) as error:
+            reason: str = failure_reason(error)
+            hint: str = ("; with an approvals file, run it with "
+                         "EZPKG_APPROVE=write" if self.approved() else "")
+            writer.write(f"ezpkg: {program.name}: nothing changed: "
+                         f"{reason}{hint}\n")
+            self.keep(record, kept, asked=fingerprint, answer=answer)
+            return asking
+        fetched: tuple[list[str], list[str]] | None = self.remember(
+            self.request_for(final))
+        ranged: dict[str, str] = {}
+        for package in modules:
+            try:
+                ranged[package] = version_range(
+                    package, importlib.metadata.version(package))
+            except importlib.metadata.PackageNotFoundError:
+                ranged[package] = package
+        final = [ranged.get(entry, entry) for entry in final]
+
+        # The whole edit, worked out before it is shown.
         source: str
         encoding: str
         crlf: bool
@@ -2570,8 +2630,6 @@ class EZPkg:
             writer.write(f"ezpkg: {program.name}: cannot edit its script "
                          f"block; change `dependencies` by hand\n")
             return asking
-        modules: dict[str, str] = {package: module for _, module, package
-                                   in found.additions if package in added}
         commented: list[str]
         edited, commented = with_type_ignores(
             edited, {*modules.values(), *(["ezpkg"] if comment else [])},
@@ -2589,19 +2647,17 @@ class EZPkg:
             self.keep(record, kept, asked=fingerprint, answer=answer)
             return asking
 
-        # Fetched and proved, then written once.
+        # Written once.  What was just fetched answers the request the
+        # ranges make, so the next run does not fetch it all again.
         try:
-            self.provide(final, argv, {normal_name(package): module
-                                       for package, module in modules.items()})
             write_program(program, edited, encoding, crlf)
-        except (RuntimeError, ValueError, OSError) as error:
-            reason: str = failure_reason(error)
-            hint: str = ("; with an approvals file, run it with "
-                         "EZPKG_APPROVE=write" if self.approved() else "")
+        except OSError as error:
             writer.write(f"ezpkg: {program.name}: nothing changed: "
-                         f"{reason}{hint}\n")
+                         f"{error}\n")
             self.keep(record, kept, asked=fingerprint, answer=answer)
             return asking
+        if fetched is not None:
+            self.remember(self.request_for(final), *fetched)
 
         # Reported, and remembered as settled.
         index: int
@@ -2613,8 +2669,8 @@ class EZPkg:
                         else f" (for {module})")
             also: str = (", and its mypy comment" if module in commented
                          else "")
-            writer.write(f'ezpkg: {program.name}: added "{package}" to '
-                         f"dependencies{why}{also}\n")
+            writer.write(f'ezpkg: {program.name}: added "{ranged[package]}" '
+                         f"to dependencies{why}{also}\n")
         for entry in keeping:
             writer.write(f'ezpkg: {program.name}: kept "{entry}" as '
                          f"unimported\n")

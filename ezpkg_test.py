@@ -5212,11 +5212,11 @@ class InstallTest(unittest.TestCase):
                       "[o=>Once/a=>Always/n=>No/d=>Don't ask again]", flat)
         self.assertIn("line 12: `sprocket` is imported, but not in "
                       'dependencies. Add "sprocket"?', flat)
-        self.assertIn('line 3 "widget", add "sprocket", ]', flat)
-        self.assertIn('added "sprocket" to dependencies', seen)
+        self.assertIn('line 3 "widget", add "sprocket>=2.0.0,<3", ]', flat)
+        self.assertIn('added "sprocket>=2.0.0,<3" to dependencies', seen)
         self.assertNotIn("mypy comment", seen)
         self.assertIn("ran", seen)
-        self.assertEqual(self.declared_now(program), ["widget", "sprocket"])
+        self.assertEqual(self.declared_now(program), ["widget", "sprocket>=2.0.0,<3"])
 
         # Settled, so the next run says nothing at all.
         done: subprocess.CompletedProcess[str] = self.run_program(program)
@@ -5231,7 +5231,7 @@ class InstallTest(unittest.TestCase):
             "commented", '["widget"]', "import sprocket", comment)
         seen: str = self.answer_on_a_terminal(program, b"o\ny\ny\n")
         self.assertIn("and the mypy comment on its import of sprocket", seen)
-        self.assertIn('added "sprocket" to dependencies, and its mypy '
+        self.assertIn('added "sprocket>=2.0.0,<3" to dependencies, and its mypy '
                       "comment", seen)
         self.assertIn(f"\nimport sprocket{comment}\n", program.read_text())
 
@@ -5344,7 +5344,7 @@ class InstallTest(unittest.TestCase):
             "import sprocket\n", "import sprocket\nimport needy\n"))
         seen = self.answer_on_a_terminal(program, b"y\ny\n")
         self.assertNotIn("See the discrepancy list?", seen)
-        self.assertIn('added "needy" to dependencies', seen)
+        self.assertIn('added "needy>=1.0.0,<2" to dependencies', seen)
 
         # Don't ask again, confirmed: named, never asked.
         program = self.synced_program("never", '["widget"]', "import sprocket")
@@ -6616,6 +6616,21 @@ class MetadataTest(unittest.TestCase):
         self.assertIsNone(ezpkg.pin_dependencies("print('ran')\n", pins))
         self.assertIsNone(ezpkg.pin_dependencies(
             '# /// script\n# requires-python = ">=3.11"\n# ///\n', pins))
+
+    def test_version_range_is_conservative(self) -> None:
+        """A floor always; a cap only where a version number means it.
+
+        The next minor for `0.x`, the next major for majors 1 to 9, and
+        none from 10, where calendar versions live.  See `T.kdaiis`.
+        """
+        # One of each kind.
+        for version, expected in (
+                ("2.32.3", "x>=2.32.3,<3"), ("0.9.1", "x>=0.9.1,<0.10"),
+                ("6.0", "x>=6.0,<7"), ("25.2", "x>=25.2"),
+                ("2025.8.3", "x>=2025.8.3"), ("1.0.0rc1", "x>=1.0.0rc1,<2"),
+                ("unknown", "x")):
+            with self.subTest(version=version):
+                self.assertEqual(ezpkg.version_range("x", version), expected)
 
     def test_failure_reason_finds_pips_error(self) -> None:
         """`pip`'s `ERROR:` line, not a warning ahead of it.

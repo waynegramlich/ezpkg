@@ -278,21 +278,25 @@ Add "PyYAML"? [y=>Yes/n=>No] y
 plugin that another package loads for itself.  It is listed in Part 1
 as `[tool.ezpkg] unimported`, and is not raised again.
 
-Then the changes to `dependencies` are shown, next to the unchanged
-entries around them, and you approve them once:
+Then the packages to add are downloaded (asking first, as any download
+does), and the changes to `dependencies` are shown, next to the
+unchanged entries around them, and you approve them once:
 
 ```
 dependencies in prog.py:
    line 5     "widget",
    remove     "rich",
-   add        "requests",
-   add        "PyYAML",
+   add        "requests>=2.32.3,<3",
+   add        "PyYAML>=6.0.2,<7",
               ]
 Make these changes? [y=>Yes/n=>No] y
 ezpkg: prog.py: removed "rich" from dependencies
-ezpkg: prog.py: added "requests" to dependencies
-ezpkg: prog.py: added "PyYAML" to dependencies (for yaml)
+ezpkg: prog.py: added "requests>=2.32.3,<3" to dependencies
+ezpkg: prog.py: added "PyYAML>=6.0.2,<7" to dependencies (for yaml)
 ```
+
+Each package added gets a range of versions, starting at the version
+that was downloaded; see [Choosing Versions](#choosing-versions).
 
 `EZPkg` only ever changes `dependencies`, never your imports, with one
 exception: if your other imports carry a `# type: ignore` comment for
@@ -339,6 +343,16 @@ https://packaging.python.org/en/latest/specifications/dependency-specifiers/)
 specification.  `pip` resolves the whole list at once, so it notices when
 two packages disagree about a third, which is very hard to get right by
 hand.
+
+When `EZPkg` adds a package for you (see [Keeping `dependencies` in
+Sync](#keeping-dependencies-in-sync)), it writes a range for you too.
+The lower end is the version your program ran with, so it never meets an
+older one.  The upper end is cautious: before the next minor release for
+a version below 1 (`>=0.9.1,<0.10`), before the next major release for
+versions 1 to 9 (`>=2.32.3,<3`), and none at all for 10 or more
+(`>=25.2`), since such numbers are usually dates, as in `certifi
+2025.8.3`, rather than promises.  A string you wrote yourself is never
+changed.
 
 ## Releasing a Program
 

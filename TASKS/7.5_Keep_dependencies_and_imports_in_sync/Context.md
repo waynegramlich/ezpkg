@@ -75,3 +75,9 @@
   with new rules; `dependency_fingerprint` now includes `__version__`.
 * `I.uedepi` filed: a `uv` export drops an `ezpkg` the program imports.
 * Quick suite: 271 tests OK, 18 skipped.
+* Version ranges (`version_range`, design item 11): additions are now
+  fetched and proved before the display, which shows `add
+  "requests>=2.32.3,<3"`.  The ranged request is recorded against what
+  was fetched (`remember`), so the next run does not fetch again.
+  README updated (examples; a paragraph at the end of Choosing
+  Versions).
