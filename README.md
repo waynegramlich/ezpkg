@@ -508,8 +508,6 @@ the `except` at the bottom stops the program with
   * If `ezpkg` imported, or `~/.ezpkg/ezpkg/` already exists,
     the next three steps are skipped.  They run only the first time any
     program uses `EZPkg` on a machine.
-<!-- Claude proposes adding this bullet here (README lines 509-510 at
-the time of writing), for `nopip6`'s new `def g(u)` (`I.btosc`):
 * `def g(u)`:
   * This fetches a URL for the next two steps.  If Python cannot, it
     asks `curl` instead.  That happens with the Python installer from
@@ -517,7 +515,6 @@ the time of writing), for `nopip6`'s new `def g(u)` (`I.btosc`):
     that it is really talking to PyPI) until its
     `Install Certificates.command` has been run.  Every Mac has `curl`,
     which uses the Mac's own certificates.
--->
 * `s = "choose pip"`:
   * This asks [PyPI](https://pypi.org/) for the newest `pip` wheel that
     the running Python can use.

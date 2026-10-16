@@ -87,3 +87,21 @@
   `continue-on-error` stays until both pass.
 * `release_check.py` runs the checkout's `quick_start.py`, so the
   check tests `nopip6` without a new upload.
+
+## 2026-10-16: `nopip6` passes everywhere
+
+* Run 38977835683 on `2304916`: all 22 jobs passed (20 in the matrix,
+  Python 3.15 included, and both `python-org` jobs).  Both python.org
+  Pythons had `cafile=None` and an empty `etc/openssl/`, yet loaded
+  `cowsay 6.1` from the fresh home: the `curl` fallback works on a
+  real Mac Python without certificates.
+* Left: drop `continue-on-error` from `python-org`; close `I.btosc`
+  (Wayne); a test.pypi.org upload carrying the new `BOOTSTRAPS`.
+
+## 2026-10-16: `nopip6` rehearsed on test.pypi.org
+
+* `continue-on-error` dropped from `python-org` (not yet pushed).
+  `I.btosc` closed (Wayne).
+* Release run 38978541585 (`2304916`, approved by Claude): `ezpkg
+  0.0.1.dev202610162255`.  `./release_check.py testpypi` passed here;
+  `check.yml` run 38978658455 against that version: 22 of 22 passed.
