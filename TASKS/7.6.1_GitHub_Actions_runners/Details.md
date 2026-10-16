@@ -16,7 +16,7 @@ the `ezpkg` just published.
 * A matrix of runners and Pythons:
   * `ubuntu-latest`, `windows-latest`, `macos-latest` (Apple
     Silicon), and an Intel macOS runner while GitHub still offers one.
-  * Python 3.11, 3.12, 3.13 and 3.14, from `actions/setup-python`.
+  * Python 3.11 to 3.15, from `actions/setup-python`.
   * Every combination runs, even after one fails
     (`fail-fast: false`).
 * Each job runs `python release_check.py TARGET VERSION`, and keeps

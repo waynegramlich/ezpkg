@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Fifteen ways to get a package onto `sys.path` with nothing preinstalled.
+"""Sixteen ways to get a package onto `sys.path` with nothing preinstalled.
 
 Run it with no arguments: `python3 bootstrap.py`.  It runs every case
 three times and prints the table below to standard output, so
@@ -80,7 +80,7 @@ steer them at a local server.  A pasted case carries the literal
 The substitution costs a case no lines, so the `paste` column is
 unchanged.
 
-Measuring fifteen cases against one `~/.ezpkg` would be wrong: the
+Measuring sixteen cases against one `~/.ezpkg` would be wrong: the
 second case onwards would find `coverage` already on disk and report a
 warm time as its cold time.  Each run therefore gets its own `HOME`,
 which `pathlib.Path.home()` honours -- the isolation is in the
@@ -125,6 +125,9 @@ user would type.  The real `~/.ezpkg` is never touched.
 |        | first         |         |       |       |        |        |        |
 | nopip5 | as nopip4,    | 4       | 32    | 35    | 3.53 s | 0.16 s | 3538   |
 |        | pip to stderr |         |       |       |        |        |        |
+| nopip6 | as nopip5,    | 4       | 38    | 41    | 3.12 s | 0.16 s | 3538   |
+|        | curl if no    |         |       |       |        |        |        |
+|        | certs         |         |       |       |        |        |        |
 +--------+---------------+---------+-------+-------+--------+--------+--------+
 
 What the columns mean, in the order they appear above:
@@ -177,7 +180,7 @@ What the columns mean, in the order they appear above:
 
 * **warm** -- wall clock for the second run, when the package is already
   on disk.  Median of `REPETITIONS` runs.  It is ~0.14 s for every case
-  because all fifteen then do the same thing: one existence check, one
+  because all sixteen then do the same thing: one existence check, one
   `sys.path.insert`, and one import.  Cold cost is paid once per
   machine; warm cost is paid on every run of the program, forever.
 
@@ -225,7 +228,7 @@ load pip at all.
 `nopip2` exists to answer a question about the instructions rather than
 to be shipped.  Those asked for a venv built with `venv`, no spawning
 of `python3 -m pip install`, only `venv` and standard libraries, and
-an `importlib` import.  `nopip2` is the only one of the fifteen that
+an `importlib` import.  `nopip2` is the only one of the sixteen that
 does all four, and it costs 57 pasted lines against `nopip1`'s 51.  The
 extra 6 lines and 32 KB buy a virtual environment that nothing then
 reads, which is finding 3 of the log book arriving from yet another
@@ -312,6 +315,15 @@ no line.  Its row was measured beside a fresh `nopip4` run, 3.53 s
 against 3.75 s cold and 0.16 s against 0.15 s warm, the same within
 the noise.  Every case above was renamed with the project, so all of
 them install into `~/.ezpkg`.
+
+`nopip6` has shipped since 2026-10-16.  It is `nopip5` with a fallback
+for a Python that has no certificates, as python.org's macOS Python
+has none until its `Install Certificates.command` is run: when
+`urlopen` fails, `curl` fetches the same URL, and if that fails too
+the `urllib` error is reported (`I.btosc`).  It costs six lines.  Its
+row was measured beside a fresh `nopip5` run, 3.12 s against 3.19 s
+cold and 0.16 s against 0.14 s warm, the same within the noise; a
+machine with certificates never reaches `curl`.
 
 MIT No Attribution
 
@@ -934,6 +946,63 @@ def nopip5() -> None:
         raise SystemExit(f"{PACKAGE}: {s} failed: {x!r}")  # Do not edit try block!
 
 
+def nopip6() -> None:
+    """As nopip5, but `curl` fetches `pip` when `urllib` cannot.
+
+    python.org's macOS Python reads no Keychain, and has no certificates
+    at all until its `Install Certificates.command` has been run, so
+    `nopip5` stopped there at its first request with
+    `CERTIFICATE_VERIFY_FAILED` (seen on a GitHub runner, 2026-10-16).
+    Every Mac has `/usr/bin/curl`, which uses the Keychain, so a failed
+    `urlopen` tries `curl` for the same URL; if that fails too, or there
+    is no `curl`, the `urllib` error is the one reported.  Once `pip`
+    has arrived nothing else needs it, since `pip` has certificates of
+    its own.  See `I.btosc` and `T.gar`.
+
+    Raises:
+    * `SystemExit`:
+      If any step fails, with one line saying what failed and why.
+    """
+    # Ensure `ezpkg` is downloaded.
+    import hashlib
+    import json
+    import subprocess
+    import urllib.request as req
+    try:  # Do not edit try block!  See https://pypi.org/project/ezpkg/
+        s = "find home"; t = pathlib.Path.home()/".ezpkg"; w = t/"pip.whl"
+        m = None
+        def g(u):  # Fetch u, with curl if this Python has no certificates.
+            try: return req.urlopen(u, None, 60).read()
+            except req.URLError as y: z = y  # As on python.org's macOS Python.
+            try: return subprocess.run(["curl", "-fsSL", u],
+                                       capture_output=True, check=True).stdout
+            except Exception: raise z from None
+        try: m = importlib.import_module(PACKAGE)  # Already importable?
+        except ImportError: pass
+        if m is None and not (t/PACKAGE).is_dir():  # Not installed yet.
+            s = "choose pip"; v = sys.version_info[1]
+            d = json.loads(g(f"{JSON_API}/pip/json"))
+            e = max((e for f in d["releases"].values() for e in f  # Newest pip ...
+                     if e["url"][-4:] == ".whl" and not e["yanked"]
+                     and (q := e["requires_python"] or "")[:4] == ">=3."
+                     and "," not in q and int(q.split(".")[1]) <= v),
+                    key=lambda e: e["upload_time"])  # ... whose floor we meet.
+            s = "download pip"; r = g(e["url"])
+            if hashlib.sha256(r).hexdigest() != e["digests"]["sha256"]:
+                raise ValueError(f"{e['filename']} fails its SHA-256 check")
+            t.mkdir(parents=True, exist_ok=True); p = t/"pip.part"
+            p.write_bytes(r); p.replace(w)  # The rename is atomic.
+            s = f"install {PACKAGE}"; subprocess.run([
+                sys.executable, w/"pip", "install", "--no-input", "-t", t,
+                "--disable-pip-version-check", PACKAGE], check=True, stdout=2)
+        if m is None:
+            s = f"import {PACKAGE}"; sys.path.insert(0, str(t))
+            importlib.invalidate_caches(); m = importlib.import_module(PACKAGE)
+        s = "fetch packages"; m.EZPkg().install(bootstrap="nopip6")
+    except Exception as x:
+        raise SystemExit(f"{PACKAGE}: {s} failed: {x!r}")  # Do not edit try block!
+
+
 def main() -> None:
     """Run the single bootstrap mechanism named by `sys.argv[1]`.
 
@@ -961,7 +1030,7 @@ def main() -> None:
     # neither is idle here: the constructor repairs a single module
     # install so that this case's own `is_dir()` guard recognises it on
     # the following run, and `install()` walks the declared path in every
-    # one of the fifteen shapes, virtual environments included.  This
+    # one of the sixteen shapes, virtual environments included.  This
     # file has no PEP 723 block, so nothing is fetched.  See `I.cctfd` and
     # 6.7.8 of `T.p7i`.  Harness machinery, so `paste` does not count it.
     if hasattr(module, "EZPkg"):
@@ -987,6 +1056,7 @@ MECHANISMS = {
     "nopip3": "no venv, PyPI pip subprocess",
     "nopip4": "as nopip3, importable first",
     "nopip5": "as nopip4, pip to stderr",
+    "nopip6": "as nopip5, curl if no certs",
 }
 # Lines a case needs but does not contain: the three module level
 # imports.  This is the difference between `lines` and `paste`.

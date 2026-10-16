@@ -40,7 +40,7 @@ jobs:
           - windows-latest
           - macos-latest     # Apple Silicon.
           - macos-15-intel   # The last Intel image, until fall 2027.
-        python: ["3.11", "3.12", "3.13", "3.14"]
+        python: ["3.11", "3.12", "3.13", "3.14", "3.15"]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v5
@@ -92,6 +92,9 @@ jobs:
         run: |
           curl -fsSLO "https://www.python.org/ftp/python/$VERSION/python-$VERSION-macos11.pkg"
           sudo installer -pkg "python-$VERSION-macos11.pkg" -target /
+          # The runner image may have run `Install Certificates.command`
+          # for an earlier install of the same minor version.
+          sudo rm -f "/Library/Frameworks/Python.framework/Versions/${VERSION%.*}/etc/openssl/cert.pem"
       - name: Show where it looks for certificates
         run: |
           PY="/Library/Frameworks/Python.framework/Versions/${VERSION%.*}/bin/python3"

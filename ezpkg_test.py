@@ -146,12 +146,13 @@ FLOOR: str = floor()
 PROMPT: str = "go ahead? [y=>Yes/n=>No/a=>Always/?=>Explanation]"
 CONFIRM: str = "Really never ask again? [y=>Yes/n=>No]"
 
-# The case that ships: `nopip5` uses an `ezpkg` that is already
+# The case that ships: `nopip6` uses an `ezpkg` that is already
 # importable, and otherwise fetches a `pip` of its own and runs it as a
 # subprocess, with its output on standard error, so it needs no `pip`
-# on the machine and leaves none of `pip`'s state in the program.  See
-# `T.npp`, `T.ewar` and `T.rp`.
-SHIPPING: str = "nopip5"
+# on the machine and leaves none of `pip`'s state in the program.  It
+# fetches `pip` with `curl` when this Python has no certificates.  See
+# `T.npp`, `T.ewar`, `T.rp` and `I.btosc`.
+SHIPPING: str = "nopip6"
 
 # Which cases the all-case tests exercise by default.  The first cull
 # found that only the four needing no `pip` add anything to coverage
@@ -159,10 +160,12 @@ SHIPPING: str = "nopip5"
 # add nothing beyond `nopip1` and `nopip4`, so those two went too
 # (Wayne).  `nopip5`, which ships, took `nopip4`'s place in 2026-10-12's
 # rename, being the same code with `pip`'s output on standard error.
+# `nopip6` took `nopip5`'s place on 2026-10-16, adding the `curl`
+# fallback for a Python without certificates (`I.btosc`).
 # The others are kept, because keeping them costs nothing, and run
 # under `EZPKG_TEST=COMPLETE`; a test that names a case of its own
 # still runs it.
-FAST_CASES: tuple[str, ...] = ("nopip1", "nopip5")
+FAST_CASES: tuple[str, ...] = ("nopip1", "nopip6")
 
 def platform_tag() -> str:
     """Return a compatibility tag this interpreter would accept.
@@ -268,7 +271,7 @@ def runs_cases(test: Marked) -> Marked:
 
     `ezpkg_coverage.py --per-case` measures the suite once with no
     cases, as a baseline, and then only the marked tests once per case,
-    which is what makes measuring fifteen cases take minutes rather
+    which is what makes measuring sixteen cases take minutes rather
     than hours.  An unmarked test that runs a case would be missing
     from every per-case run, so its coverage would be credited to no
     case at all.  `test_case_runners_are_marked` checks the marking
@@ -5715,7 +5718,7 @@ class HarnessTest(unittest.TestCase):
         path is the one where a case does not work: the numbers are
         meaningless then, and saying which case broke is the only useful
         output.  `subprocess.run` is patched rather than breaking a real
-        index, which makes fifteen cases times three repetitions
+        index, which makes sixteen cases times three repetitions
         instantaneous instead of minutes.
         """
         # Every case "fails", so every case must be named.
@@ -5890,7 +5893,8 @@ class BootstrapCheckTest(unittest.TestCase):
                 self.assertNotEqual(variant, block)
                 self.assertEqual(ezpkg.bootstrap_fingerprint(variant),
                                  same)
-        changed: str = block.replace("None, 30", "None, 31", 1)
+        self.assertIn("None, 60", block)
+        changed: str = block.replace("None, 60", "None, 61", 1)
         self.assertNotEqual(ezpkg.bootstrap_fingerprint(changed), same)
 
     def test_the_four_states(self) -> None:
@@ -5900,13 +5904,14 @@ class BootstrapCheckTest(unittest.TestCase):
                         f"{textwrap.indent(self.shipping(), '    ')}\n")
         venv: ezpkg.EZPkg = ezpkg.EZPkg(self.root / "cache")
         mine: str = ezpkg.bootstrap_fingerprint(self.shipping())
+        self.assertIn("None, 60", program)
         newer: dict[str, str] = {mine: "nopip3 of yesterday",
                                  "0" * 64: "nopip3 of tomorrow"}
         cases: list[tuple[str, dict[str, str], tuple[str, str]]] = [
             (program, dict(ezpkg.BOOTSTRAPS),
              ("current", list(ezpkg.BOOTSTRAPS.values())[-1])),
             (program, newer, ("stale", "nopip3 of yesterday")),
-            (program.replace("None, 30", "None, 31"),
+            (program.replace("None, 60", "None, 61"),
              dict(ezpkg.BOOTSTRAPS), ("edited", "")),
             ("print('no bootstrap here')\n", dict(ezpkg.BOOTSTRAPS),
              ("absent", "")),
@@ -6110,7 +6115,7 @@ class CoverageToolTest(unittest.TestCase):
         """Runs that never finished are named rather than ignored."""
         # An empty directory is missing everything the default selects.
         text: str = ezpkg_coverage.compare(self.root)
-        self.assertIn("No counts for: baseline, nopip1, nopip5.", text)
+        self.assertIn("No counts for: baseline, nopip1, nopip6.", text)
 
     def test_report_keeps_the_counts(self) -> None:
         """`report` saves what `compare` later reads back."""

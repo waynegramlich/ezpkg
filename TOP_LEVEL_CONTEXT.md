@@ -11,7 +11,7 @@ needs live here instead.
 * `quick_start.py`: The Quick Start program, and the authority for the
   bootstrap text.
 * `bootstrap.py`: Every bootstrap this project has tried, one function
-  per case (`nopip1` ... `nopip5`); `nopip5` is the one that ships.
+  per case (`nopip1` ... `nopip6`); `nopip6` is the one that ships.
 * `ezpkg_test.py`: The test suite.
 * `ezpkg_coverage.py`: Coverage with the standard library `trace`
   (`trace_hook/` carries it into child processes).
@@ -36,7 +36,7 @@ match it:
 * Both bootstrap copies in `README.md` (Quick Start, and Enabling
   `EZPkg` for Your Program).
 * `QUICK_START` in `ezpkg.py`.
-* The `nopip5` function in `bootstrap.py` (which spells the package name
+* The `nopip6` function in `bootstrap.py` (which spells the package name
   as `PACKAGE` and the index as `JSON_API`).
 
 `bootstrap_fingerprint` ignores comments and whitespace, so a comment
