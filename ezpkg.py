@@ -2324,6 +2324,69 @@ class EZPkg:
         write_program(where, edited, encoding, crlf)
         return f"resolution date {resolved} written to {where}"
 
+    def offer_ranges(self, asking: Sequence[str]) -> list[str]:
+        """Offer version ranges for the bare entries in Part 1.
+
+        Under `EZPKG_APPROVE=write`, once the approvals are written: each
+        entry that is a name alone gets the range `version_range` makes
+        from the version just approved, so that a `.py` sent without its
+        approvals cannot be handed a much newer package than the one it
+        was tested with ("I used EZPkg and it put the wrong packages
+        in!", Wayne, 2026-10-15).  Development is never interrupted for
+        this, nor is the Quick Start's newcomer.  An entry with any
+        specifier, extra or marker is the author's decision and is left
+        alone.  Asked first, as `stamp` asks; no terminal, no edit.
+        See `T.kdaiis`.
+
+        Arguments:
+        * `asking` (`Sequence[str]`):
+          The requirements the program declared.
+
+        Returns:
+        * (`list[str]`): The requirements now declared.
+        """
+        # The approved version of each bare entry.
+        versions: dict[str, str] = {
+            normal_name(wheel.split("-")[0]): wheel.split("-")[1]
+            for wheel in self.approved() or {}}
+        ranged: list[str] = [
+            version_range(entry, versions[normal_name(entry)])
+            if requirement_name(entry) == entry.strip()
+            and normal_name(entry) in versions else entry
+            for entry in asking]
+        changed: list[str] = [after for before, after
+                              in zip(asking, ranged, strict=True)
+                              if before != after]
+        where: Path | None = main_path()
+        if not changed or where is None:
+            return list(asking)
+
+        # Asked, then written, keeping the encoding and line endings.
+        source: str
+        encoding: str
+        crlf: bool
+        try:
+            source, encoding, crlf = read_program(where)
+        except OSError:
+            return list(asking)
+        edited: str | None = with_dependency_list(source, ranged)
+        if edited is None:
+            return list(asking)
+        entries: str = "entry" if len(changed) == 1 else "entries"
+        listed: str = ", ".join(f'"{entry}"' for entry in changed)
+        if not self.ask(textwrap.fill(
+                f"ezpkg: could I add version ranges to {len(changed)} "
+                f"{entries} of {where.name} ({listed})?", 76)):
+            return list(asking)
+        try:
+            write_program(where, edited, encoding, crlf)
+        except OSError as error:
+            print(f"ezpkg: {where.name}: could not write it ({error})",
+                  file=sys.stderr)
+            return list(asking)
+        print(f"ezpkg: {where.name}: version ranges written", file=sys.stderr)
+        return ranged
+
     def request_for(self, asking: Sequence[str]) -> str:
         """Return the key a request's record is filed under.
 
@@ -4381,6 +4444,11 @@ class EZPkg:
             self.check_python(declaration)
             asked: list[str] = self.declared()
             self.provide(asked, argv)
+
+            # Recording approvals is a release step, so it is also when
+            # bare entries are offered their ranges.
+            if os.environ.get("EZPKG_APPROVE", "").lower() == "write":
+                asked = self.offer_ranges(asked)
 
             # An export is a build step, not a run: once written, the
             # program stops before its own code.  See `export`.

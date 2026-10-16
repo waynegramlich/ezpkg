@@ -81,3 +81,9 @@
   was fetched (`remember`), so the next run does not fetch again.
   README updated (examples; a paragraph at the end of Choosing
   Versions).
+* `offer_ranges` at `EZPKG_APPROVE=write`, after the date question.
+  The two older write tests needed a second answer, or they hang until
+  `answer_on_a_terminal`'s 300 s timeout.  `release_check.py` now
+  retries a 404 (test.pypi.org served one for a just-uploaded release).
+  README: `mypy` comment sentence (lines 113-115), ranges at write
+  (lines 400-403).  Quick suite: 273 OK, 18 skipped.

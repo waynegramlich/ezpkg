@@ -74,6 +74,10 @@ after asking, keeping encoding and line endings (`T.srdisb`).
     `<(major+1)` for majors 1-9, none from 10 (calendar versions such as
     `pip 25.2` and `certifi 2025.8.3`).  So additions are fetched and
     proved before the changes are shown, and the display shows the real
-    range.  Entries the author wrote are never changed.
+    range.  Entries the author wrote are never changed during
+    development.  At release (`EZPKG_APPROVE=write`), `offer_ranges`
+    asks once whether to give each bare entry (a name alone) the range
+    of its approved version, so a `.py` sent alone cannot get "the wrong
+    packages" (Wayne).
 10. **The bootstrap does not change.**  Shipped through test.pypi.org
     (`./release_check.py testpypi`), then `T.utpat`.

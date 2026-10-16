@@ -27,6 +27,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -87,14 +88,24 @@ def built_version(target: str) -> str:
         return wheels[0].name.split("-")[1]
 
 
-def wheel_info(target: str, version: str | None) -> dict[str, Any]:
+def wheel_info(target: str, version: str | None, attempts: int = 4,
+               pause: float = 10.0) -> dict[str, Any]:
     """Return the index's record of the `ezpkg` wheel.
+
+    A release just uploaded can be answered "not found" for a while:
+    on 2026-10-16 test.pypi.org gave a 404 for one, two minutes after
+    the same question had been answered.  So a failed request is tried
+    again, a few times, before it counts.
 
     Arguments:
     * `target` (`str`):
       `testpypi` or `pypi`.
     * `version` (`str | None`):
       The version wanted, or `None` for the newest.
+    * `attempts` (`int`):
+      How many times to ask.
+    * `pause` (`float`):
+      Seconds to wait between them.
 
     Returns:
     * (`dict[str, Any]`): The JSON API's entry for the wheel, plus
@@ -103,13 +114,26 @@ def wheel_info(target: str, version: str | None) -> dict[str, Any]:
     Raises:
     * `LookupError`:
       If that release has no wheel.
+    * `urllib.error.URLError`:
+      If every attempt failed.
     """
     # The newest is `/ezpkg/json`, which is cached; a particular one is
-    # one level deeper, and is fresh the first time it is asked for.
+    # one level deeper, and is usually fresh.
     url: str = f"{JSON_APIS[target]}/ezpkg"
     url += f"/{version}/json" if version else "/json"
-    with urllib.request.urlopen(url, timeout=30) as response:
-        release: dict[str, Any] = json.load(response)
+    release: dict[str, Any] = {}
+    attempt: int
+    for attempt in range(attempts):
+        try:
+            with urllib.request.urlopen(url, timeout=30) as response:
+                release = json.load(response)
+            break
+        except urllib.error.URLError:
+            if attempt == attempts - 1:
+                raise
+            print(f"release_check: {url} did not answer; asking again in "
+                  f"{pause:.0f} s", file=sys.stderr)
+            time.sleep(pause)
     entry: dict[str, Any]
     for entry in release["urls"]:
         if entry["filename"].endswith(".whl"):

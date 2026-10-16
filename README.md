@@ -110,6 +110,9 @@ The `# type: ignore` comment on `import cowsay` is only for `mypy`; leave
 such comments out of your own programs if you do not use `mypy`.  If you
 do use them, `EZPkg` copies one onto each import it adds for you (see
 [Keeping `dependencies` in Sync](#keeping-dependencies-in-sync)).
+`EZPkg` adds the comment only where `mypy` needs it, on imports of
+packages it fetches, not on the standard library, where `mypy --strict`
+would report it as unused.
 
 ## Download Prompt
 
@@ -393,6 +396,11 @@ The same run also offers to add a date to Part 1, as `exclude-newer =
 a copy of `YOUR_PROG.py` emailed on its own fetches only the packages that
 were available on that date, rather than whatever is newest when your
 friend runs it.
+
+It also offers, asking first, to give each entry in `dependencies` that
+is a name alone a range of versions starting at the one just recorded,
+such as `"cowsay>=6.1,<7"` (see [Choosing Versions](#choosing-versions)).
+An entry that already says anything about versions is left as it is.
 
 `YOUR_PROG.ezpkg` contains detailed information about each package that
 is needed.  With this file in your version control, you can exactly

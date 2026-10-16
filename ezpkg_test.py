@@ -3407,7 +3407,7 @@ class InstallTest(unittest.TestCase):
         program: Path = self.declaring_program(
             "stamped", 'dependencies = ["widget"]',
             "import widget\nprint(widget.__version__)")
-        seen: str = self.answer_on_a_terminal(program, b"y\n",
+        seen: str = self.answer_on_a_terminal(program, b"y\nn\n",
                                               EZPKG_APPROVE="write")
         lines: list[str] = program.read_text().splitlines()
         at: int = next(index for index, line in enumerate(lines, 1)
@@ -3430,6 +3430,35 @@ class InstallTest(unittest.TestCase):
         self.assertEqual(again.stdout.strip(), "1.2.3", again.stderr[-300:])
         self.assertNotIn("exclude-newer", again.stderr)
 
+    def test_write_offers_ranges_for_bare_entries(self) -> None:
+        """`write` offers each bare entry a range from its approved version.
+
+        An entry with a specifier is the author's and is left alone; no
+        terminal, or a no, leaves the program as it was.  See `T.kdaiis`.
+        """
+        # No terminal: approvals written, entries untouched.
+        program: Path = self.declaring_program(
+            "ranged", 'dependencies = ["widget", "sprocket>=1"]',
+            "import widget\nimport sprocket\nprint('ran')")
+        before: str = program.read_text()
+        done: subprocess.CompletedProcess[str] = self.run_program(
+            program, EZPKG_APPROVE="write")
+        self.assertEqual(done.returncode, 0, done.stderr[-400:])
+        self.assertEqual(program.read_text(), before)
+
+        # No to the date, yes to the ranges.
+        seen: str = self.answer_on_a_terminal(program, b"n\ny\n",
+                                              EZPKG_APPROVE="write")
+        self.assertIn('could I add version ranges to 1 entry of prog.py '
+                      '("widget>=1.2.3,<2")?', " ".join(seen.split()))
+        self.assertIn("version ranges written", seen)
+        metadata: dict[str, Any] | None = ezpkg.script_metadata(
+            program.read_text())
+        assert metadata is not None
+        self.assertEqual(metadata["dependencies"],
+                         ["widget>=1.2.3,<2", "sprocket>=1"])
+        self.assertNotIn("exclude-newer", program.read_text())
+
     def test_write_leaves_the_program_alone_unless_told(self) -> None:
         """No terminal, or a no, leaves the program exactly as it was.
 
@@ -3450,7 +3479,7 @@ class InstallTest(unittest.TestCase):
         self.assertTrue(program.with_suffix(".ezpkg").is_file())
 
         # A terminal that answers no.
-        seen: str = self.answer_on_a_terminal(program, b"n\n",
+        seen: str = self.answer_on_a_terminal(program, b"n\nn\n",
                                               EZPKG_APPROVE="write")
         self.assertIn("could I add", seen)
         self.assertEqual(program.read_text(), before)
