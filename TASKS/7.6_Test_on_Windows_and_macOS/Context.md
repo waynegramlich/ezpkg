@@ -28,3 +28,8 @@
 * `T.fwrm` stays, narrowed to what runners cannot do (a person
   answering the prompt; Store, install manager, Homebrew and Apple
   Pythons).  Friends answer in days, not minutes (Wayne).
+
+## 2026-10-16: The Windows prompt is now `I.owenabd`
+
+* Filed and opened at Wayne's word, priority 1.  `I.btosc` closed by
+  `nopip6` (`T.gar`).  Wayne accepted the README `def g(u)` bullet.

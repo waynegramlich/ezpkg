@@ -1,0 +1,17 @@
+{
+  "state": "Open",
+  "created": "2026-10-16T23:05:47Z",
+  "updated": "2026-10-16T23:05:57Z",
+  "history": [
+    {
+      "state": "Pending",
+      "time": "2026-10-16T23:05:47Z"
+    },
+    {
+      "state": "Open",
+      "time": "2026-10-16T23:05:57Z"
+    }
+  ],
+  "tag": "owenabd",
+  "priority": 1
+}
