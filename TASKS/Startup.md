@@ -9,6 +9,7 @@
 @../ISSUES/2_Windows_and_macOS_are_untried/Details.md
 @../ISSUES/3_Reviewer_thoughts_have_two_formats/Details.md
 @../ISSUES/19_How_to_deal_with_compiled_packages/Details.md
+@../ISSUES/20_A_uv_export_drops_an_ezpkg_the_program_imports/Details.md
 @7.4_Upload_to_test.pypi_and_test/Summary.md
 @7.7_Print_the_2FA_recovery_codes/Summary.md
 @7.2_Set_up_hardware_2FA/Summary.md

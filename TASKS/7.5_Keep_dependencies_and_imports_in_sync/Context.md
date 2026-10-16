@@ -67,3 +67,11 @@
 * The `yaml` case worked in Wayne's run: `"PyYAML"` added, the mypy
   comment copied.  He dogfooded on the project's `quick_start.py`,
   which he will restore.
+* Wayne's dogfood, `import ezpkg`: correctly not a dependency, but it
+  needs the author's `mypy` comment too (`mypy` cannot see
+  `~/.ezpkg`).  Now an item of its own (`Discrepancy.uncommented`,
+  `pending()`).  Test: `test_an_ezpkg_import_gets_the_mypy_comment_alone`.
+* A program already looked at was never re-checked by a newer `ezpkg`
+  with new rules; `dependency_fingerprint` now includes `__version__`.
+* `I.uedepi` filed: a `uv` export drops an `ezpkg` the program imports.
+* Quick suite: 271 tests OK, 18 skipped.

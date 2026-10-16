@@ -5161,10 +5161,13 @@ class InstallTest(unittest.TestCase):
         Returns:
         * (`Path`): The program, edited but not run again.
         """
-        # Declares and imports `widget`, so the first run is clean.
+        # Declares and imports `widget`, so the first run is clean; the
+        # bootstrap's `import ezpkg` carries any comment too.
         program: Path = self.declaring_program(
             name, 'dependencies = ["widget"]',
             f"import widget{comment}\nprint('ran')")
+        program.write_text(program.read_text().replace(
+            "import ezpkg\n", f"import ezpkg{comment}\n"))
         done: subprocess.CompletedProcess[str] = self.run_program(program)
         self.assertEqual(done.returncode, 0, done.stderr[-400:])
         self.assertNotIn("disagree", done.stderr)
@@ -5231,6 +5234,34 @@ class InstallTest(unittest.TestCase):
         self.assertIn('added "sprocket" to dependencies, and its mypy '
                       "comment", seen)
         self.assertIn(f"\nimport sprocket{comment}\n", program.read_text())
+
+    def test_an_ezpkg_import_gets_the_mypy_comment_alone(self) -> None:
+        """`import ezpkg` gets the comment, but never a dependency.
+
+        `mypy` cannot see `~/.ezpkg`, where the bootstrap puts `ezpkg`,
+        any more than the packages (Wayne's dogfood, 2026-10-15).
+        """
+        # The packages' imports carry it; `import ezpkg` does not.
+        comment: str = "  # type: ignore[import-not-found]  # For mypy."
+        program: Path = self.declaring_program(
+            "ezpkg-comment", 'dependencies = ["widget"]',
+            f"import widget{comment}\nprint('ran')")
+        done: subprocess.CompletedProcess[str] = self.run_program(program)
+        self.assertIn("its imports (line 7) disagree", done.stderr)
+        seen: str = self.answer_on_a_terminal(program, b"o\ny\ny\n")
+        flat: str = " ".join(seen.split())
+        self.assertIn("line 7: `ezpkg` is imported without the mypy comment "
+                      "your other imports carry. Add it? [y=>Yes/n=>No]",
+                      flat)
+        self.assertIn("In prog.py, the mypy comment on its import of ezpkg",
+                      flat)
+        self.assertIn("added the mypy comment to its import of ezpkg", seen)
+        self.assertIn(f"\nimport ezpkg{comment}\n", program.read_text())
+        self.assertEqual(self.declared_now(program), ["widget"])
+
+        # Settled: nothing more to say.
+        done = self.run_program(program)
+        self.assertEqual((done.stdout, done.stderr), ("ran\n", ""))
 
     def test_an_unused_dependency_is_removed_or_kept(self) -> None:
         """Nothing importing a package offers to remove it, or keep it.
@@ -6670,6 +6701,9 @@ class MetadataTest(unittest.TestCase):
             text, ["a", "g"], ()), one)
         self.assertNotEqual(ezpkg.dependency_fingerprint(
             text.replace("import a\n", "") + "import a\n", ["a"], ()), one)
+        with unittest.mock.patch.object(ezpkg, "__version__", "9.9.9"):
+            self.assertNotEqual(ezpkg.dependency_fingerprint(
+                text, ["a"], ()), one)
         self.assertEqual(ezpkg.line_list([9, 5, 6, 5]), "lines 5-6, 9")
         self.assertEqual(ezpkg.line_list([7]), "line 7")
 

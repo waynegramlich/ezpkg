@@ -1538,7 +1538,9 @@ def dependency_fingerprint(text: str, entries: Sequence[str],
     Its imports in order (optional or not), its `dependencies`, what it
     keeps unimported and what its approvals cover: when none of these
     has changed, neither has any discrepancy between them, so it is not
-    worked out again.  Eight hex digits, since it is only ever compared
+    worked out again.  `ezpkg`'s own version goes in too, so a newer
+    `ezpkg`, whose rules may differ, looks at every program once more
+    (Wayne's dogfood, 2026-10-15).  Eight hex digits, since it is only ever compared
     with the last one for the same program (Wayne, 2026-10-15).
 
     Arguments:
@@ -1562,7 +1564,8 @@ def dependency_fingerprint(text: str, entries: Sequence[str],
                     in every_import(text)],
         "entries": list(entries),
         "unimported": unimported(text),
-        "approved": sorted(approved)})
+        "approved": sorted(approved),
+        "ezpkg": __version__})
     return hashlib.sha256(key.encode()).hexdigest()[:8]
 
 
@@ -1624,6 +1627,11 @@ class Discrepancy:
     * `guessed` (`set[str]`):
       The additions whose package names were guessed, which the index
       is asked about before they are offered.
+    * `uncommented` (`int | None`):
+      The line of an import of `ezpkg` that lacks the `type: ignore`
+      comment the author's other imports carry, or `None`.  `mypy`
+      cannot see `~/.ezpkg`, where the bootstrap puts `ezpkg`, any more
+      than it can see the packages (Wayne's dogfood, 2026-10-15).
     """
 
     program: Path
@@ -1635,6 +1643,17 @@ class Discrepancy:
     removals: list[int]
     used: set[str]
     guessed: set[str] = dataclasses.field(default_factory=set)
+    uncommented: int | None = None
+
+    def pending(self) -> bool:
+        """Say whether there is anything to raise at all.
+
+        Returns:
+        * (`bool`): True when `dependencies` is not the target, or an
+          import of `ezpkg` lacks the author's `mypy` comment.
+        """
+        # Either kind of difference.
+        return self.target() != self.entries or self.uncommented is not None
 
     def arrange(self, added: Collection[str],
                 removed: Collection[int]) -> list[str]:
@@ -1705,6 +1724,8 @@ class Discrepancy:
         declared: list[int] = [self.lines[index]
                                for index in (*self.removals, *moved)]
         imported: list[int] = [line for line, _, _ in self.additions]
+        if self.uncommented is not None:
+            imported.append(self.uncommented)
         imported += [self.placed_by[index] for index in moved
                      if index in self.placed_by]
         sides: str = (f"its `dependencies`"
@@ -2393,7 +2414,7 @@ class EZPkg:
         # Worked out only now, since it reads the installed metadata.
         found: Discrepancy | None = self.discrepancy(program, text, asking)
         answer: str = str(kept.get("answer", ""))
-        if found is None or found.target() == found.entries:
+        if found is None or not found.pending():
             self.keep(record, kept, asked=fingerprint)
             return list(asking)
 
@@ -2481,7 +2502,10 @@ class EZPkg:
             [(line, "add", position) for position, (line, _, _)
              in enumerate(found.additions)]
             + [(found.lines[index], "remove", index)
-               for index in found.removals])
+               for index in found.removals]
+            + ([(found.uncommented, "comment", 0)]
+               if found.uncommented is not None else []))
+        comment: bool = False
         line: int
         kind: str
         which: int
@@ -2489,7 +2513,13 @@ class EZPkg:
         package: str
         for line, kind, which in items:
             reply: str
-            if kind == "add":
+            if kind == "comment":
+                reply = self.choose(
+                    opened, f"line {line}: `ezpkg` is imported without the "
+                    f"mypy comment your other\nimports carry.  Add it? "
+                    f"[y=>Yes/n=>No] ", YES_NO)
+                comment = reply == "yes"
+            elif kind == "add":
                 _, module, package = found.additions[which]
                 if (package in found.guessed
                         and index_has(package) is False):
@@ -2521,7 +2551,7 @@ class EZPkg:
 
         # The whole edit, worked out before it is shown.
         final: list[str] = found.arrange(added, removed)
-        if final == found.entries and not keeping:
+        if final == found.entries and not keeping and not comment:
             writer.write("Nothing to change.\n")
             self.keep(record, kept, asked=fingerprint, answer=answer)
             return asking
@@ -2544,11 +2574,16 @@ class EZPkg:
                                    in found.additions if package in added}
         commented: list[str]
         edited, commented = with_type_ignores(
-            edited, set(modules.values()), found.used)
-        writer.write("\n" + found.changes(final, keeping))
-        if commented:
-            writer.write(f"   and the mypy comment on its import of "
-                         f"{', '.join(commented)}\n")
+            edited, {*modules.values(), *(["ezpkg"] if comment else [])},
+            found.used)
+        if final != found.entries or keeping:
+            writer.write("\n" + found.changes(final, keeping))
+            if commented:
+                writer.write(f"   and the mypy comment on its import of "
+                             f"{', '.join(commented)}\n")
+        else:
+            writer.write(f"\nIn {program.name}, the mypy comment on its "
+                         f"import of {', '.join(commented)}\n")
         if self.choose(opened, "Make these changes? [y=>Yes/n=>No] ",
                        YES_NO) != "yes":
             self.keep(record, kept, asked=fingerprint, answer=answer)
@@ -2583,6 +2618,9 @@ class EZPkg:
         for entry in keeping:
             writer.write(f'ezpkg: {program.name}: kept "{entry}" as '
                          f"unimported\n")
+        if "ezpkg" in commented:
+            writer.write(f"ezpkg: {program.name}: added the mypy comment to "
+                         f"its import of ezpkg\n")
         common: list[str] = [entry for entry in found.entries
                              if entry in final]
         if [entry for entry in final if entry in common] != common:
@@ -2688,8 +2726,17 @@ class EZPkg:
             index for index, name in enumerate(names)
             if index not in placed_by and name in installed
             and name not in keep]
+        # `ezpkg` is the bootstrap's, never a dependency, but `mypy`
+        # needs the same comment for it as for the packages.
+        uncommented: int | None = None
+        if any(module == "ezpkg" for module, _, _ in imports):
+            commented: list[str]
+            _, commented = with_type_ignores(text, {"ezpkg"}, used)
+            if commented:
+                uncommented = next(line for module, line, _ in imports
+                                   if module == "ezpkg")
         return Discrepancy(program, entries, lines, order, placed_by,
-                           additions, removals, used, guessed)
+                           additions, removals, used, guessed, uncommented)
 
     def with_unimported(self, text: str, adding: Sequence[str]) -> str | None:
         """Return a program with names added to `[tool.ezpkg] unimported`.
