@@ -1,7 +1,7 @@
 {
-  "state": "Open",
+  "state": "Closed",
   "created": "2026-10-16T23:05:47Z",
-  "updated": "2026-10-16T23:05:57Z",
+  "updated": "2026-10-17T03:14:55Z",
   "history": [
     {
       "state": "Pending",
@@ -10,6 +10,10 @@
     {
       "state": "Open",
       "time": "2026-10-16T23:05:57Z"
+    },
+    {
+      "state": "Closed",
+      "time": "2026-10-17T03:14:55Z"
     }
   ],
   "tag": "owenabd",

@@ -5,5 +5,6 @@
 These items are only listed by tag and title; `ai_contexts TAG
 show` shows the rest.
 
+- `I.pinpa` `pip._internal` is not a public API
 - `I.whwnn` What happens with no network?
 - `I.cctfd` The cache check tests for a directory

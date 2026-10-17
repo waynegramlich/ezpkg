@@ -52,3 +52,10 @@
 * Next: Wayne commits; push, rehearsal, check: the five Windows
   `quick-start` jobs should no longer hang (`CI` set), and `console`
   should still pass.
+
+## 2026-10-16: Rehearsed; everything passes
+
+* Wayne committed `8ede14b`.  Release run 38997554715:
+  `0.0.1.dev202610170307`; `release_check.py testpypi` passed.  Check
+  run 38997637067: 25 of 25, the Windows `quick-start` jobs no longer
+  hang, and `console (windows-latest)` was asked and answered.

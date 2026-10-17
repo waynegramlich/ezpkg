@@ -15,8 +15,7 @@
 @../ISSUES/3_Reviewer_thoughts_have_two_formats/Details.md
 @../ISSUES/19_How_to_deal_with_compiled_packages/Details.md
 @../ISSUES/20_A_uv_export_drops_an_ezpkg_the_program_imports/Details.md
-@../ISSUES/21_On_Windows_EZPkg_never_asks_before_downloading/Details.md
-@../ISSUES/21_On_Windows_EZPkg_never_asks_before_downloading/Context.md
+@../ISSUES/21_On_Windows_EZPkg_never_asks_before_downloading/Summary.md
 @../ISSUES/1_The_bootstrap_trusts_only_system_certificates/Summary.md
 @7.6.2_QEMU_virtual_machines/Summary.md
 @7.4_Upload_to_test.pypi_and_test/Summary.md
@@ -66,5 +65,4 @@
 @../ISSUES/13_How_should_required_packages_be_declared/Summary.md
 @../ISSUES/14_The_bootstrap_fetches_the_newest_pip_regardless_of_Python/Summary.md
 @../ISSUES/15_Nothing_identifies_a_cache_as_valid/Summary.md
-@../ISSUES/16_Pip._internal_is_not_a_public_API/Summary.md
 @Closed.md
