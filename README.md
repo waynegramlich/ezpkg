@@ -540,10 +540,24 @@ the `except` at the bottom stops the program with
     them on `sys.path`, so that the imports in Part 4 succeed.
   * `bootstrap="nopip6"` names the bootstrap this program carries.
 
-Never edit the bootstrap.  Re-indenting it or changing its comments does
-no harm, but changing its code makes it a different bootstrap.  To see
-whether a program carries the current one, run it with
-`EZPKG_BOOTSTRAP=check` set, and it says so on standard error.
+Never edit the bootstrap, not even a space or a comment.  Indenting the
+whole of it, as under an `if`, is the one change allowed.  Anything
+else stops the program, which shows each line that differs from the
+published bootstrap, with a `|` under the first character that
+differs:
+
+```
+ezpkg: prog.py: its bootstrap (lines 21-53) has been edited, so ezpkg stops here.
+  line 33: s = "choose pipx"; v = sys.version_info[1]
+  nopip6:  s = "choose pip"; v = sys.version_info[1]
+                          |
+Replace it with the bootstrap from https://pypi.org/project/ezpkg/, then run it again.
+```
+
+An older bootstrap that has not been edited still runs.  To see whether
+a program carries the current one, run it with `EZPKG_BOOTSTRAP=check`
+set, and it says so on standard error.
+-->
 
 ## Conclusion
 

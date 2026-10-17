@@ -331,9 +331,12 @@ def run_bootstrap_case(label: str, home: Path, index_url: str,
     # `extra` overrides rather than collides, so a caller can aim the
     # JSON API somewhere else; as keyword arguments, a repeat raised
     # `TypeError`.
+    # Its copies spell the package and the index as variables, so
+    # `EZPkg` would refuse them as edited (`T.reb`).
     environment: dict[str, str] = dict(
         os.environ, HOME=str(home), PIP_INDEX_URL=index_url,
-        BOOTSTRAP_PACKAGE=MODULE, BOOTSTRAP_JSON_API=f"{index_url}pypi")
+        BOOTSTRAP_PACKAGE=MODULE, BOOTSTRAP_JSON_API=f"{index_url}pypi",
+        EZPKG_BOOTSTRAP="unchecked")
     environment.update(extra or {})
     environment.pop("VIRTUAL_ENV", None)
     # `-P` keeps the script's directory off `sys.path`; it is new in
@@ -5903,14 +5906,15 @@ class BootstrapCheckTest(unittest.TestCase):
         program: str = (f"import sys\nif False:\n"
                         f"{textwrap.indent(self.shipping(), '    ')}\n")
         venv: ezpkg.EZPkg = ezpkg.EZPkg(self.root / "cache")
-        mine: str = ezpkg.bootstrap_fingerprint(self.shipping())
         self.assertIn("None, 60", program)
-        newer: dict[str, str] = {mine: "nopip3 of yesterday",
-                                 "0" * 64: "nopip3 of tomorrow"}
+        older: str = (
+            "import sys\nif False:\n" + textwrap.indent(
+                ezpkg.OLD_BOOTSTRAP_TEXTS["nopip5 of 2026-10-12"], "    "))
         cases: list[tuple[str, dict[str, str], tuple[str, str]]] = [
             (program, dict(ezpkg.BOOTSTRAPS),
              ("current", list(ezpkg.BOOTSTRAPS.values())[-1])),
-            (program, newer, ("stale", "nopip3 of yesterday")),
+            (older, dict(ezpkg.BOOTSTRAPS),
+             ("stale", "nopip5 of 2026-10-12")),
             (program.replace("None, 60", "None, 61"),
              dict(ezpkg.BOOTSTRAPS), ("edited", "")),
             ("print('no bootstrap here')\n", dict(ezpkg.BOOTSTRAPS),
@@ -5965,6 +5969,160 @@ class BootstrapCheckTest(unittest.TestCase):
         self.assertEqual(asked.stderr.strip(),
                          "ezpkg: this program's bootstrap is current, "
                          f"{list(ezpkg.BOOTSTRAPS.values())[-1]}")
+
+    def test_an_edit_is_refused_where_it_is(self) -> None:
+        """An edited bootstrap is refused, naming the line, indented or not.
+
+        Wayne's dogfood edit of 2026-10-16, `"choose pipx"`, which the
+        bootstrap survives, so only the check can notice.  See `T.reb`.
+        """
+        # The line is the program's, wherever the paste is indented.
+        block: str = self.shipping()
+        self.assertIn('"choose pip"', block)
+        edited: str = block.replace('"choose pip"', '"choose pipx"', 1)
+        offset: int = next(index for index, line in
+                           enumerate(edited.splitlines())
+                           if "choose pipx" in line)
+        indent: str
+        for indent in ("", "    "):
+            with self.subTest(indent=len(indent)):
+                text: str = ("import sys\n" + ("if True:\n" if indent else "")
+                             + textwrap.indent(edited, indent))
+                first: int = 3 if indent else 2
+                refusal: str | None = ezpkg.bootstrap_refusal(
+                    Path("prog.py"), text, "nopip6")
+                assert refusal is not None
+                self.assertIn("ezpkg: prog.py: its bootstrap (lines "
+                              f"{first}-", refusal)
+                self.assertIn(
+                    f'  line {first + offset}: s = "choose pipx"; v = '
+                    "sys.version_info[1]\n"
+                    '  nopip6:  s = "choose pip"; v = sys.version_info[1]\n'
+                    "                          |\n", refusal)
+                self.assertTrue(refusal.endswith("then run it again."))
+
+    def test_only_indentation_and_staleness_pass(self) -> None:
+        """A re-indented or stale copy runs; a comment or a space does not.
+
+        Every line must equal the published one once trimmed, so the
+        indentation a program gives the paste is all that is forgiven
+        (Wayne, 2026-10-16).
+        """
+        # Published code, wherever it is indented.
+        block: str = self.shipping()
+        fine: list[tuple[str, str]] = [
+            (block, "nopip6"),
+            ("if True:\n" + textwrap.indent(block, "    "), "nopip6"),
+            (ezpkg.OLD_BOOTSTRAP_TEXTS["nopip5 of 2026-10-12"], "nopip5"),
+        ]
+        text: str
+        name: str
+        for text, name in fine:
+            with self.subTest(text=text[:30], name=name):
+                self.assertIsNone(ezpkg.bootstrap_refusal(
+                    Path("prog.py"), text, name))
+
+        # Anything else, however harmless.
+        self.assertIn("m = None\n", block)
+        self.assertIn("; v = ", block)
+        edits: list[str] = [
+            block.replace("m = None\n", "m = None  # Mine.\n", 1),
+            block.replace("; v = ", " ; v = ", 1),
+            block.replace("; v = ", ";  v = ", 1),
+        ]
+        for text in edits:
+            with self.subTest(edit=text):
+                self.assertIsNotNone(ezpkg.bootstrap_refusal(
+                    Path("prog.py"), text, "nopip6"))
+
+    def test_added_and_missing_lines_say_where(self) -> None:
+        """A line only one side has is named, and long lists are cut."""
+        # One line added after the first, and one that parses without
+        # it dropped.
+        lines: list[str] = self.shipping().splitlines(keepends=True)
+        gone: int = next(index for index, line in enumerate(lines)
+                         if "p.write_bytes(r)" in line)
+        added: str = "".join([lines[0], '    print("hi")\n', *lines[1:]])
+        dropped: str = "".join([*lines[:gone], *lines[gone + 1:]])
+        more: str | None = ezpkg.bootstrap_refusal(Path("prog.py"), added,
+                                                   "nopip6")
+        fewer: str | None = ezpkg.bootstrap_refusal(Path("prog.py"),
+                                                    dropped, "nopip6")
+        assert more is not None and fewer is not None
+        self.assertIn('  line 2:  print("hi")\n'
+                      "           (not in nopip6)\n", more)
+        self.assertIn(f"  nopip6:  {lines[gone].strip()}\n", fewer)
+        self.assertIn(f"(missing after line {gone})\n", fewer)
+
+        # Seven changed lines show six, then a count.  Trailing space
+        # would not count, being trimmed, so each gains a comment.
+        many: str = "".join(f"{line.rstrip()}  # Seven.\n" if 0 < index < 8
+                            else line for index, line in enumerate(lines))
+        cut: str | None = ezpkg.bootstrap_refusal(Path("prog.py"), many,
+                                                  "nopip6")
+        assert cut is not None
+        self.assertEqual(cut.count("|\n"), 6, cut)
+        self.assertIn("  ... and 1 more\n", cut)
+
+    def test_published_texts_are_registered(self) -> None:
+        """Each text carried is the bootstrap its name's fingerprint says."""
+        # Old and current alike.
+        name: str
+        text: str
+        for name, text in [*ezpkg.OLD_BOOTSTRAP_TEXTS.items(),
+                           (list(ezpkg.BOOTSTRAPS.values())[-1],
+                            ezpkg.find_bootstrap(ezpkg.QUICK_START) or "")]:
+            with self.subTest(name=name):
+                self.assertEqual(
+                    ezpkg.BOOTSTRAPS[ezpkg.bootstrap_fingerprint(text)], name)
+                self.assertEqual(ezpkg.bootstrap_name(text), name)
+
+    def test_a_wrong_name_or_no_bootstrap_is_refused(self) -> None:
+        """The name must be the fingerprint's, and a bootstrap must exist."""
+        # A published bootstrap calling itself another's name.
+        misnamed: str | None = ezpkg.bootstrap_refusal(
+            Path("prog.py"), self.shipping(), "nopip5")
+        assert misnamed is not None
+        self.assertIn("but calls itself 'nopip5'", misnamed)
+
+        # A caller naming a bootstrap the program does not have.
+        missing: str | None = ezpkg.bootstrap_refusal(
+            Path("prog.py"), "print('hello')\n", "nopip6")
+        assert missing is not None
+        self.assertIn("no ezpkg bootstrap was found", missing)
+
+    def test_install_stops_on_an_edited_bootstrap(self) -> None:
+        """`install(bootstrap=...)` exits with the refusal, unless unchecked."""
+        # The paste must not run, so it sits under `if False:`, and the
+        # program makes the call the bootstrap would have made.
+        edited: str = self.shipping().replace('"choose pip"',
+                                              '"choose pipx"', 1)
+        program: Path = self.root / "prog.py"
+        program.write_text(
+            "import sys\n"
+            "if False:\n"
+            f"{textwrap.indent(edited, '    ')}\n"
+            f"sys.path.insert(0, {str(Path(__file__).resolve().parent)!r})\n"
+            "import ezpkg\n"
+            "from pathlib import Path\n"
+            f"cache = Path({str(self.root / 'cache')!r})\n"
+            "ezpkg.EZPkg(cache).install(bootstrap='nopip6')\n"
+            "print('ran')\n")
+        environment: dict[str, str] = dict(os.environ)
+        environment.pop("EZPKG_BOOTSTRAP", None)
+        refused: subprocess.CompletedProcess[str] = subprocess.run(
+            [sys.executable, str(program)], env=environment,
+            capture_output=True, text=True, check=False)
+        unchecked: subprocess.CompletedProcess[str] = subprocess.run(
+            [sys.executable, str(program)],
+            env=dict(environment, EZPKG_BOOTSTRAP="unchecked"),
+            capture_output=True, text=True, check=False)
+        self.assertEqual((refused.returncode, refused.stdout), (1, ""))
+        self.assertTrue(refused.stderr.startswith(
+            "ezpkg: prog.py: its bootstrap (lines 3-"), refused.stderr)
+        self.assertEqual((unchecked.returncode, unchecked.stdout),
+                         (0, "ran\n"), unchecked.stderr)
+        self.assertIn("EZPKG_BOOTSTRAP=unchecked", unchecked.stderr)
 
 
 class CoverageToolTest(unittest.TestCase):

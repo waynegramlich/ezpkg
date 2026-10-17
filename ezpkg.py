@@ -187,6 +187,42 @@ print(f"cowsay {cowsay.__version__} was loaded from {cowsay.__file__}")
 '''
 
 
+# The text of every published bootstrap that names `ezpkg`, as
+# `find_bootstrap` returns it, apart from the current one, which is
+# `QUICK_START`'s own.  An edited copy is compared with the nearest, to
+# say which lines changed (`T.reb`).  `nopip3` and `nopip4` named
+# `alt_venv`, so no program that reaches this module carries them.
+OLD_BOOTSTRAP_TEXTS: dict[str, str] = {
+    "nopip5 of 2026-10-12": '''try:  # Do not edit try block!  See https://pypi.org/project/ezpkg/
+    s = "find home"; t = pathlib.Path.home()/".ezpkg"; w = t/"pip.whl"
+    m = None
+    try: m = importlib.import_module("ezpkg")  # Already importable?
+    except ImportError: pass
+    if m is None and not (t/"ezpkg").is_dir():  # Not installed yet.
+        s = "choose pip"; v = sys.version_info[1]
+        d = json.load(req.urlopen("https://pypi.org/pypi/pip/json", None, 30))
+        e = max((e for f in d["releases"].values() for e in f  # Newest pip ...
+                 if e["url"][-4:] == ".whl" and not e["yanked"]
+                 and (q := e["requires_python"] or "")[:4] == ">=3."
+                 and "," not in q and int(q.split(".")[1]) <= v),
+                key=lambda e: e["upload_time"])  # ... whose floor we meet.
+        s = "download pip"; r = req.urlopen(e["url"], None, 60).read()
+        if hashlib.sha256(r).hexdigest() != e["digests"]["sha256"]:
+            raise ValueError(f"{e['filename']} fails its SHA-256 check")
+        t.mkdir(parents=True, exist_ok=True); p = t/"pip.part"
+        p.write_bytes(r); p.replace(w)  # The rename is atomic.
+        s = "install ezpkg"; subprocess.run([
+            sys.executable, w/"pip", "install", "--no-input", "-t", t,
+            "--disable-pip-version-check", "ezpkg"], check=True, stdout=2)
+    if m is None:
+        s = "import ezpkg"; sys.path.insert(0, str(t))
+        importlib.invalidate_caches(); m = importlib.import_module("ezpkg")
+    s = "fetch packages"; m.EZPkg().install(bootstrap="nopip5")
+except Exception as x:
+    raise SystemExit(f"ezpkg: {s} failed: {x!r}")''',
+}
+
+
 # Where a requirement stops naming a package and starts constraining
 # it: a version specifier, an extras list or an environment marker.
 SPECIFIER = re.compile(r"[<>=!~\[;\s]")
@@ -573,6 +609,183 @@ def bootstrap_node(text: str) -> ast.Try | None:
             if block and "ezpkg" in block and "import_module" in block:
                 return node
     return None
+
+
+def published_bootstraps() -> dict[str, list[str]]:
+    """Return every published bootstrap that names `ezpkg`, as trimmed lines.
+
+    Returns:
+    * (`dict[str, list[str]]`): Each name, such as `nopip6 of
+      2026-10-16`, and its `try` block, each line stripped.
+    """
+    # The current one is `QUICK_START`'s own.
+    texts: dict[str, str] = dict(OLD_BOOTSTRAP_TEXTS)
+    texts[list(BOOTSTRAPS.values())[-1]] = find_bootstrap(QUICK_START) or ""
+    return {name: trimmed(text) for name, text in texts.items()}
+
+
+def trimmed(block: str) -> list[str]:
+    """Return a bootstrap's lines with their leading and trailing space gone.
+
+    So the indentation a program gives the paste does not count, and
+    nothing else is forgiven (Wayne, 2026-10-16; see `T.reb`).
+
+    Arguments:
+    * `block` (`str`):
+      A bootstrap's `try` block.
+
+    Returns:
+    * (`list[str]`): Its lines, stripped.
+    """
+    return [line.strip() for line in block.splitlines()]
+
+
+def bootstrap_name(block: str) -> str | None:
+    """Return the published bootstrap this one is exactly, or `None`.
+
+    Arguments:
+    * `block` (`str`):
+      A bootstrap's `try` block, as `find_bootstrap` returns it.
+
+    Returns:
+    * (`str | None`): Its name, such as `nopip6 of 2026-10-16`.
+    """
+    # Line for line, once trimmed.
+    mine: list[str] = trimmed(block)
+    name: str
+    lines: list[str]
+    for name, lines in published_bootstraps().items():
+        if lines == mine:
+            return name
+    return None
+
+
+def bootstrap_refusal(path: Path, text: str, bootstrap: str,
+                      shown: int = 6) -> str | None:
+    """Say why a program's bootstrap must not run, or `None` if it may.
+
+    It may only when, line for line once each line is trimmed, it is a
+    published bootstrap, and that is the one it names itself
+    (`bootstrap="nopip6"`).  So a re-indented paste passes, and so does
+    a stale one, which is still code this project published; any other
+    change, a comment or a space included, is an edit, and nobody can
+    say what an edited bootstrap did before `EZPkg` got control (Wayne,
+    2026-10-16; see `T.reb`).
+
+    Each differing line is shown beside the published one, with a `|`
+    under the first character that differs.
+
+    Arguments:
+    * `path` (`Path`):
+      The program, for the message.
+    * `text` (`str`):
+      The program's source.
+    * `bootstrap` (`str`):
+      The name the calling bootstrap gave itself.
+    * `shown` (`int`):
+      At most this many differing lines are shown.
+
+    Returns:
+    * (`str | None`): The refusal, several lines long, or `None`.
+    """
+    # Found, published and rightly named is the only way through.
+    advice: str = ("Replace it with the bootstrap from "
+                   "https://pypi.org/project/ezpkg/, then run it again.")
+    node: ast.Try | None = bootstrap_node(text)
+    if node is None:
+        return (f"ezpkg: {path.name} calls ezpkg as bootstrap "
+                f"{bootstrap!r}, but no ezpkg bootstrap was found in it, "
+                f"so ezpkg stops here.\n{advice}")
+    block: str = find_bootstrap(text) or ""
+    name: str | None = bootstrap_name(block)
+    if name is not None and name.split()[0] == bootstrap:
+        return None
+    first: int = node.lineno
+    last: int = node.end_lineno or first
+    lines: list[str] = [
+        (f"ezpkg: {path.name}: its bootstrap (lines {first}-{last}) has "
+         f"been edited, so ezpkg stops here.")]
+    if name is not None:
+        lines.append(f"  It is {name}, but calls itself {bootstrap!r}.")
+
+    # Otherwise each difference from the nearest published bootstrap.
+    else:
+        mine: list[str] = trimmed(block)
+        known: dict[str, list[str]] = published_bootstraps()
+        matches: dict[str, difflib.SequenceMatcher[str]] = {
+            label: difflib.SequenceMatcher(None, theirs, mine, autojunk=False)
+            for label, theirs in known.items()}
+        nearest: str = max(matches, key=lambda label: matches[label].ratio())
+        lines += bootstrap_differences(
+            known[nearest], mine, first, nearest.split()[0],
+            matches[nearest].get_opcodes(), shown)
+    lines.append(advice)
+    return "\n".join(lines)
+
+
+def bootstrap_differences(published: list[str], mine: list[str], first: int,
+                          short: str, opcodes: list[tuple[str, int, int,
+                                                          int, int]],
+                          shown: int) -> list[str]:
+    """Return the lines showing how a bootstrap differs from a published one.
+
+    A changed line is shown twice, the program's and the published
+    one's, and then a `|` under the first character that differs.  A
+    line only the program has, or only the published one has, is shown
+    once and says so.
+
+    Arguments:
+    * `published` (`list[str]`):
+      The published bootstrap's trimmed lines.
+    * `mine` (`list[str]`):
+      The program's trimmed lines.
+    * `first` (`int`):
+      The program's line number of `mine[0]`.
+    * `short` (`str`):
+      The published bootstrap's short name, such as `nopip6`.
+    * `opcodes` (`list[tuple[str, int, int, int, int]]`):
+      `difflib.SequenceMatcher.get_opcodes()` from `published` to `mine`.
+    * `shown` (`int`):
+      At most this many differences are shown.
+
+    Returns:
+    * (`list[str]`): The lines, indented, without the advice.
+    """
+    # The labels are padded alike, so the two texts line up.
+    width: int = max(len(f"line {first + len(mine)}:"), len(f"{short}:"))
+    differences: list[list[str]] = []
+    tag: str
+    low: int
+    high: int
+    start: int
+    end: int
+    for tag, low, high, start, end in opcodes:
+        if tag == "equal":
+            continue
+        pairs: int = min(high - low, end - start)
+        index: int
+        for index in range(pairs):
+            ours: str = mine[start + index]
+            theirs: str = published[low + index]
+            column: int = len(os.path.commonprefix([ours, theirs]))
+            differences.append([
+                f"  {f'line {first + start + index}:':<{width}} {ours}",
+                f"  {f'{short}:':<{width}} {theirs}",
+                f"  {'':<{width}} {' ' * column}|"])
+        for index in range(start + pairs, end):
+            differences.append([
+                f"  {f'line {first + index}:':<{width}} {mine[index]}",
+                f"  {'':<{width}} (not in {short})"])
+        for index in range(low + pairs, high):
+            differences.append([
+                f"  {f'{short}:':<{width}} {published[index]}",
+                (f"  {'':<{width}} (missing after line "
+                 f"{first + start + pairs - 1})")])
+    result: list[str] = [line for difference in differences[:shown]
+                         for line in difference]
+    if len(differences) > shown:
+        result.append(f"  ... and {len(differences) - shown} more")
+    return result
 
 
 def strip_bootstrap(text: str, why: str = "a zipapp carries its packages.",
@@ -4280,7 +4493,7 @@ class EZPkg:
         block: str | None = find_bootstrap(found[1]) if found else None
         if block is None:
             return "absent", ""
-        name: str | None = BOOTSTRAPS.get(bootstrap_fingerprint(block))
+        name: str | None = bootstrap_name(block)
         if name is None:
             return "edited", ""
         newest: str = list(BOOTSTRAPS.values())[-1]
@@ -4311,6 +4524,38 @@ class EZPkg:
             return ("ezpkg: this program's bootstrap has been edited, "
                     "or is not one ezpkg published")
         return "ezpkg: no bootstrap found in this program"
+
+    def refuse_an_edited_bootstrap(self, bootstrap: str) -> None:
+        """Stop the program if the bootstrap that called is not published.
+
+        Called by `install` for a caller that names its bootstrap, which
+        every published bootstrap does and nothing else need.  A program
+        whose source cannot be read (`python -c`, a frozen program) has
+        nothing to compare, and goes on.  `EZPKG_BOOTSTRAP=unchecked`
+        skips the check, saying so every time, for this project's own
+        `bootstrap.py`, whose copies spell `ezpkg` and the index as
+        variables so that its tests can aim them elsewhere.  See `T.reb`.
+
+        Arguments:
+        * `bootstrap` (`str`):
+          The name the calling bootstrap gave itself, such as `nopip6`.
+
+        Raises:
+        * `SystemExit`:
+          If the bootstrap has been edited, saying where.
+        """
+        # Never silently skipped.
+        if os.environ.get("EZPKG_BOOTSTRAP", "").lower() == "unchecked":
+            print("ezpkg: the bootstrap is not checked "
+                  "(EZPKG_BOOTSTRAP=unchecked)", file=sys.stderr)
+            return
+        found: tuple[Path, str] | None = main_source()
+        if found is None:
+            return
+        refusal: str | None = bootstrap_refusal(found[0], found[1],
+                                                bootstrap)
+        if refusal is not None:
+            raise SystemExit(refusal)
 
     @overload
     def install(self, *, bootstrap: str = "") -> None: ...
@@ -4443,6 +4688,10 @@ class EZPkg:
         # author asks; see `T.fbanwiis`.
         if os.environ.get("EZPKG_BOOTSTRAP", "").lower() == "check":
             print(self.report_bootstrap(), file=sys.stderr)
+
+        # An edited bootstrap stops the program; see `bootstrap_refusal`.
+        if bootstrap:
+            self.refuse_an_edited_bootstrap(bootstrap)
 
         # No arguments means whatever the program declared.  The
         # interpreter is checked first, because a program on the wrong

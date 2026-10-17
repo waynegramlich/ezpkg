@@ -1231,7 +1231,10 @@ def run_tests() -> None:
     import time
 
     counts = measure_source()
+    # The cases spell the package and the index as variables, which
+    # `EZPkg` would refuse as an edited bootstrap (`T.reb`).
     base = {k: v for k, v in os.environ.items() if k != "VIRTUAL_ENV"}
+    base["EZPKG_BOOTSTRAP"] = "unchecked"
     script = str(pathlib.Path(__file__).resolve())
     rows, failures = [], []
 
