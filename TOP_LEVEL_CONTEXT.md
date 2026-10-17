@@ -21,7 +21,19 @@ needs live here instead.
 * `.github/workflows/release.yml`: Publishes it with Trusted
   Publishing, after Wayne approves on GitHub (`T.wrw`).
 * `release_check.py`: Runs the Quick Start as a new user against a
-  published `ezpkg` (`./release_check.py testpypi|pypi`).
+  published `ezpkg` (`./release_check.py [--python PY] [--console]
+  testpypi|pypi [VERSION]`).  `--console` gives it a real terminal
+  (a pseudoterminal, or ConPTY via `pywinpty` on Windows) and answers
+  the download prompt.
+* `.github/workflows/check.yml`: Runs `release_check.py` on GitHub's
+  Linux, Windows, Apple Silicon and Intel macOS runners, Python 3.11
+  to 3.15, plus python.org's macOS Python without certificates and a
+  `--console` job per system: `gh workflow run check.yml -f
+  target=testpypi -f version=V` (25 jobs, about 3 minutes; Claude
+  starts it).  Started by hand, not yet by `release.yml` (`T.gar`).
+* `~/ezpkg_dogfood/` (outside the project): Wayne's `prog.py`; `run`
+  uses the project's `ezpkg.py`, `run_testpypi [--clean] [VERSION]`
+  the newest test.pypi.org upload (`--clean` empties its `~/.ezpkg`).
 * `git_hooks/`: `prepare-commit-msg` adds `Assisted-by: Claude
   Code:claude-opus-5-5` to Wayne's commit messages (deletable in the
   editor), and `commit-msg` refuses a message that is only that
@@ -39,10 +51,17 @@ match it:
 * The `nopip6` function in `bootstrap.py` (which spells the package name
   as `PACKAGE` and the index as `JSON_API`).
 
-`bootstrap_fingerprint` ignores comments and whitespace, so a comment
-edit keeps the same bootstrap.  A code edit makes a new one: it needs a
-new `nopipN` name and its fingerprint added to the end of `BOOTSTRAPS` in
-`ezpkg.py`.
+A changed bootstrap is a new one, comments and spaces included
+(`T.reb`: `EZPkg` refuses any bootstrap that is not, line for line once
+trimmed, a published one).  It needs a new `nopipN` name, its
+fingerprint added to the end of `BOOTSTRAPS` in `ezpkg.py`, and the
+previous text kept in `OLD_BOOTSTRAP_TEXTS`.  `bootstrap.py`'s copies
+spell things as variables, so its harness sets
+`EZPKG_BOOTSTRAP=unchecked`.
+
+Part 1 of every program with a bootstrap lists `ezpkg` first (the Quick
+Start's is `ezpkg>=0.0.1.dev0,<0.1` until the real release), and that
+entry chooses which `ezpkg` runs it (`T.eui`).
 
 ## Testing and Linting
 
@@ -64,6 +83,9 @@ new `nopipN` name and its fingerprint added to the end of `BOOTSTRAPS` in
   notes, and open items are `<!-- Issue: ... -->` comments.  Re-read
   the file before editing, since Wayne edits it between turns.
 * Wayne does his own end-to-end reads of `README.md`.
+* Wayne prefers discussing in chat to notes in `Details.md` files.
+* Claude may push to GitHub, and start and approve `testpypi` release
+  runs, but never commits; Wayne commits staged changes.
 * `ezpkg` is on test.pypi.org (`T.uttat`) but not yet on pypi.org
   (`T.utpat`), so the Quick Start does not yet work for a new user;
   dogfood runs use `PYTHONPATH` pointing at the project, and

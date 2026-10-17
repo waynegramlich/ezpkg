@@ -6014,9 +6014,13 @@ class BootstrapCheckTest(unittest.TestCase):
     def test_install_reports_only_when_asked(self) -> None:
         """`EZPKG_BOOTSTRAP=check` prints one line; otherwise nothing."""
         # A real program carrying the paste, which must not run it.  Its
-        # imports follow the paste, or the import scan would object.
+        # imports follow the paste, or the import scan would object, and
+        # its `ezpkg` entry is the one the paste implies (`T.eui`).
         program: Path = self.root / "prog.py"
         program.write_text(
+            "# /// script\n"
+            '# dependencies = ["ezpkg>=0.0.1.dev0"]\n'
+            "# ///\n"
             "import sys\n"
             "if False:\n"
             f"{textwrap.indent(self.shipping(), '    ')}\n"
@@ -6160,6 +6164,119 @@ class BootstrapCheckTest(unittest.TestCase):
             Path("prog.py"), "print('hello')\n", "nopip6")
         assert missing is not None
         self.assertIn("no ezpkg bootstrap was found", missing)
+
+    def test_a_bootstrap_wants_an_ezpkg_entry_first(self) -> None:
+        """The bootstrap implies `ezpkg`, ahead of every later import."""
+        # Without the entry it is the first addition; with it, all agree.
+        venv: ezpkg.EZPkg = ezpkg.EZPkg(self.root / "cache")
+        text: str = ("# /// script\n"
+                     "# dependencies = []\n"
+                     "# ///\n"
+                     "import sys\n"
+                     f"{self.shipping()}\n"
+                     "import cowsay\n")
+        missing: ezpkg.Discrepancy | None = venv.discrepancy(
+            self.root / "prog.py", text, ["cowsay"])
+        assert missing is not None
+        self.assertEqual(missing.order[0], ("add", 0, "ezpkg"))
+        self.assertEqual(missing.additions[0][1:], ("ezpkg", "ezpkg"))
+        agreed: ezpkg.Discrepancy | None = venv.discrepancy(
+            self.root / "prog.py", text, ["ezpkg>=0.0.1.dev0", "cowsay"])
+        assert agreed is not None
+        self.assertEqual((agreed.additions, agreed.removals), ([], []))
+        self.assertEqual(agreed.order[0], ("entry", 0, ""))
+
+    def test_chosen_needs_the_entry_and_the_pin(self) -> None:
+        """This `ezpkg` runs the program only if both allow it."""
+        # The entry alone, then a pin of this version, then of another.
+        venv: ezpkg.EZPkg = ezpkg.EZPkg(self.root / "cache")
+        mine: str = ezpkg.__version__
+        cases: list[tuple[str, list[str], bool]] = [
+            ("ezpkg>=0.0.1.dev0", [], True),
+            ("ezpkg<0.0.1.dev0", [], False),
+            ("ezpkg>=0.0.1.dev0", [f"ezpkg=={mine}"], True),
+            ("ezpkg>=0.0.1.dev0", ["ezpkg==0.0.1.dev1"], False),
+        ]
+        entry: str
+        pins: list[str]
+        wanted: bool
+        for entry, pins, wanted in cases:
+            with (self.subTest(entry=entry, pins=pins),
+                  unittest.mock.patch.object(venv, "locked",
+                                             return_value=pins)):
+                self.assertIs(venv.chosen(entry), wanted)
+
+    def test_switch_runs_the_program_again_once(self) -> None:
+        """Another `ezpkg` tree means starting again with it first."""
+        # The tree `provide` returned, and what `exec` would be given.
+        venv: ezpkg.EZPkg = ezpkg.EZPkg(self.root / "cache")
+        versions: Path = self.root / "cache" / "versions"
+        other: Path = versions / "ezpkg-9.9.9-cpython-312-linux-x86_64"
+        mine: Path = versions / (f"ezpkg-{ezpkg.__version__}-"
+                                 "cpython-312-linux-x86_64")
+        cowsay: Path = versions / "cowsay-6.1-cpython-312-linux-x86_64"
+        clean: dict[str, str] = {
+            key: value for key, value in os.environ.items()
+            if key not in ("EZPKG_SWITCHED", "EZPKG_PYTHONPATH")}
+        clean["PYTHONPATH"] = "/somewhere"
+        with (unittest.mock.patch.dict(os.environ, clean, clear=True),
+              unittest.mock.patch.object(ezpkg.os, "name", "posix"),
+              unittest.mock.patch.object(
+                  ezpkg.os, "execve", side_effect=SystemExit("exec"))
+              as execve):
+            venv.switch([cowsay, mine])
+            execve.assert_not_called()
+            with self.assertRaises(SystemExit):
+                venv.switch([cowsay, other])
+            program: str
+            command: list[str]
+            environment: dict[str, str]
+            program, command, environment = execve.call_args.args
+            self.assertEqual(program, sys.executable)
+            self.assertEqual(command, [sys.executable, *sys.orig_argv[1:]])
+            self.assertEqual(environment["EZPKG_SWITCHED"], "9.9.9")
+            self.assertEqual(environment["EZPKG_PYTHONPATH"], "/somewhere")
+            self.assertEqual(environment["PYTHONPATH"],
+                             f"{other}{os.pathsep}/somewhere")
+
+            # A second switch is refused rather than looped.
+            os.environ["EZPKG_SWITCHED"] = "9.9.9"
+            with self.assertRaises(SystemExit) as refused:
+                venv.switch([other])
+            self.assertIn("still running after switching",
+                          str(refused.exception))
+
+        # Windows runs it as a child and passes its status on.
+        done: subprocess.CompletedProcess[str] = (
+            subprocess.CompletedProcess([], 3))
+        with (unittest.mock.patch.dict(os.environ, clean, clear=True),
+              unittest.mock.patch.object(ezpkg.os, "name", "nt"),
+              unittest.mock.patch.object(ezpkg.subprocess, "run",
+                                         return_value=done)):
+            with self.assertRaises(SystemExit) as passed:
+                venv.switch([other])
+            self.assertEqual(passed.exception.code, 3)
+
+    def test_switched_puts_the_environment_back(self) -> None:
+        """The program's children see the environment it was given."""
+        # With a `PYTHONPATH` before, without one, and the wrong `ezpkg`.
+        venv: ezpkg.EZPkg = ezpkg.EZPkg(self.root / "cache")
+        mine: str = ezpkg.__version__
+        before: str
+        for before in ("/somewhere", ""):
+            with (self.subTest(before=before),
+                  unittest.mock.patch.dict(os.environ, {
+                      "EZPKG_SWITCHED": mine, "EZPKG_PYTHONPATH": before,
+                      "PYTHONPATH": f"/tree{os.pathsep}{before}"})):
+                venv.switched()
+                self.assertNotIn("EZPKG_SWITCHED", os.environ)
+                self.assertNotIn("EZPKG_PYTHONPATH", os.environ)
+                self.assertEqual(os.environ.get("PYTHONPATH"),
+                                 before or None)
+        with (unittest.mock.patch.dict(os.environ,
+                                       {"EZPKG_SWITCHED": "9.9.9"}),
+              self.assertRaises(SystemExit)):
+            venv.switched()
 
     def test_install_stops_on_an_edited_bootstrap(self) -> None:
         """`install(bootstrap=...)` exits with the refusal, unless unchecked."""
@@ -6878,6 +6995,45 @@ class MetadataTest(unittest.TestCase):
         self.assertIsNone(ezpkg.pin_dependencies("print('ran')\n", pins))
         self.assertIsNone(ezpkg.pin_dependencies(
             '# /// script\n# requires-python = ">=3.11"\n# ///\n', pins))
+
+    def test_meets_orders_development_releases(self) -> None:
+        """`0.0.1.devN` comes before `0.0.1`, and odd specifiers are no."""
+        # Each version against each specifier.
+        cases: list[tuple[str, str, bool]] = [
+            ("0.0.1", ">=0.0.1.dev0,<0.1", True),
+            ("0.0.1.dev202610170307", ">=0.0.1.dev0,<0.1", True),
+            ("0.0.1.dev5", ">=0.0.1", False),
+            ("0.0.1.dev5", "<0.0.1", True),
+            ("0.0.1.dev5", ">0.0.1.dev4", True),
+            ("0.1.0", "<0.1", False),
+            ("2.32.3", "~=2.32.1", True),
+            ("2.33", "~=2.32.1", False),
+            ("1.0", "==1", True),
+            ("1.0", "", True),
+            ("1.0", "===1.0", False),
+            ("1.0rc1", ">=1", False),
+        ]
+        version: str
+        specifier: str
+        wanted: bool
+        for version, specifier, wanted in cases:
+            with self.subTest(version=version, specifier=specifier):
+                self.assertIs(ezpkg.meets(version, specifier), wanted)
+
+    def test_the_quick_start_asks_for_this_ezpkg(self) -> None:
+        """The Quick Start's `ezpkg` entry is met by the `ezpkg` beside it.
+
+        Otherwise a release would ship a Quick Start that switches away
+        from the very `ezpkg` released with it (`T.eui`).
+        """
+        # Its first entry, which the bootstrap implies.
+        metadata: dict[str, Any] | None = ezpkg.script_metadata(
+            ezpkg.QUICK_START)
+        assert metadata is not None
+        entry: str | None = ezpkg.own_entry(metadata["dependencies"])
+        assert entry is not None
+        self.assertTrue(ezpkg.meets(ezpkg.__version__,
+                                    entry.removeprefix("ezpkg")))
 
     def test_version_range_is_conservative(self) -> None:
         """A floor always; a cap only where a version number means it.

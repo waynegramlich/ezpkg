@@ -67,3 +67,29 @@
 * Commits now carry `Assisted-by: Claude Code:claude-opus-5-5` from
   `git_hooks/` (`core.hooksPath`); update the model there when it
   changes.
+
+## 2026-10-16: State at the end of the day
+
+* Done today: `I.btosc` closed (`nopip6`, `curl` fallback);
+  `I.owenabd` closed (`CONIN$`/`CONOUT$`, `CI`, 5-minute answer
+  limit); `T.qvm` rejected; `T.reb` (refuse an edited bootstrap) built
+  and rehearsed; `T.eui` (each program's Part 1 chooses its `ezpkg`)
+  built, NOT yet rehearsed.
+* Children now: 7.3 `T.wrw` open; 7.5 `T.kdaiis` open (Wayne's dogfood
+  left); 7.6 `T.towam` with 7.6.1 `T.gar` (done but for "release.yml
+  calls check.yml", deferred), 7.6.2 `T.qvm` rejected, 7.6.3 `T.fwrm`
+  (friends, days); 7.7 `T.reb` (dogfood left); 7.8 `T.eui`; 7.9
+  `T.abfd` (designed, not built); 7.10 `T.utpat`; 7.11 `T.p2rc`.
+* Newest test.pypi.org upload: `0.0.1.dev202610170307` (from
+  `8ede14b`), which has `T.reb` and `I.owenabd` but not `T.eui`.
+* Next session, in order: (1) push Wayne's `T.eui` commit, rehearse
+  (`gh workflow run release.yml -f target=testpypi`, approve with
+  `gh api .../pending_deployments`), `./release_check.py testpypi`,
+  `gh workflow run check.yml -f target=testpypi -f version=V`;
+  (2) close `T.eui`, verify and close `I.uedepi`; (3) build `T.abfd`
+  (Wayne may want its messages first, before the bootstrap part);
+  (4) close `T.reb`, `T.kdaiis` after Wayne's dogfood.
+* Before `T.utpat` (Wayne, on GitHub and pypi.org): the `pypi`
+  environment, the `v*` tag ruleset, the pypi.org pending publisher.
+* Open README proposal: line 167, "Download Prompt" reworded to say
+  what CI is (Wayne did not know the term).

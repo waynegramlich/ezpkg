@@ -27,7 +27,7 @@ Save the program below as `quick_start.py`, and run it with
 # Part 1: The packages this program needs.
 # /// script
 # requires-python = ">=3.11"
-# dependencies = ["cowsay"]
+# dependencies = ["ezpkg>=0.0.1.dev0,<0.1", "cowsay"]
 # ///
 """Try `EZPkg`: fetch the `cowsay` package on first use, then run."""
 
@@ -87,9 +87,9 @@ print(f"cowsay {cowsay.__version__} was loaded from {cowsay.__file__}")
 
 The first run creates `~/.ezpkg/` in your home directory, which is where
 `EZPkg` keeps everything it fetches.  It fetches `ezpkg` into it, then
-the `cowsay` package that the program lists at the top (line 5,
-`# dependencies = ["cowsay"]`), and asks once whether `EZPkg` may
-install `cowsay`.  Answer `y`, and the program runs:
+the packages the program lists at the top (line 5): `ezpkg` itself,
+which says which `ezpkg` runs the program, and `cowsay`.  It asks once
+whether `EZPkg` may keep them.  Answer `y`, and the program runs:
 
 ```
   ______________
@@ -192,7 +192,7 @@ Immediately below is the `EZPkg` bootstrap:
 # Part 1: The packages this program needs.
 # /// script
 # requires-python = ">=3.11"
-# dependencies = []
+# dependencies = ["ezpkg>=0.0.1.dev0,<0.1"]
 # ///
 """TOP_LEVEL_DOCSTRING"""
 # Any `from __future__ import ...` goes here.
@@ -350,6 +350,8 @@ settings:
   3.11 or later.
 * `dependencies` lists the packages the program needs, one string each.
   Changing this list is usually the only change a program needs.
+  * Its first entry is `ezpkg` itself, such as `"ezpkg>=0.1,<0.2"`,
+    because the bootstrap itself imports it.
 
 Each string is handed to `pip` exactly as written, so it can say which
 versions are acceptable:

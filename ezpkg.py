@@ -135,7 +135,7 @@ QUICK_START: str = '''#!/usr/bin/env python3
 # Part 1: The packages this program needs.
 \x23 /// script
 # requires-python = ">=3.11"
-# dependencies = ["cowsay"]
+# dependencies = ["ezpkg>=0.0.1.dev0,<0.1", "cowsay"]
 \x23 ///
 """Try `EZPkg`: fetch the `cowsay` package on first use, then run."""
 
@@ -306,35 +306,76 @@ def satisfied(requirement: str) -> bool:
     if not name or any(mark in rest for mark in "[;@"):
         return False
 
-    # Installed at all, and as a plain release?
+    # Installed at all, and as a plain release, against plain releases?
     try:
         found: str = importlib.metadata.version(name)
     except importlib.metadata.PackageNotFoundError:
         return False
     if not re.fullmatch(r"\d+(?:\.\d+)*", found):
         return False
-    have: list[int] = [int(part) for part in found.split(".")]
+    if not all(CLAUSE.fullmatch(clause) for clause in
+               filter(None, (one.strip() for one in rest.split(",")))):
+        return False
+    return meets(found, rest)
 
-    # Every clause must hold.  PEP 440 pads a release with zeros, so
-    # `2.0` equals `2.0.0`.
+
+# A version `meets` understands: a release, perhaps a development
+# release of it, as `0.0.1.dev202610170307` is on test.pypi.org.
+RELEASE: re.Pattern[str] = re.compile(r"(\d+(?:\.\d+)*)(?:\.dev(\d+))?")
+
+# One clause of a specifier `meets` understands.
+DEV_CLAUSE: re.Pattern[str] = re.compile(
+    r"(==|!=|>=|<=|>|<|~=)\s*(\d+(?:\.\d+)*(?:\.dev\d+)?)")
+
+
+def meets(version: str, specifier: str) -> bool:
+    """Report whether a version certainly meets a specifier.
+
+    Releases and their development releases only, with the common
+    operators, which is all this project's own `ezpkg` entries use: a
+    development release comes before its release, so `0.0.1.devN` is
+    older than `0.0.1`, as PEP 440 orders them.  Anything else is
+    `False`.  See `T.eui`.
+
+    Arguments:
+    * `version` (`str`):
+      A version, such as `0.0.1` or `0.0.1.dev202610170307`.
+    * `specifier` (`str`):
+      Comma-separated clauses, such as `>=0.0.1.dev0,<0.1`, or empty.
+
+    Returns:
+    * (`bool`): True only when every clause holds.
+    """
+    # A release, padded, then whether it is final, then its number.
+    def key(text: str, width: int) -> tuple[tuple[int, ...], int, int]:
+        matched: re.Match[str] | None = RELEASE.fullmatch(text)
+        assert matched is not None
+        parts: list[int] = [int(part) for part in matched.group(1).split(".")]
+        dev: str | None = matched.group(2)
+        return (tuple(parts + [0] * (width - len(parts))),
+                0 if dev is not None else 1, int(dev or 0))
+
+    if not RELEASE.fullmatch(version):
+        return False
+    have: list[str] = version.split(".dev")[0].split(".")
     clause: str
-    for clause in filter(None, (one.strip() for one in rest.split(","))):
-        matched: re.Match[str] | None = CLAUSE.fullmatch(clause)
+    for clause in filter(None, (one.strip() for one in specifier.split(","))):
+        matched: re.Match[str] | None = DEV_CLAUSE.fullmatch(clause)
         if matched is None:
             return False
         operator: str = matched.group(1)
-        want: list[int] = [int(part) for part in matched.group(2).split(".")]
+        want: list[str] = matched.group(2).split(".dev")[0].split(".")
         width: int = max(len(have), len(want))
-        mine: tuple[int, ...] = tuple(have + [0] * (width - len(have)))
-        theirs: tuple[int, ...] = tuple(want + [0] * (width - len(want)))
+        mine: tuple[tuple[int, ...], int, int] = key(version, width)
+        theirs: tuple[tuple[int, ...], int, int] = key(matched.group(2),
+                                                       width)
         holds: bool
         if operator == "~=":
             # `~=2.32.1` is `>=2.32.1` and `==2.32.*`; one number is
             # not allowed.
             if len(want) < 2:
                 return False
-            holds = (mine >= theirs
-                     and have[:len(want) - 1] == want[:-1])
+            holds = mine >= theirs and have[:len(want) - 1] == want[:-1]
         else:
             holds = {"==": mine == theirs, "!=": mine != theirs,
                      ">=": mine >= theirs, "<=": mine <= theirs,
@@ -616,6 +657,21 @@ def bootstrap_node(text: str) -> ast.Try | None:
             if block and "ezpkg" in block and "import_module" in block:
                 return node
     return None
+
+
+def own_entry(asking: Sequence[str]) -> str | None:
+    """Return a program's `ezpkg` requirement, or `None` if it has none.
+
+    Arguments:
+    * `asking` (`Sequence[str]`):
+      Its `dependencies`.
+
+    Returns:
+    * (`str | None`): The entry, such as `ezpkg>=0.1,<0.2`.
+    """
+    # By name, as `pip` compares them.
+    return next((entry for entry in asking
+                 if normal_name(requirement_name(entry)) == "ezpkg"), None)
 
 
 def answer_from(reader: IO[str], writer: IO[str],
@@ -3054,11 +3110,19 @@ class EZPkg:
         * (`Discrepancy | None`): What disagrees, which may be nothing,
           or `None` when the program does not parse.
         """
-        # What is declared, what is kept, what is installed.
+        # What is declared, what is kept, what is installed.  The
+        # bootstrap imports `ezpkg` where it stands, so a program that
+        # carries one needs an `ezpkg` entry there, which chooses the
+        # `ezpkg` that runs it (`T.eui`).
         try:
             imports: list[tuple[str, int, bool]] = every_import(text)
         except SyntaxError:
             return None
+        bootstrap: ast.Try | None = bootstrap_node(text)
+        implied: int | None = None if bootstrap is None else bootstrap.lineno
+        if implied is not None:
+            imports = sorted([*imports, ("ezpkg", implied, False)],
+                             key=lambda one: one[1])
         entries: list[str] = list(asking)
         lines: list[int] = dependency_lines(text) or [0] * len(entries)
         names: list[str] = [normal_name(requirement_name(entry))
@@ -3082,9 +3146,12 @@ class EZPkg:
         line: int
         optional: bool
         for module, line, optional in imports:
-            if self.exempt(program, module):
+            from_bootstrap: bool = (module, line) == ("ezpkg", implied)
+            if not from_bootstrap and self.exempt(program, module):
                 continue
-            packages: list[str] = sorted(set(providers.get(module, [])))
+            packages: list[str] = (
+                ["ezpkg"] if from_bootstrap
+                else sorted(set(providers.get(module, []))))
             normal: set[str] = {normal_name(name) for name in packages}
             index: int | None = next(
                 (index for index, name in enumerate(names)
@@ -4598,6 +4665,107 @@ class EZPkg:
                     "or is not one ezpkg published")
         return "ezpkg: no bootstrap found in this program"
 
+    def chosen(self, entry: str) -> bool:
+        """Report whether this `ezpkg` is the one the program asks for.
+
+        It must meet the program's `ezpkg` entry and, when the approvals
+        pin `ezpkg`, be that version.  See `T.eui`.
+
+        Arguments:
+        * `entry` (`str`):
+          The program's `ezpkg` requirement, such as `ezpkg>=0.1,<0.2`.
+
+        Returns:
+        * (`bool`): True when this `ezpkg` will do.
+        """
+        # The entry, then the pin.
+        name: str = requirement_name(entry)
+        specifier: str = entry[entry.find(name) + len(name):].strip()
+        if not meets(__version__, specifier):
+            return False
+        pinned: str
+        for pinned in self.locked():
+            if normal_name(requirement_name(pinned)) == "ezpkg":
+                return pinned.split("==", 1)[-1] == __version__
+        return True
+
+    def switch(self, trees: Sequence[Path]) -> None:
+        """Run the program again with the `ezpkg` it asked for, if not this.
+
+        `provide` has fetched and unpacked the program's `ezpkg` entry
+        like any other package, so the tree it returns for `ezpkg` is
+        the one the program chose, pinned by its approvals and its
+        resolution date.  When that is not this `ezpkg`, the program is
+        started again with that tree first on `PYTHONPATH`, so that the
+        bootstrap's `import ezpkg` finds it, wherever this one came from
+        (Wayne, 2026-10-16; see `T.eui`).  Once only: `EZPKG_SWITCHED`
+        marks the second start, and a second switch stops instead.
+
+        Arguments:
+        * `trees` (`Sequence[Path]`):
+          The version trees `provide` returned.
+
+        Raises:
+        * `SystemExit`:
+          With the program's own exit status on Windows, or when a
+          switch has already been made and did not take.
+        """
+        # Nothing to do unless an `ezpkg` other than this one arrived.
+        tree: Path | None = next(
+            (one for one in trees if one.name.split("-")[0] == "ezpkg"),
+            None)
+        if tree is None or tree.name.split("-")[1] == __version__:
+            return
+        version: str = tree.name.split("-")[1]
+        if "EZPKG_SWITCHED" in os.environ:
+            raise SystemExit(
+                f"ezpkg: this program asks for ezpkg {version}, but ezpkg "
+                f"{__version__} is still running after switching to it "
+                f"once, so it stops here.  Is Python running with -I or "
+                f"-E, which ignore PYTHONPATH?")
+
+        # Everything said so far is said before the program starts again.
+        paths: str = os.environ.get("PYTHONPATH", "")
+        environment: dict[str, str] = dict(
+            os.environ, EZPKG_SWITCHED=version, EZPKG_PYTHONPATH=paths,
+            PYTHONPATH=os.pathsep.join(filter(None, [str(tree), paths])))
+        command: list[str] = [sys.executable, *sys.orig_argv[1:]]
+        sys.stdout.flush()
+        sys.stderr.flush()
+
+        # Windows has no `exec` that keeps the process, so the program
+        # runs as a child and its status is passed on.
+        if os.name == "nt":
+            raise SystemExit(subprocess.run(command, env=environment,
+                                            check=False).returncode)
+        os.execve(sys.executable, command, environment)
+
+    def switched(self) -> None:
+        """Put the environment back after `switch` ran the program again.
+
+        The program's own children should see the `PYTHONPATH` it was
+        given, not the one `switch` made, and no `EZPKG_SWITCHED`, so
+        that one of them may switch in its turn.  See `T.eui`.
+
+        Raises:
+        * `SystemExit`:
+          If the `ezpkg` running is not the one switched to.
+        """
+        # Only after a switch.
+        version: str | None = os.environ.pop("EZPKG_SWITCHED", None)
+        if version is None:
+            return
+        paths: str = os.environ.pop("EZPKG_PYTHONPATH", "")
+        if paths:
+            os.environ["PYTHONPATH"] = paths
+        else:
+            os.environ.pop("PYTHONPATH", None)
+        if version != __version__:
+            raise SystemExit(
+                f"ezpkg: switched to ezpkg {version}, but ezpkg "
+                f"{__version__} is running, so it stops here.  Is Python "
+                f"running with -I or -E, which ignore PYTHONPATH?")
+
     def refuse_an_edited_bootstrap(self, bootstrap: str) -> None:
         """Stop the program if the bootstrap that called is not published.
 
@@ -4762,9 +4930,9 @@ class EZPkg:
         if os.environ.get("EZPKG_BOOTSTRAP", "").lower() == "check":
             print(self.report_bootstrap(), file=sys.stderr)
 
-        # An edited bootstrap stops the program; see `bootstrap_refusal`.
-        if bootstrap:
-            self.refuse_an_edited_bootstrap(bootstrap)
+        # A program run again with the `ezpkg` it asked for puts things
+        # back as they were for its own children; see `switch`.
+        self.switched()
 
         # No arguments means whatever the program declared.  The
         # interpreter is checked first, because a program on the wrong
@@ -4773,7 +4941,20 @@ class EZPkg:
             declaration: dict[str, Any] = self.declaration()
             self.check_python(declaration)
             asked: list[str] = self.declared()
-            self.provide(asked, argv)
+
+            # The program's own `ezpkg` entry chooses which `ezpkg` runs
+            # it.  This one judges the bootstrap only if it is that one;
+            # otherwise the one switched to does (`T.eui`).
+            own: str | None = own_entry(asked)
+            switching: bool = own is not None and not self.chosen(own)
+            if bootstrap and not switching:
+                self.refuse_an_edited_bootstrap(bootstrap)
+            self.switch(self.provide(
+                asked if switching else
+                [one for one in asked if one != own], argv))
+            if bootstrap and switching:
+                # Still here, so no other `ezpkg` came: this one judges.
+                self.refuse_an_edited_bootstrap(bootstrap)
 
             # Recording approvals is a release step, so it is also when
             # bare entries are offered their ranges.
@@ -4793,6 +4974,10 @@ class EZPkg:
             # can be found.
             self.scan_imports(self.sync_dependencies(asked, argv))
             return None
+
+        # An edited bootstrap stops the program; see `bootstrap_refusal`.
+        if bootstrap:
+            self.refuse_an_edited_bootstrap(bootstrap)
 
         # One string is the simple case, and it returns one module.
         single: bool = isinstance(requirements, str)

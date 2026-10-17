@@ -76,3 +76,9 @@
 * `~/ezpkg_dogfood/run_testpypi --clean` with Wayne's `"choose
   pipxxx"`: the published `ezpkg` refuses it at line 33.
 * Left: Wayne's dogfood, then `Summary.md` and close.
+
+## 2026-10-16: Waiting on Wayne's dogfood
+
+* Built, tested, rehearsed (`0.0.1.dev202610170025` onward).  Wayne's
+  `~/ezpkg_dogfood/prog.py` now carries `nopip6` unedited.  Close
+  after his dogfood.

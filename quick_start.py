@@ -2,7 +2,7 @@
 # Part 1: The packages this program needs.
 # /// script
 # requires-python = ">=3.11"
-# dependencies = ["cowsay"]
+# dependencies = ["ezpkg>=0.0.1.dev0,<0.1", "cowsay"]
 # ///
 """Try `EZPkg`: fetch the `cowsay` package on first use, then run."""
 
