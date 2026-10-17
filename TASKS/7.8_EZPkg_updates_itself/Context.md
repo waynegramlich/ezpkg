@@ -53,3 +53,25 @@
 * Remember at the real release: the Quick Start's entry
   (`ezpkg>=0.0.1.dev0,<0.1`) and the Enabling template's become the
   released version's range, in all copies.
+
+## 2026-10-17: Rehearsed
+
+* `7f9fe8c` pushed; release run 39040557825 uploaded
+  `0.0.1.dev202610171424` to test.pypi.org.  `./release_check.py
+  testpypi` passed, and `check.yml` run 39040661597 passed all 25 jobs
+  (Linux, Windows, both Macs, 3.11-3.15, python.org, console).
+* Left before closing: `Summary.md`, and checking `I.uedepi`.
+
+## 2026-10-17: Two gaps found before closing
+
+* A scratch copy of the Quick Start that also does `import ezpkg`,
+  run with the project's `ezpkg` (0.0.1): `EZPKG_APPROVE=write`, then
+  `EZPKG_EXPORT=uv`.  The approvals file has only `cowsay`, and
+  `prog-uv.py`'s Part 1 is only `"cowsay==6.1"`.
+* Cause: when the running `ezpkg` is `chosen`, `install()` leaves the
+  entry out of `provide`, so nothing records an `ezpkg` wheel, and
+  `chosen` returns True when there is no pin.  So the approvals never
+  pin `ezpkg` (Details item 1 says they do), and `I.uedepi` is not
+  settled: the export pins only what the approvals record.
+* Waiting on Wayne: how to pin `ezpkg` (a dev copy of `ezpkg` is on no
+  index, so it has no wheel to record).

@@ -156,16 +156,6 @@ into your program's own output.  The prompt takes one of four answers:
 * **`?=>Explanation`** - This lists all requested downloads and then prompts
   again.
 
-Some programs are run with nobody there to answer, such as from `cron`
-or a CI system.  When there is no terminal (on Windows, no console), or
-the `CI` variable is set, as CI systems set it, the download prompt is
-skipped and the answer is taken to be `Yes`, for that run only: no
-`FOREVER_APPROVE` file is written, so a later run from a terminal still
-asks.  A program started on Windows by Task Scheduler or a service can
-have a console with nobody at it, so any question left unanswered for
-5 minutes is taken as `No`.
-<!-- Claude proposes replacing lines 159-166 above with this, to say
-what CI is:
 Some programs are run with nobody there to answer, such as from `cron`,
 or by an automated build and test service such as GitHub Actions (known
 as continuous integration, or CI).  When there is no terminal (on
@@ -175,7 +165,6 @@ to be `Yes`, for that run only: no `FOREVER_APPROVE` file is written, so
 a later run from a terminal still asks.  A program started on Windows by
 Task Scheduler or a service can have a console with nobody at it, so any
 question left unanswered for 5 minutes is taken as `No`.
--->
 
 A package is code, and installing one can run some of it: a `.pth` file
 in a package runs when the package is put on `sys.path`, before your

@@ -5,11 +5,16 @@
 @7.5_Keep_dependencies_and_imports_in_sync/Details.md
 @7.5_Keep_dependencies_and_imports_in_sync/Context.md
 @7.6_Test_on_Windows_and_macOS/Details.md
+@7.6_Test_on_Windows_and_macOS/Context.md
 @7.6.1_GitHub_Actions_runners/Details.md
+@7.6.1_GitHub_Actions_runners/Context.md
 @7.6.3_Friends_with_real_machines/Details.md
 @7.7_Refuse_an_edited_bootstrap/Details.md
+@7.7_Refuse_an_edited_bootstrap/Context.md
 @7.8_EZPkg_updates_itself/Details.md
+@7.8_EZPkg_updates_itself/Context.md
 @7.9_Ask_before_the_first_download/Details.md
+@7.9_Ask_before_the_first_download/Context.md
 @7.10_Upload_to_pypi_and_test/Details.md
 @../ISSUES/2_Windows_and_macOS_are_untried/Details.md
 @../ISSUES/3_Reviewer_thoughts_have_two_formats/Details.md

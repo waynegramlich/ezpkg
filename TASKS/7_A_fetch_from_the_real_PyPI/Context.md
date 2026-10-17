@@ -93,3 +93,10 @@
   environment, the `v*` tag ruleset, the pypi.org pending publisher.
 * Open README proposal: line 167, "Download Prompt" reworded to say
   what CI is (Wayne did not know the term).
+
+## 2026-10-17
+
+* Opened `T.eui`, `T.reb`, `T.abfd`, `T.towam`, `T.gar` (Wayne: open
+  what is being worked on).  README "Download Prompt" now says what CI
+  is.  Newest test.pypi.org upload: `0.0.1.dev202610171424` (from
+  `7f9fe8c`, with `T.eui`), passed `release_check` and `check.yml`.
