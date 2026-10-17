@@ -20,7 +20,7 @@ import urllib.request as req
 # Part 3: The EZPkg bootstrap.  Never edit it.
 try:  # Do not edit try block!  See https://pypi.org/project/ezpkg/
     s = "find home"; t = pathlib.Path.home()/".ezpkg"; w = t/"pip.whl"
-    m = None
+    m = n = None
     def g(u):  # Fetch u, with curl if this Python has no certificates.
         try: return req.urlopen(u, None, 60).read()
         except req.URLError as y: z = y  # As on python.org's macOS Python.
@@ -42,13 +42,14 @@ try:  # Do not edit try block!  See https://pypi.org/project/ezpkg/
             raise ValueError(f"{e['filename']} fails its SHA-256 check")
         t.mkdir(parents=True, exist_ok=True); p = t/"pip.part"
         p.write_bytes(r); p.replace(w)  # The rename is atomic.
-        s = "install ezpkg"; subprocess.run([
-            sys.executable, w/"pip", "install", "--no-input", "-t", t,
-            "--disable-pip-version-check", "ezpkg"], check=True, stdout=2)
+        s = "install ezpkg"; n = subprocess.run([sys.executable, w/"pip",
+            "install", "--no-input", "-t", t, "--disable-pip-version-check",
+            "ezpkg"], check=False, capture_output=True, text=True)
+        if n.returncode: raise RuntimeError(n.stderr.strip()[-300:])
     if m is None:
         s = "import ezpkg"; sys.path.insert(0, str(t))
         importlib.invalidate_caches(); m = importlib.import_module("ezpkg")
-    s = "fetch packages"; m.EZPkg().install(bootstrap="nopip6")
+    s = "fetch packages"; m.EZPkg(pip=n).install(bootstrap="nopip7")
 except Exception as x:
     raise SystemExit(f"ezpkg: {s} failed: {x!r}")  # Do not edit try block!
 

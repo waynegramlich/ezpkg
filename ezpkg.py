@@ -40,6 +40,7 @@ import dataclasses
 import datetime
 import difflib
 import hashlib
+import html
 import importlib
 import importlib.metadata
 import importlib.util
@@ -122,6 +123,8 @@ BOOTSTRAPS: dict[str, str] = {
         "nopip5 of 2026-10-12",
     "c12d783a7cbae0de29b7b5cf3a864c627e0e76d962ed31272f6a1cec8bf9c5f1":
         "nopip6 of 2026-10-16",
+    "670d697c070c800990a8b63cd25327e7470d16552c4e9e70b4706cb4a46b2d25":
+        "nopip7 of 2026-10-17",
 }
 
 # The Quick Start program from `README.md`, which the constructor writes
@@ -153,7 +156,7 @@ import urllib.request as req
 # Part 3: The EZPkg bootstrap.  Never edit it.
 try:  # Do not edit try block!  See https://pypi.org/project/ezpkg/
     s = "find home"; t = pathlib.Path.home()/".ezpkg"; w = t/"pip.whl"
-    m = None
+    m = n = None
     def g(u):  # Fetch u, with curl if this Python has no certificates.
         try: return req.urlopen(u, None, 60).read()
         except req.URLError as y: z = y  # As on python.org's macOS Python.
@@ -175,13 +178,14 @@ try:  # Do not edit try block!  See https://pypi.org/project/ezpkg/
             raise ValueError(f"{e['filename']} fails its SHA-256 check")
         t.mkdir(parents=True, exist_ok=True); p = t/"pip.part"
         p.write_bytes(r); p.replace(w)  # The rename is atomic.
-        s = "install ezpkg"; subprocess.run([
-            sys.executable, w/"pip", "install", "--no-input", "-t", t,
-            "--disable-pip-version-check", "ezpkg"], check=True, stdout=2)
+        s = "install ezpkg"; n = subprocess.run([sys.executable, w/"pip",
+            "install", "--no-input", "-t", t, "--disable-pip-version-check",
+            "ezpkg"], check=False, capture_output=True, text=True)
+        if n.returncode: raise RuntimeError(n.stderr.strip()[-300:])
     if m is None:
         s = "import ezpkg"; sys.path.insert(0, str(t))
         importlib.invalidate_caches(); m = importlib.import_module("ezpkg")
-    s = "fetch packages"; m.EZPkg().install(bootstrap="nopip6")
+    s = "fetch packages"; m.EZPkg(pip=n).install(bootstrap="nopip7")
 except Exception as x:
     raise SystemExit(f"ezpkg: {s} failed: {x!r}")  # Do not edit try block!
 
@@ -225,6 +229,39 @@ OLD_BOOTSTRAP_TEXTS: dict[str, str] = {
         s = "import ezpkg"; sys.path.insert(0, str(t))
         importlib.invalidate_caches(); m = importlib.import_module("ezpkg")
     s = "fetch packages"; m.EZPkg().install(bootstrap="nopip5")
+except Exception as x:
+    raise SystemExit(f"ezpkg: {s} failed: {x!r}")''',
+    "nopip6 of 2026-10-16": '''try:  # Do not edit try block!  See https://pypi.org/project/ezpkg/
+    s = "find home"; t = pathlib.Path.home()/".ezpkg"; w = t/"pip.whl"
+    m = None
+    def g(u):  # Fetch u, with curl if this Python has no certificates.
+        try: return req.urlopen(u, None, 60).read()
+        except req.URLError as y: z = y  # As on python.org's macOS Python.
+        try: return subprocess.run(["curl", "-fsSL", u],
+                                   capture_output=True, check=True).stdout
+        except Exception: raise z from None
+    try: m = importlib.import_module("ezpkg")  # Already importable?
+    except ImportError: pass
+    if m is None and not (t/"ezpkg").is_dir():  # Not installed yet.
+        s = "choose pip"; v = sys.version_info[1]
+        d = json.loads(g("https://pypi.org/pypi/pip/json"))
+        e = max((e for f in d["releases"].values() for e in f  # Newest pip ...
+                 if e["url"][-4:] == ".whl" and not e["yanked"]
+                 and (q := e["requires_python"] or "")[:4] == ">=3."
+                 and "," not in q and int(q.split(".")[1]) <= v),
+                key=lambda e: e["upload_time"])  # ... whose floor we meet.
+        s = "download pip"; r = g(e["url"])
+        if hashlib.sha256(r).hexdigest() != e["digests"]["sha256"]:
+            raise ValueError(f"{e['filename']} fails its SHA-256 check")
+        t.mkdir(parents=True, exist_ok=True); p = t/"pip.part"
+        p.write_bytes(r); p.replace(w)  # The rename is atomic.
+        s = "install ezpkg"; subprocess.run([
+            sys.executable, w/"pip", "install", "--no-input", "-t", t,
+            "--disable-pip-version-check", "ezpkg"], check=True, stdout=2)
+    if m is None:
+        s = "import ezpkg"; sys.path.insert(0, str(t))
+        importlib.invalidate_caches(); m = importlib.import_module("ezpkg")
+    s = "fetch packages"; m.EZPkg().install(bootstrap="nopip6")
 except Exception as x:
     raise SystemExit(f"ezpkg: {s} failed: {x!r}")''',
 }
@@ -383,6 +420,47 @@ def meets(version: str, specifier: str) -> bool:
         if not holds:
             return False
     return True
+
+
+class Declined(RuntimeError):
+    """The person asked said no to the packages that arrived.
+
+    A `RuntimeError`, as it always was, for a program calling `install`
+    with arguments.  `install()` with none ends the program instead, with
+    one line saying so (`T.abfd`).
+    """
+
+
+def shown(path: Path) -> str:
+    """Return a path as a person reads it: `~/.ezpkg`, not `/home/...`.
+
+    Windows has no `~`, so there the path is shown in full (`T.abfd`).
+
+    Arguments:
+    * `path` (`Path`):
+      Any path.
+
+    Returns:
+    * (`str`): The path, under `~` when it is inside the home directory.
+    """
+    # Only where a shell would understand the `~`.
+    if os.name == "nt":
+        return str(path)
+    try:
+        return "~/" + path.relative_to(Path.home()).as_posix()
+    except ValueError:
+        return str(path)
+
+
+def program_name() -> str:
+    """Return the running program's file name, for messages.
+
+    Returns:
+    * (`str`): Such as `prog.py`, or `this program` when it has no file.
+    """
+    # The interactive interpreter and `-c` have none.
+    program: Path | None = main_path()
+    return program.name if program is not None else "this program"
 
 
 def main_path() -> Path | None:
@@ -1532,36 +1610,40 @@ def with_type_ignores(text: str, adding: Collection[str],
     return "\n".join(lines), given
 
 
-def index_has(name: str) -> bool | None:
-    """Ask the package index whether it has a project of this name.
+def index_files(name: str) -> list[str] | None:
+    """Ask the package index which files it has for a project.
 
     The index is the one `pip` would use: `PIP_INDEX_URL`, else PyPI,
     then any `PIP_EXTRA_INDEX_URL`.  Asked before offering to add a
-    package whose name was only guessed, so that a misspelt import is
-    caught before anything is promised (Wayne's dogfood, 2026-10-15).
-    See `T.kdaiis`.
+    package whose name was only guessed, so that a misspelt import, or
+    a name somebody else has used for source code only (PyPI's `bogus`),
+    is caught before any question (Wayne's dogfood, 2026-10-15 and
+    2026-10-17).  See `T.kdaiis`.
 
     Arguments:
     * `name` (`str`):
       A distribution name.
 
     Returns:
-    * (`bool | None`): True if some index has it, False if every one
-      said it has not, and `None` when that could not be found out,
-      as with no network.
+    * (`list[str] | None`): The file names on the first index that has
+      the project, an empty list if every one said it has not, and
+      `None` when that could not be found out, as with no network.
     """
-    # PEP 503 project pages, one per index, until one has it.
+    # PEP 503 project pages, one per index, until one has it.  Each
+    # file is a link whose text is its name.
     indexes: list[str] = [os.environ.get("PIP_INDEX_URL", "")
                           or "https://pypi.org/simple"]
     indexes += os.environ.get("PIP_EXTRA_INDEX_URL", "").split()
     project: str = re.sub(r"[-_.]+", "-", name).lower()
-    answer: bool | None = False
+    answer: list[str] | None = []
     index: str
     for index in indexes:
         try:
             with urllib.request.urlopen(
-                    f"{index.rstrip('/')}/{project}/", timeout=10):
-                return True
+                    f"{index.rstrip('/')}/{project}/", timeout=10) as page:
+                text: str = page.read().decode("utf-8", "replace")
+            return [html.unescape(found).strip() for found in
+                    re.findall(r"<a\b[^>]*>([^<]*)</a>", text)]
         except urllib.error.HTTPError as error:
             if error.code != 404:
                 answer = None
@@ -2244,7 +2326,9 @@ class EZPkg:
     root: Path
     bootstrap: str = ""
 
-    def __init__(self, root: Path | None = None) -> None:
+    def __init__(self, root: Path | None = None,
+                 pip: subprocess.CompletedProcess[str] | None = None,
+                 **later: object) -> None:
         """EZPkg Package Cache.
 
         This directory holds Python packages that a program needed but
@@ -2308,8 +2392,17 @@ class EZPkg:
           The cache directory to use.  `None`, the default, means
           `~/.ezpkg`, which is the directory the bootstrap
           code names.  Tests pass a temporary directory instead.
+        * `pip` (`subprocess.CompletedProcess[str] | None`):
+          What the bootstrap's `pip install ezpkg` printed, captured,
+          on the run that installed `ezpkg` (a first run), else `None`
+          (`T.abfd`).
+        * `later` (`object`):
+          Keywords a newer bootstrap passes, ignored, so that it can
+          still reach `install` and switch to the `ezpkg` it asks for
+          (`T.eui`).
         """
         # Default to the cache directory that the bootstrap code names.
+        self.pip_run: subprocess.CompletedProcess[str] | None = pip
         self.root = Path.home() / ".ezpkg" if root is None else root
         self.root.mkdir(parents=True, exist_ok=True)
 
@@ -2903,6 +2996,60 @@ class EZPkg:
             return self.reconcile(found, list(asking), argv, record, kept,
                                   fingerprint, approved, opened)
 
+    def prove(self, package: str, module: str,
+              argv: Sequence[str] = ()) -> str:
+        """Say why a guessed package cannot be the one an import wants.
+
+        A guess is only the import's name, so before anybody is asked
+        about it, the index must have it, as a wheel, and the wheel must
+        hold the module.  Fetched into a holding directory, looked at
+        and thrown away: nothing is unpacked or run, and `pip`'s own
+        cache makes the later fetch cheap.  See `T.kdaiis`.
+
+        Arguments:
+        * `package` (`str`):
+          The guessed distribution name.
+        * `module` (`str`):
+          The top-level module the program imports.
+        * `argv` (`Sequence[str]`):
+          Extra arguments for `pip`, as `install` takes them.
+
+        Returns:
+        * (`str`): Why not, to follow "is imported, but", or an empty
+          string when the package does provide the module.
+        """
+        # The index's list of files first, which costs one page.  No
+        # answer (no network) leaves it to the fetch.
+        files: list[str] | None = index_files(package)
+        if files is not None and not files:
+            return f'no package "{package}" is on the index'
+        if files is not None and not any(
+                one.endswith(".whl") for one in files):
+            return (f'the index\'s "{package}" has no wheel, only '
+                    f'source code, so it cannot be installed')
+
+        # Then the wheel itself, with whatever it needs.
+        arrived: list[Path] = []
+        try:
+            arrived = self.download([package], argv)
+            wheel: Path | None = next(
+                (one for one in arrived
+                 if normal_name(one.name.split("-")[0])
+                 == normal_name(package)), None)
+            if wheel is None:
+                return f'"{package}" could not be fetched'
+            if module not in wheel_modules(wheel):
+                return (f'the index\'s "{package}" does not provide '
+                        f'`{module}`')
+            return ""
+        except (RuntimeError, ValueError) as error:
+            return f'"{package}" could not be fetched: ' + (
+                failure_reason(error))
+        finally:
+            holding: Path
+            for holding in {one.parent for one in arrived}:
+                shutil.rmtree(holding, ignore_errors=True)
+
     def reconcile(self, found: Discrepancy, asking: list[str],
                   argv: Sequence[str], record: Path, kept: dict[str, Any],
                   fingerprint: str, approved: set[str],
@@ -2989,13 +3136,14 @@ class EZPkg:
                 comment = reply == "yes"
             elif kind == "add":
                 _, module, package = found.additions[which]
-                if (package in found.guessed
-                        and index_has(package) is False):
-                    writer.write(
-                        f"line {line}: `{module}` is imported, but no "
-                        f"package of that name\nis on the index; check "
-                        f"the spelling, or add the right package to\n"
-                        f"dependencies by hand.\n")
+                problem: str = (self.prove(package, module, argv)
+                                if package in found.guessed else "")
+                if problem:
+                    writer.write(textwrap.fill(
+                        f"line {line}: `{module}` is imported, but "
+                        f"{problem}; check the spelling, or add the "
+                        f"right package to dependencies by hand.", 72)
+                        + "\n")
                     continue
                 reply = self.choose(
                     opened, f"line {line}: `{module}` is imported, but not "
@@ -3027,9 +3175,17 @@ class EZPkg:
             return asking
         modules: dict[str, str] = {package: module for _, module, package
                                    in found.additions if package in added}
+
+        # The `ezpkg` entry this `ezpkg` meets is not fetched, as in
+        # `install`: the index may not have this very version.
+        own: str | None = own_entry(final)
+        fetching: list[str] = (
+            [one for one in final if one != own]
+            if own is not None and self.chosen(own) else final)
         try:
-            self.provide(final, argv, {normal_name(package): module
-                                       for package, module in modules.items()})
+            self.provide(fetching, argv, {normal_name(package): module
+                                          for package, module
+                                          in modules.items()})
         except (RuntimeError, ValueError) as error:
             reason: str = failure_reason(error)
             hint: str = ("; with an approvals file, run it with "
@@ -3039,7 +3195,7 @@ class EZPkg:
             self.keep(record, kept, asked=fingerprint, answer=answer)
             return asking
         fetched: tuple[list[str], list[str]] | None = self.remember(
-            self.request_for(final))
+            self.request_for(fetching))
         ranged: dict[str, str] = {}
         for package in modules:
             try:
@@ -3901,41 +4057,41 @@ class EZPkg:
         for line in text.splitlines():
             if line.startswith("Summary:"):
                 return "".join(one for one in line[8:].strip()
-                               if one.isprintable())[:60]
+                               if one.isprintable())
         return ""
 
     def details(self, wheels: Sequence[Path],
-                asking: Sequence[str]) -> list[str]:
-        """Describe each wheel, for somebody who typed `?`.
+                width: int = 80) -> list[str]:
+        """Describe each wheel in one numbered line, for `?`.
 
-        Separates what was observed from what the package claims about
-        itself.  The size and the digest are ours; the origin is the
-        index we were pointed at; the summary is the package's own words.
+        The name and version, which the wheel's file name fixes, then the
+        package's own summary, cut to fit `width` (Wayne, 2026-10-17:
+        the earlier origin, size, digest and "it says" lines were "way,
+        way, way too verbose").  The summary is the uploader's words, so
+        a typosquat's reads like the real one; `summary` strips anything
+        unprintable.
 
         Arguments:
         * `wheels` (`Sequence[Path]`):
           The wheels that arrived.
-        * `asking` (`Sequence[str]`):
-          The requirements that were asked for.
+        * `width` (`int`):
+          The longest line, in characters.
 
         Returns:
         * (`list[str]`): Lines to show, without trailing newlines.
         """
-        # Where these came from is a fact; what they say is a claim.
-        origin: str = os.environ.get("PIP_INDEX_URL", "the default index")
-        wanted: set[str] = {requirement_name(one).replace("-", "_").lower()
-                            for one in asking}
-        lines: list[str] = [f"fetched from {origin}"]
+        # `  1. cowsay 6.1: The famous cowsay ...`, cut with `...`.
+        lines: list[str] = []
+        number: int
         wheel: Path
-        for wheel in sorted(wheels):
+        for number, wheel in enumerate(sorted(wheels), 1):
             fields: list[str] = wheel.stem.split("-")
-            asked: str = ("asked for" if fields[0].lower() in wanted
-                          else "came along")
-            told: str = self.summary(wheel) or "(says nothing about itself)"
-            lines.append(f"  {fields[0]} {fields[1]}, {asked}, "
-                         f"{wheel.stat().st_size / 1024:.1f} KB")
-            lines.append(f"    it says: {told}")
-            lines.append(f"    sha256:  {self.digest(wheel)}")
+            told: str = self.summary(wheel)
+            line: str = (f"  {number}. {fields[0]} {fields[1]}"
+                         + (f": {told}" if told else ""))
+            if len(line) > width:
+                line = line[:width - 3].rstrip() + "..."
+            lines.append(line)
         return lines
 
     def terminal(self) -> tuple[IO[str], IO[str]] | None:
@@ -4017,7 +4173,7 @@ class EZPkg:
         declines at once rather than being asked again forever.
 
         With no terminal there is nobody to ask, and the answer is yes:
-        the list has already been printed, and failing instead would
+        a line says how many packages were stored, and failing instead would
         break every program run from `cron` or a build on the first day.
         A guarantee rather than a notification is what the approvals file
         is for; see `T.sawaw`.
@@ -4046,14 +4202,26 @@ class EZPkg:
         writer: IO[str]
         reader: IO[str]
         writer, reader = opened
+        name: str = program_name()
+        many: bool = len(wheels) != 1
+        question: str = (
+            f"{name} needs {len(wheels)} software "
+            f"package{'s' if many else ''}, chosen by its author and now "
+            f"downloaded.\n"
+            f"If you do not trust the author of {name}, answer n and "
+            f"{'they are' if many else 'it is'} deleted.\n"
+            f"Keep {'them' if many else 'it'} in {shown(self.root)} and "
+            f"run {name}? [y=>Yes/n=>No/a=>Always/?=>Explain] ")
         with writer, reader:
             while typos < ATTEMPTS:
-                writer.write(f"{len(asking)} requested, {len(wheels)} to "
-                             f"install into {self.root};\n"
-                             f"go ahead? "
-                             f"[y=>Yes/n=>No/a=>Always/?=>Explanation] ")
+                writer.write(question)
                 writer.flush()
                 answer = answer_from(reader, writer)
+
+                # Standard error sent to a file gets the question and
+                # the answer too, so that it tells the whole story.
+                if not sys.stderr.isatty():
+                    print(f"{question}{answer.strip()}", file=sys.stderr)
 
                 # An empty read is the terminal going away, not an
                 # answer, and asking again would never end.
@@ -4099,8 +4267,10 @@ class EZPkg:
                         f"download:\n    {removal}\n\n")
                     return True
                 if answer == "?":
-                    writer.write("\n" + "\n".join(
-                        self.details(wheels, asking)) + "\n")
+                    writer.write(
+                        "\nSoftware packages are code from PyPI, the "
+                        "Python Package Index:\n"
+                        + "\n".join(self.details(wheels)) + "\n\n")
                     continue
                 typos += 1
                 writer.write(
@@ -4229,7 +4399,7 @@ class EZPkg:
         if self.forever().is_file():
             return
         if not self.consent(wheels, asking):
-            raise RuntimeError(
+            raise Declined(
                 f"declined: nothing was installed into {self.root}")
 
     def verify(self, wheels: Sequence[Path]) -> None:
@@ -4268,41 +4438,6 @@ class EZPkg:
                     f"{wheel.name} does not match its approval in "
                     f"{self.approvals()}: expected "
                     f"{expected[wheel.name]}, got {actual}")
-
-    def announce(self, wheels: Sequence[Path],
-                 asking: Sequence[str]) -> None:
-        """Say what arrived, separating what was asked for from the rest.
-
-        Written to standard error, never to standard output, because a
-        library that writes to standard output corrupts the output of
-        any program whose own output is piped or parsed.
-
-        Nothing from the index is printed: not a summary, not a page
-        title.  Those are written by whoever uploaded the package, so a
-        typosquat's read exactly like the real thing, and index text can
-        carry escape sequences that rewrite the terminal.  Only the
-        filename, which the wheel specification fixes, and our own
-        digest of it.
-
-        Arguments:
-        * `wheels` (`Sequence[Path]`):
-          The wheels that arrived.
-        * `asking` (`Sequence[str]`):
-          The requirements that were asked for.
-        """
-        # Which of these were asked for, and which merely came along?
-        wanted: set[str] = {requirement_name(one).replace("-", "_").lower()
-                            for one in asking}
-        lines: list[str] = []
-        wheel: Path
-        for wheel in sorted(wheels):
-            fields: list[str] = wheel.stem.split("-")
-            asked: str = ("asked for" if fields[0].lower() in wanted
-                          else "came along")
-            lines.append(f"  {fields[0]} {fields[1]}  {asked}")
-        print(f"{len(asking)} requested, {len(wheels)} downloaded into "
-              f"{self.root}:", file=sys.stderr)
-        print("\n".join(lines), file=sys.stderr)
 
     def digest(self, wheel: Path) -> str:
         """Return the SHA-256 of a wheel, as hexadecimal.
@@ -5028,7 +5163,13 @@ class EZPkg:
             if bootstrap and not switching:
                 self.refuse_an_edited_bootstrap(bootstrap)
             providing: list[str] = self.providing(asked, own, switching)
-            self.switch(self.provide(providing, argv))
+            try:
+                self.switch(self.provide(providing, argv))
+            except Declined:
+                # One line, not a traceback or the bootstrap's
+                # `failed:` line, which would read as a fault.
+                raise SystemExit(f"ezpkg: nothing was installed, so "
+                                 f"{program_name()} stops here.") from None
             if bootstrap and switching:
                 # Still here, so no other `ezpkg` came: this one judges.
                 self.refuse_an_edited_bootstrap(bootstrap)
@@ -5332,13 +5473,16 @@ class EZPkg:
                             f"{wheel.name} does not provide `{module}`, "
                             f"so it is not the package that import wants")
 
-                # Say what turned up, then check it against what the
-                # author approved, and only then unpack.  Nothing in a
+                # Check what turned up against what the author approved,
+                # or ask, and only then unpack and say so.  Nothing in a
                 # wheel has run at the moment it is refused; see 6.6.
-                self.announce(arrived, asking)
+                # The list of what arrived is for `?` (`T.abfd`).
                 self.gate(arrived, asking)
 
                 trees = [self.unpack(wheel) for wheel in arrived]
+                print(f"ezpkg: {len(arrived)} "
+                      f"package{'' if len(arrived) == 1 else 's'} stored "
+                      f"in {shown(self.root)}.", file=sys.stderr)
                 self.remember(request, [tree.name for tree in trees],
                               [wheel.name for wheel in arrived])
             finally:

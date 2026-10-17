@@ -11,7 +11,7 @@ needs live here instead.
 * `quick_start.py`: The Quick Start program, and the authority for the
   bootstrap text.
 * `bootstrap.py`: Every bootstrap this project has tried, one function
-  per case (`nopip1` ... `nopip6`); `nopip6` is the one that ships.
+  per case (`nopip1` ... `nopip7`); `nopip7` is the one that ships.
 * `ezpkg_test.py`: The test suite.
 * `ezpkg_coverage.py`: Coverage with the standard library `trace`
   (`trace_hook/` carries it into child processes).
@@ -34,6 +34,12 @@ needs live here instead.
 * `~/ezpkg_dogfood/` (outside the project): Wayne's `prog.py`; `run`
   uses the project's `ezpkg.py`, `run_testpypi [--clean] [VERSION]`
   the newest test.pypi.org upload (`--clean` empties its `~/.ezpkg`).
+  `run_testpypi --local` builds a wheel from the project's `ezpkg.py`
+  (again only when it changed; `--time` reports `prog.py`'s own run time)
+  (`release.py testpypi`) and installs that instead, to try uncommitted
+  code as a stranger gets it.  `--reset` (both) puts back `quick_start.py` as `prog.py` (old one in
+  `prog.py.reset~`) and removes approvals, exports, `develop/` and
+  `scans/`.
 * `git_hooks/`: `prepare-commit-msg` adds `Assisted-by: Claude
   Code:claude-opus-5-5` to Wayne's commit messages (deletable in the
   editor), and `commit-msg` refuses a message that is only that
@@ -48,7 +54,7 @@ match it:
 * Both bootstrap copies in `README.md` (Quick Start, and Enabling
   `EZPkg` for Your Program).
 * `QUICK_START` in `ezpkg.py`.
-* The `nopip6` function in `bootstrap.py` (which spells the package name
+* The `nopip7` function in `bootstrap.py` (which spells the package name
   as `PACKAGE` and the index as `JSON_API`).
 
 A changed bootstrap is a new one, comments and spaces included

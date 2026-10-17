@@ -128,6 +128,9 @@ user would type.  The real `~/.ezpkg` is never touched.
 | nopip6 | as nopip5,    | 4       | 38    | 41    | 3.12 s | 0.16 s | 3538   |
 |        | curl if no    |         |       |       |        |        |        |
 |        | certs         |         |       |       |        |        |        |
+| nopip7 | as nopip6,    | 4       | 39    | 42    | -      | -      | -      |
+|        | pip output    |         |       |       |        |        |        |
+|        | captured      |         |       |       |        |        |        |
 +--------+---------------+---------+-------+-------+--------+--------+--------+
 
 What the columns mean, in the order they appear above:
@@ -324,6 +327,13 @@ the `urllib` error is reported (`I.btosc`).  It costs six lines.  Its
 row was measured beside a fresh `nopip5` run, 3.12 s against 3.19 s
 cold and 0.16 s against 0.14 s warm, the same within the noise; a
 machine with certificates never reaches `curl`.
+
+`nopip7` has shipped since 2026-10-17.  It is `nopip6` with `pip`'s
+output captured rather than printed, and handed to `EZPkg(pip=n)`, so
+that a stranger's first run starts with the download prompt (`T.abfd`);
+a failed install raises with `pip`'s own reason.  It costs one line.
+Its timings are not measured yet (`-`); it runs the same steps as
+`nopip6`.
 
 MIT No Attribution
 
@@ -1003,6 +1013,63 @@ def nopip6() -> None:
         raise SystemExit(f"{PACKAGE}: {s} failed: {x!r}")  # Do not edit try block!
 
 
+def nopip7() -> None:
+    """As nopip6, but `pip`'s output is captured and handed to `EZPkg`.
+
+    A stranger's first run showed `pip`'s own lines before anything
+    explained them (Wayne, 2026-10-16), so `pip install` captures its
+    output, and `EZPkg(pip=n)` gets the result, from which it knows a
+    first run.  A failed install raises with `pip`'s own reason, which
+    `check=True` lost.  `EZPkg` takes unknown keywords and ignores them,
+    so a later bootstrap may pass more to an older cached `ezpkg`.  See
+    `T.abfd`.
+
+
+    Raises:
+    * `SystemExit`:
+      If any step fails, with one line saying what failed and why.
+    """
+    # Ensure `ezpkg` is downloaded.
+    import hashlib
+    import json
+    import subprocess
+    import urllib.request as req
+    try:  # Do not edit try block!  See https://pypi.org/project/ezpkg/
+        s = "find home"; t = pathlib.Path.home()/".ezpkg"; w = t/"pip.whl"
+        m = n = None
+        def g(u):  # Fetch u, with curl if this Python has no certificates.
+            try: return req.urlopen(u, None, 60).read()
+            except req.URLError as y: z = y  # As on python.org's macOS Python.
+            try: return subprocess.run(["curl", "-fsSL", u],
+                                       capture_output=True, check=True).stdout
+            except Exception: raise z from None
+        try: m = importlib.import_module(PACKAGE)  # Already importable?
+        except ImportError: pass
+        if m is None and not (t/PACKAGE).is_dir():  # Not installed yet.
+            s = "choose pip"; v = sys.version_info[1]
+            d = json.loads(g(f"{JSON_API}/pip/json"))
+            e = max((e for f in d["releases"].values() for e in f  # Newest pip ...
+                     if e["url"][-4:] == ".whl" and not e["yanked"]
+                     and (q := e["requires_python"] or "")[:4] == ">=3."
+                     and "," not in q and int(q.split(".")[1]) <= v),
+                    key=lambda e: e["upload_time"])  # ... whose floor we meet.
+            s = "download pip"; r = g(e["url"])
+            if hashlib.sha256(r).hexdigest() != e["digests"]["sha256"]:
+                raise ValueError(f"{e['filename']} fails its SHA-256 check")
+            t.mkdir(parents=True, exist_ok=True); p = t/"pip.part"
+            p.write_bytes(r); p.replace(w)  # The rename is atomic.
+            s = f"install {PACKAGE}"; n = subprocess.run([sys.executable, w/"pip",
+                "install", "--no-input", "-t", t, "--disable-pip-version-check",
+                PACKAGE], check=False, capture_output=True, text=True)
+            if n.returncode: raise RuntimeError(n.stderr.strip()[-300:])
+        if m is None:
+            s = f"import {PACKAGE}"; sys.path.insert(0, str(t))
+            importlib.invalidate_caches(); m = importlib.import_module(PACKAGE)
+        s = "fetch packages"; m.EZPkg(pip=n).install(bootstrap="nopip7")
+    except Exception as x:
+        raise SystemExit(f"{PACKAGE}: {s} failed: {x!r}")  # Do not edit try block!
+
+
 def main() -> None:
     """Run the single bootstrap mechanism named by `sys.argv[1]`.
 
@@ -1057,6 +1124,7 @@ MECHANISMS = {
     "nopip4": "as nopip3, importable first",
     "nopip5": "as nopip4, pip to stderr",
     "nopip6": "as nopip5, curl if no certs",
+    "nopip7": "as nopip6, pip output captured",
 }
 # Lines a case needs but does not contain: the three module level
 # imports.  This is the difference between `lines` and `paste`.

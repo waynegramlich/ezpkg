@@ -45,7 +45,7 @@ import urllib.request as req
 # Part 3: The EZPkg bootstrap.  Never edit it.
 try:  # Do not edit try block!  See https://pypi.org/project/ezpkg/
     s = "find home"; t = pathlib.Path.home()/".ezpkg"; w = t/"pip.whl"
-    m = None
+    m = n = None
     def g(u):  # Fetch u, with curl if this Python has no certificates.
         try: return req.urlopen(u, None, 60).read()
         except req.URLError as y: z = y  # As on python.org's macOS Python.
@@ -67,13 +67,14 @@ try:  # Do not edit try block!  See https://pypi.org/project/ezpkg/
             raise ValueError(f"{e['filename']} fails its SHA-256 check")
         t.mkdir(parents=True, exist_ok=True); p = t/"pip.part"
         p.write_bytes(r); p.replace(w)  # The rename is atomic.
-        s = "install ezpkg"; subprocess.run([
-            sys.executable, w/"pip", "install", "--no-input", "-t", t,
-            "--disable-pip-version-check", "ezpkg"], check=True, stdout=2)
+        s = "install ezpkg"; n = subprocess.run([sys.executable, w/"pip",
+            "install", "--no-input", "-t", t, "--disable-pip-version-check",
+            "ezpkg"], check=False, capture_output=True, text=True)
+        if n.returncode: raise RuntimeError(n.stderr.strip()[-300:])
     if m is None:
         s = "import ezpkg"; sys.path.insert(0, str(t))
         importlib.invalidate_caches(); m = importlib.import_module("ezpkg")
-    s = "fetch packages"; m.EZPkg().install(bootstrap="nopip6")
+    s = "fetch packages"; m.EZPkg(pip=n).install(bootstrap="nopip7")
 except Exception as x:
     raise SystemExit(f"ezpkg: {s} failed: {x!r}")  # Do not edit try block!
 
@@ -200,7 +201,7 @@ import urllib.request as req
 # Part 3: The EZPkg bootstrap.  Never edit it.
 try:  # Do not edit try block!  See https://pypi.org/project/ezpkg/
     s = "find home"; t = pathlib.Path.home()/".ezpkg"; w = t/"pip.whl"
-    m = None
+    m = n = None
     def g(u):  # Fetch u, with curl if this Python has no certificates.
         try: return req.urlopen(u, None, 60).read()
         except req.URLError as y: z = y  # As on python.org's macOS Python.
@@ -222,13 +223,14 @@ try:  # Do not edit try block!  See https://pypi.org/project/ezpkg/
             raise ValueError(f"{e['filename']} fails its SHA-256 check")
         t.mkdir(parents=True, exist_ok=True); p = t/"pip.part"
         p.write_bytes(r); p.replace(w)  # The rename is atomic.
-        s = "install ezpkg"; subprocess.run([
-            sys.executable, w/"pip", "install", "--no-input", "-t", t,
-            "--disable-pip-version-check", "ezpkg"], check=True, stdout=2)
+        s = "install ezpkg"; n = subprocess.run([sys.executable, w/"pip",
+            "install", "--no-input", "-t", t, "--disable-pip-version-check",
+            "ezpkg"], check=False, capture_output=True, text=True)
+        if n.returncode: raise RuntimeError(n.stderr.strip()[-300:])
     if m is None:
         s = "import ezpkg"; sys.path.insert(0, str(t))
         importlib.invalidate_caches(); m = importlib.import_module("ezpkg")
-    s = "fetch packages"; m.EZPkg().install(bootstrap="nopip6")
+    s = "fetch packages"; m.EZPkg(pip=n).install(bootstrap="nopip7")
 except Exception as x:
     raise SystemExit(f"ezpkg: {s} failed: {x!r}")  # Do not edit try block!
 
@@ -537,6 +539,15 @@ the `except` at the bottom stops the program with
     from PyPI and install it into `~/.ezpkg`.
   * `stdout=2` sends `pip`'s progress to standard error, so a program
     whose output is piped or saved never finds `pip`'s lines in it.
+<!-- Claude proposes replacing the `stdout=2` bullet above with these
+two, for `nopip7`:
+  * `capture_output=True` keeps `pip`'s lines off the screen, since on
+    a first run they come before anything explains them.  `ezpkg` gets
+    them as `n`, and shows them under the download prompt's `?`.
+  * If `pip` fails, its own reason ends the run, such as `ezpkg:
+    install ezpkg failed: RuntimeError('ERROR: No matching distribution
+    found for ezpkg')`.
+-->
 * `s = "import ezpkg"`:
   * This puts `~/.ezpkg` at the front of `sys.path` and imports
     `ezpkg` from there.
@@ -544,7 +555,14 @@ the `except` at the bottom stops the program with
   * `m.EZPkg()` sets up the `~/.ezpkg` directory, and `.install()`
     reads Part 1, downloads any packages not already there, and puts
     them on `sys.path`, so that the imports in Part 4 succeed.
-  * `bootstrap="nopip6"` names the bootstrap this program carries.
+<!-- Claude proposes replacing the bullet above with this, for
+`nopip7`:
+  * `m.EZPkg(pip=n)` sets up the `~/.ezpkg` directory, given what `pip`
+    printed if it just installed `ezpkg`, and `.install()` reads Part 1,
+    downloads any packages not already there, and puts them on
+    `sys.path`, so that the imports in Part 4 succeed.
+-->
+  * `bootstrap="nopip7"` names the bootstrap this program carries.
 
 Never edit the bootstrap, not even a space or a comment.  Indenting the
 whole of it, as under an `if`, is the one change allowed.  Anything
@@ -555,7 +573,7 @@ differs:
 ```
 ezpkg: prog.py: its bootstrap (lines 21-53) has been edited, so ezpkg stops here.
   line 33: s = "choose pipx"; v = sys.version_info[1]
-  nopip6:  s = "choose pip"; v = sys.version_info[1]
+  nopip7:  s = "choose pip"; v = sys.version_info[1]
                           |
 Replace it with the bootstrap from https://pypi.org/project/ezpkg/, then run it again.
 ```

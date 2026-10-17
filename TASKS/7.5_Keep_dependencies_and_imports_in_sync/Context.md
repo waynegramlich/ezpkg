@@ -98,3 +98,22 @@ rehearsal and dogfood run, then its `Summary.md` and closing.
    `coverage`, `pip` are bare).
 4. Write `Summary.md` and close.  Then `I.wmau` (Windows and macOS),
    which must close before `T.utpat` (Wayne).
+
+## 2026-10-17: Guessed names are proved before asking
+
+* Wayne's dogfood: `import bogus` was offered and questioned, and only
+  failed at the end.  PyPI's `bogus` is a stranger's source-only
+  project.  And since `T.eui` the final fetch also asked for the `ezpkg`
+  entry, which pypi.org lacks, so the failure named `ezpkg`, not `bogus`.
+* Fixes (Wayne: do all three): `reconcile` fetches without the `ezpkg`
+  entry this `ezpkg` meets; `EZPkg.prove(package, module)` runs before
+  each guessed addition's question: `index_files` (replaces
+  `index_has`; the PEP 503 page's file names) for "no package" and "no
+  wheel, only source code", then a `download` into holding and
+  `wheel_modules` for "does not provide".  A failure is one wrapped
+  line, and no question.
+* Tests: `test_a_wrong_guess_is_not_offered` (was
+  `..._changes_nothing`), `test_a_source_only_package_is_not_offered`
+  (`sourceonly-1.0.0.tar.gz` in the test index),
+  `test_an_addition_does_not_fetch_this_ezpkg` (fails with the bug put
+  back), and the index-lacks test's new wording.

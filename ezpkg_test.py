@@ -143,16 +143,16 @@ FLOOR: str = floor()
 
 # The consent question, spelled once here so that changing the wording in
 # `ezpkg.py` fails in one obvious place rather than in six.
-PROMPT: str = "go ahead? [y=>Yes/n=>No/a=>Always/?=>Explanation]"
+PROMPT: str = "? [y=>Yes/n=>No/a=>Always/?=>Explain]"
 CONFIRM: str = "Really never ask again? [y=>Yes/n=>No]"
 
-# The case that ships: `nopip6` uses an `ezpkg` that is already
+# The case that ships: `nopip7` uses an `ezpkg` that is already
 # importable, and otherwise fetches a `pip` of its own and runs it as a
-# subprocess, with its output on standard error, so it needs no `pip`
+# subprocess, its output captured for `EZPkg`, so it needs no `pip`
 # on the machine and leaves none of `pip`'s state in the program.  It
 # fetches `pip` with `curl` when this Python has no certificates.  See
 # `T.npp`, `T.ewar`, `T.rp` and `I.btosc`.
-SHIPPING: str = "nopip6"
+SHIPPING: str = "nopip7"
 
 # Which cases the all-case tests exercise by default.  The first cull
 # found that only the four needing no `pip` add anything to coverage
@@ -161,11 +161,12 @@ SHIPPING: str = "nopip6"
 # (Wayne).  `nopip5`, which ships, took `nopip4`'s place in 2026-10-12's
 # rename, being the same code with `pip`'s output on standard error.
 # `nopip6` took `nopip5`'s place on 2026-10-16, adding the `curl`
-# fallback for a Python without certificates (`I.btosc`).
+# fallback for a Python without certificates (`I.btosc`), and `nopip7`
+# took `nopip6`'s on 2026-10-17, capturing `pip`'s output (`T.abfd`).
 # The others are kept, because keeping them costs nothing, and run
 # under `EZPKG_TEST=COMPLETE`; a test that names a case of its own
 # still runs it.
-FAST_CASES: tuple[str, ...] = ("nopip1", "nopip6")
+FAST_CASES: tuple[str, ...] = ("nopip1", "nopip7")
 
 def platform_tag() -> str:
     """Return a compatibility tag this interpreter would accept.
@@ -2389,13 +2390,19 @@ class InstallTest(unittest.TestCase):
                                   "Not what its name says.",
                                   cls.root / "dist")
 
+        # A project with source code only, as PyPI's `bogus` is, which
+        # `pip --only-binary :all:` can never install (Wayne's dogfood,
+        # 2026-10-17).  Its contents never matter.
+        source_only: Path = cls.root / "dist" / "sourceonly-1.0.0.tar.gz"
+        source_only.write_bytes(b"not really a tarball")
+
         # This project too, for the bootstrap the no-`pip` test runs.
         project: Path = build_wheel(
             Path(__file__).resolve().parent / f"{MODULE}.py",
             DISTRIBUTION, VERSION, SUMMARY, cls.root / "dist", floor=FLOOR)
 
         cls.index = build_index([wheel, two_named, depending, shipping,
-                                 decoy, project, *versions],
+                                 decoy, source_only, project, *versions],
                                 cls.root / "index")
         cls.cache = cls.root / "cache"
 
@@ -3275,13 +3282,13 @@ class InstallTest(unittest.TestCase):
         `charset-normalizer 3.3.2` either way, so asking them would be a
         rubber stamp.  See `T.sawaw`.
         """
-        # Nothing is prompted, and the listing separates the two kinds.
+        # Nothing is prompted; one line says what was stored.
         program: Path = self.program("told", "widget")
         done: subprocess.CompletedProcess[str] = self.run_program(program)
         self.assertEqual(done.returncode, 0, done.stderr[-300:])
         self.assertEqual(done.stdout.strip(), "1.2.3")
-        self.assertIn("1 requested, 1 downloaded", done.stderr)
-        self.assertIn("widget 1.2.3  asked for", done.stderr)
+        self.assertEqual(done.stderr, f"ezpkg: 1 package stored in "
+                         f"{program.parent / 'cache'}.\n")
         self.assertFalse(program.with_suffix(".ezpkg").exists())
 
     def test_the_author_records_approvals(self) -> None:
@@ -3622,7 +3629,7 @@ class InstallTest(unittest.TestCase):
         done: subprocess.CompletedProcess[str] = self.run_program(
             program, EZPKG_APPROVE="write")
         self.assertEqual(done.returncode, 0, done.stderr[-300:])
-        self.assertIn("1 requested, 1 downloaded", done.stderr)
+        self.assertIn("ezpkg: 1 package stored in", done.stderr)
         self.assertIn("approvals written to", done.stderr)
         rows: list[str] = [line for line in
                            program.with_suffix(".ezpkg").read_text(
@@ -3700,7 +3707,8 @@ class InstallTest(unittest.TestCase):
         # anybody can judge.
         program: Path = self.program("asked_yes", "widget")
         seen: str = self.answer_on_a_terminal(program, b"y\n")
-        self.assertIn("1 requested, 1 to install", seen)
+        self.assertIn("prog.py needs 1 software package, chosen by its "
+                      "author", seen)
         self.assertIn(PROMPT, seen)
         self.assertIn("1.2.3", seen)
 
@@ -3769,7 +3777,7 @@ class InstallTest(unittest.TestCase):
         shutil.rmtree(program.parent / "cache" / "versions")
         shutil.rmtree(program.parent / "cache" / "requests")
         seen: str = self.answer_on_a_terminal(program, b"")
-        self.assertNotIn("go ahead?", seen)
+        self.assertNotIn(PROMPT, seen)
         self.assertIn("1.2.3", seen)
 
     def test_the_marker_never_hides_a_mismatch(self) -> None:
@@ -3849,21 +3857,41 @@ class InstallTest(unittest.TestCase):
         self.assertIn("1.2.3", seen)
 
     def test_a_question_mark_says_more_and_asks_again(self) -> None:
-        """`?` describes each wheel, then puts the question again.
+        """`?` lists each package in a numbered line, then asks again.
 
-        The terse listing is the default; somebody who wants to know
-        more can ask without leaving the program.  What was observed is
-        kept apart from what the package claims about itself.
+        One line per package, the one that came along included, so
+        somebody who wants to know more can ask without leaving the
+        program (Wayne, 2026-10-17).  See `T.abfd`.
         """
         # Ask for detail, then agree.
-        program: Path = self.program("curious", "widget")
+        program: Path = self.program("curious", "needy")
         seen: str = self.answer_on_a_terminal(program, b"?\ny\n")
         self.assertEqual(seen.count(PROMPT), 2, seen)
-        self.assertIn("fetched from", seen)
-        self.assertIn("it says:", seen)
-        self.assertIn("sha256:", seen)
-        self.assertIn("KB", seen)
-        self.assertIn("1.2.3", seen)
+        self.assertIn("  1. needy 1.0.0: Needs a widget.", seen)
+        self.assertIn("  2. widget 1.2.3: A throwaway.", seen)
+        self.assertNotIn("sha256", seen)
+
+    def test_a_long_summary_is_cut_to_fit(self) -> None:
+        """A line longer than the width ends in `...` at the width."""
+        # A summary of 200 characters, and one with none.
+        venv: ezpkg.EZPkg = ezpkg.EZPkg(self.root / "cut-cache")
+        wheels: list[Path] = []
+        name: str
+        told: str
+        for name, told in (("long", "word " * 40), ("bare", "")):
+            wheel: Path = self.root / "cut" / f"{name}-1.0-py3-none-any.whl"
+            wheel.parent.mkdir(parents=True, exist_ok=True)
+            with zipfile.ZipFile(wheel, "w") as archive:
+                archive.writestr(
+                    f"{name}-1.0.dist-info/METADATA",
+                    f"Metadata-Version: 2.1\nName: {name}\n"
+                    + (f"Summary: {told}\n" if told else ""))
+            wheels.append(wheel)
+        lines: list[str] = venv.details(wheels)
+        self.assertEqual(lines[0], "  1. bare 1.0")
+        self.assertTrue(lines[1].startswith("  2. long 1.0: word word"))
+        self.assertTrue(lines[1].endswith("..."))
+        self.assertLessEqual(len(lines[1]), 80)
 
     def test_asking_for_detail_is_not_a_typo(self) -> None:
         """`?` does not spend the patience meant for mistakes.
@@ -3875,7 +3903,8 @@ class InstallTest(unittest.TestCase):
         program: Path = self.program("patient", "widget")
         seen: str = self.answer_on_a_terminal(
             program, b"?\n" * (ezpkg.ATTEMPTS + 2) + b"n\n")
-        self.assertEqual(seen.count("fetched from"), ezpkg.ATTEMPTS + 2)
+        self.assertEqual(seen.count("Software packages are code from"),
+                         ezpkg.ATTEMPTS + 2)
         self.assertIn("declined", seen)
         self.assertNotIn("Please answer", seen)
 
@@ -3899,31 +3928,19 @@ class InstallTest(unittest.TestCase):
         self.assertNotIn("\x1b", told)
         self.assertTrue(told.isprintable(), repr(told))
 
-    def test_a_dependency_is_shown_as_having_come_along(self) -> None:
-        """What was asked for is told apart from what arrived with it.
+    def test_a_dependency_counts_as_a_package(self) -> None:
+        """What arrived with a package is counted with it.
 
-        This is what 6.6.4 of `T.sawaw` rests on: nobody ever looks at what a
-        single `pip install` actually pulls in, and the listing is the
-        first time most people would see the number.  Until a test wheel
-        had a dependency, the `came along` branch had never executed at
-        all -- found by tracing child processes.
+        Nobody looks at what a single `pip install` pulls in, so the
+        count is the first time most people would see the number; `?`
+        tells the two kinds apart (`test_the_detail_also_separates_the_
+        two_kinds`).  See 6.6.4 of `T.sawaw` and `T.abfd`.
         """
         # `needy` depends on `widget`, so two arrive for one request.
         program: Path = self.program("came_along", "needy")
         done: subprocess.CompletedProcess[str] = self.run_program(program)
         self.assertEqual(done.returncode, 0, done.stderr[-400:])
-        self.assertIn("1 requested, 2 downloaded", done.stderr)
-        self.assertIn("needy 1.0.0  asked for", done.stderr)
-        self.assertIn("widget 1.2.3  came along", done.stderr)
-
-    def test_the_detail_also_separates_the_two_kinds(self) -> None:
-        """`?` marks a dependency as having come along as well."""
-        # The same distinction, in the verbose form.
-        program: Path = self.program("came_along_detail", "needy")
-        seen: str = self.answer_on_a_terminal(program, b"?\ny\n")
-        self.assertIn("needy 1.0.0, asked for,", seen)
-        self.assertIn("widget 1.2.3, came along,", seen)
-        self.assertIn("Needs a widget.", seen)
+        self.assertIn("ezpkg: 2 packages stored in", done.stderr)
 
     def test_a_summary_that_is_absent_or_unreadable(self) -> None:
         """A wheel with no summary, or no metadata at all, says nothing.
@@ -3978,7 +3995,7 @@ class InstallTest(unittest.TestCase):
             self.run_program(program, EZPKG_APPROVE="write").returncode, 0)
         shutil.rmtree(program.parent / "cache")
         seen: str = self.answer_on_a_terminal(program, b"n\n")
-        self.assertNotIn("go ahead?", seen)
+        self.assertNotIn(PROMPT, seen)
         self.assertIn("1.2.3", seen)
 
     def test_without_a_terminal_nothing_is_asked(self) -> None:
@@ -3992,7 +4009,7 @@ class InstallTest(unittest.TestCase):
         program: Path = self.program("no_terminal", "widget")
         done: subprocess.CompletedProcess[str] = self.run_program(program)
         self.assertEqual(done.returncode, 0, done.stderr[-300:])
-        self.assertNotIn("go ahead?", done.stderr)
+        self.assertNotIn(PROMPT, done.stderr)
         self.assertEqual(done.stdout.strip(), "1.2.3")
 
     def test_install_takes_the_newest_version_by_default(self) -> None:
@@ -4191,7 +4208,7 @@ class InstallTest(unittest.TestCase):
                 return_value=(spoken, _KeptStringIO(""))):
             self.assertFalse(venv.consent([], ["widget"]))
         self.assertIn(PROMPT, spoken.getvalue())
-        self.assertEqual(spoken.getvalue().count("go ahead?"), 1)
+        self.assertEqual(spoken.getvalue().count(PROMPT), 1)
 
     def test_windows_asks_through_its_console(self) -> None:
         """On Windows the terminal is `CONOUT$` and `CONIN$`, not `/dev/tty`.
@@ -5547,28 +5564,64 @@ class InstallTest(unittest.TestCase):
         seen: str = self.answer_on_a_terminal(program, b"o\n")
         flat: str = " ".join(seen.split())
         self.assertIn("line 12: `bogus_package` is imported, but no package "
-                      "of that name is on the index; check the spelling",
+                      '"bogus_package" is on the index; check the spelling',
                       flat)
         self.assertNotIn('Add "bogus_package"?', flat)
         self.assertIn("Nothing to change.", seen)
         self.assertEqual(program.read_text(), before)
 
-    def test_a_wrong_guess_changes_nothing(self) -> None:
-        """A package that is not what its name says is refused.
+    def test_a_wrong_guess_is_not_offered(self) -> None:
+        """A package that is not what its name says is never offered.
 
-        `decoy` exists but holds `elsewhere`, as a squatted name might,
-        so nothing is unpacked and the program is not edited.
+        `decoy` exists but holds `elsewhere`, as a squatted name might.
+        It is fetched and looked at before any question, so nothing is
+        unpacked and the program is not edited.
         """
-        # Approved, fetched, refused.
+        # Nothing to answer but the first question.
         program: Path = self.synced_program(
             "decoyed", '["widget"]', "import decoy")
         before: str = program.read_text()
-        seen: str = self.answer_on_a_terminal(program, b"o\ny\ny\n")
-        self.assertIn("nothing changed", seen)
-        self.assertIn("does not provide `decoy`", seen)
+        seen: str = self.answer_on_a_terminal(program, b"o\n")
+        flat: str = " ".join(seen.split())
+        self.assertIn("line 12: `decoy` is imported, but the index's "
+                      '"decoy" does not provide `decoy`; check the spelling',
+                      flat)
+        self.assertNotIn('Add "decoy"?', flat)
+        self.assertIn("Nothing to change.", seen)
         self.assertEqual(program.read_text(), before)
         self.assertFalse(list((program.parent / "cache" / "versions")
                               .glob("decoy-*")))
+
+    def test_a_source_only_package_is_not_offered(self) -> None:
+        """A name the index has only as source code is never offered.
+
+        `pip` here installs wheels only, so it could never be added
+        (Wayne's dogfood of `import bogus`, 2026-10-17).
+        """
+        # Nothing to answer but the first question.
+        program: Path = self.synced_program(
+            "sourced", '["widget"]', "import sourceonly")
+        seen: str = self.answer_on_a_terminal(program, b"o\n")
+        flat: str = " ".join(seen.split())
+        self.assertIn("line 12: `sourceonly` is imported, but the index's "
+                      '"sourceonly" has no wheel, only source code, so it '
+                      "cannot be installed; check the spelling", flat)
+        self.assertNotIn('Add "sourceonly"?', flat)
+
+    def test_an_addition_does_not_fetch_this_ezpkg(self) -> None:
+        """The `ezpkg` entry this `ezpkg` meets is not fetched again.
+
+        The index may not have this very version (the project's own
+        copy, on pypi.org before the release), which made adding any
+        package fail (Wayne's dogfood, 2026-10-17).
+        """
+        # Added, and no `ezpkg` tree in the cache.
+        program: Path = self.synced_program(
+            "own_entry", '["ezpkg>=0.0.1.dev0", "widget"]', "import sprocket")
+        seen: str = self.answer_on_a_terminal(program, b"o\ny\ny\n")
+        self.assertIn('added "sprocket>=2.0.0,<3" to dependencies', seen)
+        self.assertFalse(list((program.parent / "cache" / "versions")
+                              .glob("ezpkg-*")))
 
     def test_imports_above_the_bootstrap_are_found(self) -> None:
         """Only `__future__` and the paste's own imports may precede it.
@@ -6028,7 +6081,7 @@ class BootstrapCheckTest(unittest.TestCase):
         same: str = ezpkg.bootstrap_fingerprint(block)
         indented: str = textwrap.indent(block, "    ")
         commented: str = block.replace(
-            "m = None\n", "m = None  # Fetch it.\n", 1)
+            "m = n = None\n", "m = n = None  # Fetch it.\n", 1)
         rewrapped: str = block.replace(
             "; t = pathlib", ";\\\n        t = pathlib", 1)
         for variant in (indented, commented, rewrapped):
@@ -6134,14 +6187,14 @@ class BootstrapCheckTest(unittest.TestCase):
                              + textwrap.indent(edited, indent))
                 first: int = 3 if indent else 2
                 refusal: str | None = ezpkg.bootstrap_refusal(
-                    Path("prog.py"), text, "nopip6")
+                    Path("prog.py"), text, "nopip7")
                 assert refusal is not None
                 self.assertIn("ezpkg: prog.py: its bootstrap (lines "
                               f"{first}-", refusal)
                 self.assertIn(
                     f'  line {first + offset}: s = "choose pipx"; v = '
                     "sys.version_info[1]\n"
-                    '  nopip6:  s = "choose pip"; v = sys.version_info[1]\n'
+                    '  nopip7:  s = "choose pip"; v = sys.version_info[1]\n'
                     "                          |\n", refusal)
                 self.assertTrue(refusal.endswith("then run it again."))
 
@@ -6155,8 +6208,8 @@ class BootstrapCheckTest(unittest.TestCase):
         # Published code, wherever it is indented.
         block: str = self.shipping()
         fine: list[tuple[str, str]] = [
-            (block, "nopip6"),
-            ("if True:\n" + textwrap.indent(block, "    "), "nopip6"),
+            (block, "nopip7"),
+            ("if True:\n" + textwrap.indent(block, "    "), "nopip7"),
             (ezpkg.OLD_BOOTSTRAP_TEXTS["nopip5 of 2026-10-12"], "nopip5"),
         ]
         text: str
@@ -6167,17 +6220,17 @@ class BootstrapCheckTest(unittest.TestCase):
                     Path("prog.py"), text, name))
 
         # Anything else, however harmless.
-        self.assertIn("m = None\n", block)
+        self.assertIn("m = n = None\n", block)
         self.assertIn("; v = ", block)
         edits: list[str] = [
-            block.replace("m = None\n", "m = None  # Mine.\n", 1),
+            block.replace("m = n = None\n", "m = n = None  # Mine.\n", 1),
             block.replace("; v = ", " ; v = ", 1),
             block.replace("; v = ", ";  v = ", 1),
         ]
         for text in edits:
             with self.subTest(edit=text):
                 self.assertIsNotNone(ezpkg.bootstrap_refusal(
-                    Path("prog.py"), text, "nopip6"))
+                    Path("prog.py"), text, "nopip7"))
 
     def test_added_and_missing_lines_say_where(self) -> None:
         """A line only one side has is named, and long lists are cut."""
@@ -6189,13 +6242,13 @@ class BootstrapCheckTest(unittest.TestCase):
         added: str = "".join([lines[0], '    print("hi")\n', *lines[1:]])
         dropped: str = "".join([*lines[:gone], *lines[gone + 1:]])
         more: str | None = ezpkg.bootstrap_refusal(Path("prog.py"), added,
-                                                   "nopip6")
+                                                   "nopip7")
         fewer: str | None = ezpkg.bootstrap_refusal(Path("prog.py"),
-                                                    dropped, "nopip6")
+                                                    dropped, "nopip7")
         assert more is not None and fewer is not None
         self.assertIn('  line 2:  print("hi")\n'
-                      "           (not in nopip6)\n", more)
-        self.assertIn(f"  nopip6:  {lines[gone].strip()}\n", fewer)
+                      "           (not in nopip7)\n", more)
+        self.assertIn(f"  nopip7:  {lines[gone].strip()}\n", fewer)
         self.assertIn(f"(missing after line {gone})\n", fewer)
 
         # Seven changed lines show six, then a count.  Trailing space
@@ -6203,7 +6256,7 @@ class BootstrapCheckTest(unittest.TestCase):
         many: str = "".join(f"{line.rstrip()}  # Seven.\n" if 0 < index < 8
                             else line for index, line in enumerate(lines))
         cut: str | None = ezpkg.bootstrap_refusal(Path("prog.py"), many,
-                                                  "nopip6")
+                                                  "nopip7")
         assert cut is not None
         self.assertEqual(cut.count("|\n"), 6, cut)
         self.assertIn("  ... and 1 more\n", cut)
@@ -6231,7 +6284,7 @@ class BootstrapCheckTest(unittest.TestCase):
 
         # A caller naming a bootstrap the program does not have.
         missing: str | None = ezpkg.bootstrap_refusal(
-            Path("prog.py"), "print('hello')\n", "nopip6")
+            Path("prog.py"), "print('hello')\n", "nopip7")
         assert missing is not None
         self.assertIn("no ezpkg bootstrap was found", missing)
 
@@ -6530,7 +6583,7 @@ class CoverageToolTest(unittest.TestCase):
         """Runs that never finished are named rather than ignored."""
         # An empty directory is missing everything the default selects.
         text: str = ezpkg_coverage.compare(self.root)
-        self.assertIn("No counts for: baseline, nopip1, nopip6.", text)
+        self.assertIn("No counts for: baseline, nopip1, nopip7.", text)
 
     def test_report_keeps_the_counts(self) -> None:
         """`report` saves what `compare` later reads back."""

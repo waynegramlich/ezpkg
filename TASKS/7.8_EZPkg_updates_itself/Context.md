@@ -94,3 +94,7 @@
 * Tests: `test_write_pins_an_ezpkg_installed_from_a_wheel`,
   `test_write_cannot_pin_a_source_copy_of_ezpkg`,
   `test_without_ezpkg_drops_only_ezpkg`.
+* Rehearsed `b0e2768`: `0.0.1.dev202610171456` on test.pypi.org (run
+  39042860291), `release_check` passed, `check.yml` run 39042930963
+  passed all 25.  Waiting on Wayne's dogfood (`run_testpypi`, then
+  `I.uedepi`'s answer).
