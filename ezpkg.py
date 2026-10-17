@@ -674,6 +674,45 @@ def own_entry(asking: Sequence[str]) -> str | None:
                  if normal_name(requirement_name(entry)) == "ezpkg"), None)
 
 
+def from_wheel() -> bool:
+    """Say whether this `ezpkg` was installed from a wheel.
+
+    A wheel leaves `ezpkg-VERSION.dist-info` beside the package, as
+    the bootstrap's `pip install --target` and an unpacked version tree
+    both do.  A copy run from a source tree has none, and its version
+    is not on any index, so the approvals cannot pin it (`T.eui`).
+
+    Returns:
+    * (`bool`): True if this one came from a wheel of `__version__`.
+    """
+    # Beside the package directory, or beside a lone module.
+    here: Path = Path(__file__).resolve().parent
+    if here.name == "ezpkg":
+        here = here.parent
+    return (here / f"ezpkg-{__version__}.dist-info").is_dir()
+
+
+def without_ezpkg(names: Collection[str]) -> list[str]:
+    """Drop `ezpkg` from pins, wheel names or version tree names.
+
+    The approvals pin `ezpkg` so that the program runs the version its
+    author approved (`T.eui`), but an export takes the bootstrap out,
+    and with it the need for `ezpkg`.
+
+    Arguments:
+    * `names` (`Collection[str]`):
+      Such as `ezpkg==0.1.0`, `ezpkg-0.1.0-py3-none-any.whl` or
+      `cowsay-6.1-cpython-312-linux-x86_64`.
+
+    Returns:
+    * (`list[str]`): The others, in the same order.
+    """
+    # The name ends at the first `=` or `-`.
+    return [name for name in names
+            if normal_name(re.split(r"[=<>!~ ;-]", name, maxsplit=1)[0])
+            != "ezpkg"]
+
+
 def answer_from(reader: IO[str], writer: IO[str],
                 seconds: float | None = None) -> str:
     """Read one answer from a terminal, or nothing if none comes in time.
@@ -3697,6 +3736,7 @@ class EZPkg:
         trees: list[str]
         wheels: list[str]
         trees, wheels = remembered
+        trees, wheels = without_ezpkg(trees), without_ezpkg(wheels)
 
         # Approved, pure Python, and no `.pth` to go unrun.
         versions: Path = self.paths()[2]
@@ -3782,7 +3822,8 @@ class EZPkg:
             raise RuntimeError(
                 "a uv script leaves ezpkg out, so the program needs "
                 "the pasted bootstrap for it to take out, and has none")
-        pinned: str | None = pin_dependencies(stripped, self.pins())
+        pinned: str | None = pin_dependencies(
+            stripped, without_ezpkg(self.pins()))
         if pinned is None:
             raise RuntimeError(
                 "cannot find the dependencies in Part 1 to pin")
@@ -3813,9 +3854,11 @@ class EZPkg:
 
         # The lock must list the very wheels that were approved.
         lock: Path = target.with_name(target.name + ".lock")
+        approved: dict[str, str] = self.approved() or {}
         problems: list[str] = lock_mismatches(
             tomllib.loads(lock.read_text(encoding="utf-8")),
-            self.approved() or {})
+            {name: approved[name]
+             for name in without_ezpkg(approved)})
         if problems:
             raise RuntimeError(
                 "uv's lock disagrees with the approvals: "
@@ -4689,6 +4732,41 @@ class EZPkg:
                 return pinned.split("==", 1)[-1] == __version__
         return True
 
+    def providing(self, asked: Sequence[str], own: str | None,
+                  switching: bool) -> list[str]:
+        """Return what `provide` fetches for the program's `dependencies`.
+
+        Switching, everything, the `ezpkg` entry included.  Otherwise
+        this `ezpkg` runs the program and is not fetched, except under
+        `EZPKG_APPROVE=write`, which fetches exactly this version so that
+        the approvals pin it, and so a later run on another machine
+        switches to it (`T.eui`).  A copy not installed from a wheel is
+        on no index, so it is left out, and the author is told.
+
+        Arguments:
+        * `asked` (`Sequence[str]`):
+          The program's `dependencies`.
+        * `own` (`str | None`):
+          Its `ezpkg` entry, from `own_entry`.
+        * `switching` (`bool`):
+          True when this `ezpkg` is not the one the program chose.
+
+        Returns:
+        * (`list[str]`): The requirements to hand `provide`.
+        """
+        # The entry is met by this `ezpkg` unless switching.
+        if switching or own is None:
+            return list(asked)
+        others: list[str] = [one for one in asked if one != own]
+        if os.environ.get("EZPKG_APPROVE", "").lower() != "write":
+            return others
+        if not from_wheel():
+            print(f"ezpkg: this ezpkg {__version__} was not installed "
+                  f"from a wheel, so the approvals do not pin it",
+                  file=sys.stderr)
+            return others
+        return [f"ezpkg=={__version__}", *others]
+
     def switch(self, trees: Sequence[Path]) -> None:
         """Run the program again with the `ezpkg` it asked for, if not this.
 
@@ -4949,9 +5027,8 @@ class EZPkg:
             switching: bool = own is not None and not self.chosen(own)
             if bootstrap and not switching:
                 self.refuse_an_edited_bootstrap(bootstrap)
-            self.switch(self.provide(
-                asked if switching else
-                [one for one in asked if one != own], argv))
+            providing: list[str] = self.providing(asked, own, switching)
+            self.switch(self.provide(providing, argv))
             if bootstrap and switching:
                 # Still here, so no other `ezpkg` came: this one judges.
                 self.refuse_an_edited_bootstrap(bootstrap)
@@ -4965,7 +5042,7 @@ class EZPkg:
             # program stops before its own code.  See `export`.
             form: str = os.environ.get("EZPKG_EXPORT", "")
             if form:
-                self.export(form, asked)
+                self.export(form, providing)
                 sys.exit(0)
 
             # An ordinary run keeps Part 1 in step with the imports for

@@ -4934,6 +4934,76 @@ class InstallTest(unittest.TestCase):
         self.assertEqual(built.returncode, 0, built.stderr[-400:])
         self.assertTrue(program.with_suffix(".pyz").is_file())
 
+    def test_write_pins_an_ezpkg_installed_from_a_wheel(self) -> None:
+        """`write` records this `ezpkg`, and the exports leave it out.
+
+        The pin makes another machine run the version the author
+        approved (`T.eui`).  The exports take the bootstrap out, so
+        neither carries `ezpkg`.
+        """
+        # A HOME whose `ezpkg` came from a wheel, as the bootstrap's does.
+        program: Path
+        home: Path
+        program, home = self.bootstrapped_program(
+            "pinned", 'dependencies = ["ezpkg>=0.0.1.dev0", "needy"]',
+            "import needy\nprint(needy.__version__)")
+        info: Path = home / ".ezpkg" / f"{DISTRIBUTION}-{VERSION}.dist-info"
+        info.mkdir()
+        (info / "METADATA").write_text(
+            f"Metadata-Version: 2.1\nName: {DISTRIBUTION}\n"
+            f"Version: {VERSION}\n")
+        done: subprocess.CompletedProcess[str] = self.run_program(
+            program, HOME=str(home), EZPKG_APPROVE="write")
+        self.assertEqual(done.returncode, 0, done.stderr[-400:])
+        self.assertIn(f"\n{DISTRIBUTION}-{VERSION}-",
+                      program.with_suffix(".ezpkg").read_text())
+
+        # An ordinary run keeps to the pin, which this `ezpkg` meets.
+        again: subprocess.CompletedProcess[str] = self.run_program(
+            program, HOME=str(home))
+        self.assertEqual(again.returncode, 0, again.stderr[-400:])
+        self.assertEqual(again.stdout.strip(), "1.0.0")
+
+        # Neither export carries `ezpkg`.
+        built: subprocess.CompletedProcess[str] = self.run_program(
+            program, HOME=str(home), EZPKG_EXPORT="zipapp")
+        self.assertEqual(built.returncode, 0, built.stderr[-400:])
+        with zipfile.ZipFile(program.with_suffix(".pyz")) as opened:
+            self.assertFalse([name for name in opened.namelist()
+                              if name.startswith(MODULE)])
+        if ezpkg.find_uv() is not None:
+            locked: subprocess.CompletedProcess[str] = self.run_program(
+                program, HOME=str(home), EZPKG_EXPORT="uv")
+            self.assertEqual(locked.returncode, 0, locked.stderr[-400:])
+            metadata: dict[str, Any] | None = ezpkg.script_metadata(
+                program.with_name("prog-uv.py").read_text())
+            assert metadata is not None
+            self.assertEqual([pin.split("==")[0]
+                              for pin in metadata["dependencies"]],
+                             ["needy", "widget"])
+
+    def test_write_cannot_pin_a_source_copy_of_ezpkg(self) -> None:
+        """A copy not installed from a wheel is not pinned, and says so.
+
+        Its version is on no index.  The `zipapp` export still finds
+        what the run fetched, without the `ezpkg` entry.
+        """
+        # The copy `bootstrapped_program` puts in HOME has no dist-info.
+        program: Path
+        home: Path
+        program, home = self.bootstrapped_program(
+            "source_copy", 'dependencies = ["ezpkg>=0.0.1.dev0", "needy"]',
+            "import needy\nprint(needy.__version__)")
+        done: subprocess.CompletedProcess[str] = self.run_program(
+            program, HOME=str(home), EZPKG_APPROVE="write")
+        self.assertEqual(done.returncode, 0, done.stderr[-400:])
+        self.assertIn("was not installed from a wheel", done.stderr)
+        self.assertNotIn(f"{DISTRIBUTION}-",
+                         program.with_suffix(".ezpkg").read_text())
+        built: subprocess.CompletedProcess[str] = self.run_program(
+            program, HOME=str(home), EZPKG_EXPORT="zipapp")
+        self.assertEqual(built.returncode, 0, built.stderr[-400:])
+
     def test_export_zipapp_runs_without_a_network(self) -> None:
         """`EZPKG_EXPORT=zipapp` writes a `.pyz` that needs nothing.
 
@@ -7019,6 +7089,16 @@ class MetadataTest(unittest.TestCase):
         for version, specifier, wanted in cases:
             with self.subTest(version=version, specifier=specifier):
                 self.assertIs(ezpkg.meets(version, specifier), wanted)
+
+    def test_without_ezpkg_drops_only_ezpkg(self) -> None:
+        """Pins, wheel names and tree names, by normalized name."""
+        # One of each form, and look-alikes that must stay.
+        self.assertEqual(
+            ezpkg.without_ezpkg([
+                "ezpkg==0.1.0", "EZPkg>=0.1", "ezpkg-0.1.0-py3-none-any.whl",
+                "ezpkg-0.1.0-cpython-312-linux-x86_64", "ezpkgs==1",
+                "ez-pkg==1", "cowsay==6.1"]),
+            ["ezpkgs==1", "ez-pkg==1", "cowsay==6.1"])
 
     def test_the_quick_start_asks_for_this_ezpkg(self) -> None:
         """The Quick Start's `ezpkg` entry is met by the `ezpkg` beside it.

@@ -75,3 +75,22 @@
   settled: the export pins only what the approvals record.
 * Waiting on Wayne: how to pin `ezpkg` (a dev copy of `ezpkg` is on no
   index, so it has no wheel to record).
+
+## 2026-10-17: The approvals pin `ezpkg` (Wayne's #1)
+
+* `EZPkg.providing(asked, own, switching)`: under
+  `EZPKG_APPROVE=write`, when this `ezpkg` runs the program, it fetches
+  `ezpkg==__version__` with the rest, so the approvals record its
+  wheel.  `from_wheel()` (an `ezpkg-V.dist-info` beside the package)
+  decides; a source copy prints `this ezpkg V was not installed from a
+  wheel, so the approvals do not pin it` and is left out.
+* `without_ezpkg` drops `ezpkg` from the `uv` export's pins, its lock
+  check, and the `zipapp`'s trees and wheels, so both exports are as
+  before (`I.uedepi` still waits on Wayne's dogfood).
+* Fixed: since `T.eui`, a `zipapp` export of a program with an `ezpkg`
+  entry failed ("did not come from the cache"): `export` was given the
+  whole of `dependencies`, but `provide` had fetched them without the
+  entry.  `export` now gets what `provide` was given.
+* Tests: `test_write_pins_an_ezpkg_installed_from_a_wheel`,
+  `test_write_cannot_pin_a_source_copy_of_ezpkg`,
+  `test_without_ezpkg_drops_only_ezpkg`.
