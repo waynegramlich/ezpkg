@@ -3436,6 +3436,19 @@ class InstallTest(unittest.TestCase):
                       program.with_suffix(".ezpkg").read_text())
         self.assertEqual(metadata["dependencies"], ["widget"])
 
+        # Another `write` with the same wheels keeps the date, so it
+        # asks nothing about it; only the ranges offer is answered.
+        older: str = "2026-01-01T00:00:00Z"
+        for path in (program, program.with_suffix(".ezpkg")):
+            path.write_text(path.read_text().replace(when, older))
+        seen = self.answer_on_a_terminal(program, b"n\n",
+                                         EZPKG_APPROVE="write")
+        self.assertNotIn("exclude-newer", seen)
+        self.assertIn("approvals unchanged in", seen)
+        self.assertIn(f"# Resolved: {older}\n",
+                      program.with_suffix(".ezpkg").read_text())
+        self.assertIn(f'exclude-newer = "{older}"', program.read_text())
+
         # The program still runs, under its lock, where the date is not
         # even tried: the lock already says exactly which versions.
         shutil.rmtree(program.parent / "cache")

@@ -117,3 +117,31 @@ rehearsal and dogfood run, then its `Summary.md` and closing.
   (`sourceonly-1.0.0.tar.gz` in the test index),
   `test_an_addition_does_not_fetch_this_ezpkg` (fails with the bug put
   back), and the index-lacks test's new wording.
+
+## 2026-10-17: Wayne's dogfood, two findings
+
+* Fixed: every `EZPKG_APPROVE=write` run stamped a new time, so it
+  asked to change `exclude-newer` each run.  `gate` now keeps the old
+  `# Resolved:` date (`EZPkg.resolution`) when the wheels equal the
+  approvals, and says `approvals unchanged in ...`; `stamp` then has
+  nothing to ask.  `test_write_stamps_the_date_into_the_block` extended
+  (fails, by hanging on the question, with the fix taken out).
+* Agreed, NOT built (Wayne: 1.1-1.4, 1.3b): when two or more entries
+  would change, `reconcile`'s summary line and `See the discrepancy
+  list? [o/a/n/d]` become
+
+  ```
+  ezpkg: prog.py: 3 entries in `dependencies` (line 5) need to be updated.
+  Update them? [y=>Yes/n=>No/i=>Individually/a=>Always/d=>Don't ask again]
+  ```
+
+  * `y`: show the changes display once (anchored, as now) and write,
+    with no "Make these changes?".
+  * `n`: warn once per change, as today's `n`.
+  * `i`: today's per-item questions, then "Make these changes?".
+  * `a`: as `y`, now and from then on without asking, after "Really?"
+    (`a` means Always in every `ezpkg` question; Wayne chose 1.3b over
+    `a=>All`).
+  * `d`: never ask about this program, after "Really?", as today.
+  * One change: today's single-item question for it, no list question.
+  * Guessed additions that fail `prove` are still reported and skipped.

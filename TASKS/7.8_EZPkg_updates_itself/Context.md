@@ -111,3 +111,8 @@
   exports, and `for_export` refusing); fails with the keep removed.
 * Rehearsed `89ade59` (before this change): `0.0.1.dev202610171820`,
   `release_check` passed.
+* Rehearsed `1efdcae` (with `for_export` and `release_check.py`'s new
+  `PROMPT`, `=>Explain]`): `0.0.1.dev202610171830`, `release_check`
+  passed, `check.yml` run 39058484123 passed all 25 (the `--console`
+  jobs had failed on `0.0.1.dev202610171820`, waiting for the old
+  `go ahead?`).  Waiting on Wayne's `zipapp`/`uv` dogfood.

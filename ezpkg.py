@@ -2651,6 +2651,21 @@ class EZPkg:
             + "".join(f"{row}\n" for row in rows))
         return record
 
+    def resolution(self) -> str:
+        """Return the approvals' `# Resolved:` date, or an empty string.
+
+        Returns:
+        * (`str`): The date `approve` wrote, such as
+          `2026-10-17T18:40:11Z`; empty with no file or no date line.
+        """
+        # The line `approve` writes, third in the file.
+        record: Path | None = self.approvals()
+        if record is None or not record.is_file():
+            return ""
+        found: re.Match[str] | None = re.search(
+            r"(?m)^# Resolved: (\S+)$", record.read_text())
+        return found.group(1) if found else ""
+
     def pins(self) -> list[str]:
         """Return an exact `==` pin for every approved wheel.
 
@@ -4413,14 +4428,21 @@ class EZPkg:
         if mode == "write":
             # A program with no file has nowhere to keep approvals, and
             # saying "written to None" would claim otherwise.
+            # The same wheels as already approved keep their date, which
+            # is still true of them, so a second `write` asks nothing.
             resolved: str = time.strftime("%Y-%m-%dT%H:%M:%SZ",
                                           time.gmtime())
+            unchanged: bool = self.approved() == {
+                wheel.name: self.digest(wheel) for wheel in wheels}
+            if unchanged:
+                resolved = self.resolution() or resolved
             written: Path | None = self.approve(wheels, resolved)
             if written is None:
                 print("nowhere to write approvals: this program has no "
                       "file of its own", file=sys.stderr)
             else:
-                print(f"approvals written to {written}", file=sys.stderr)
+                print(f"approvals {'unchanged in' if unchanged else 'written to'}"
+                      f" {written}", file=sys.stderr)
             stamped: str = self.stamp(resolved)
             if stamped:
                 print(stamped, file=sys.stderr)
