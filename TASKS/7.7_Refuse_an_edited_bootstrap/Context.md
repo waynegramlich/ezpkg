@@ -82,3 +82,11 @@
 * Built, tested, rehearsed (`0.0.1.dev202610170025` onward).  Wayne's
   `~/ezpkg_dogfood/prog.py` now carries `nopip6` unedited.  Close
   after his dogfood.
+
+## 2026-10-17: Still To Discuss, rechecked with Wayne
+
+* Layout and comments: settled (only the paste's indentation is
+  forgiven).  A stale, unedited bootstrap passes: agreed.
+* No bootstrap (`uv run`, a `zipapp`, a direct call; only a call with
+  `bootstrap=` is checked): stays open until Wayne dogfoods the
+  `uv` and `zipapp` exports.

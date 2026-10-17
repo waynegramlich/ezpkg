@@ -54,8 +54,9 @@ JSON_APIS: dict[str, str] = {
 # What `quick_start.py` prints when it works.
 COW: str = "EZPkg works!"
 
-# The start of the download prompt, which `--console` answers.
-PROMPT: str = "go ahead?"
+# The end of the download prompt, which `--console` answers: short,
+# so that a console wrapping the long line cannot split it.
+PROMPT: str = "=>Explain]"
 
 # A terminal's control sequences, which a Windows pseudoconsole mixes
 # into what it passes on.

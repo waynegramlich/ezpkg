@@ -5021,6 +5021,57 @@ class InstallTest(unittest.TestCase):
             program, HOME=str(home), EZPKG_EXPORT="zipapp")
         self.assertEqual(built.returncode, 0, built.stderr[-400:])
 
+    def test_an_export_keeps_an_ezpkg_the_program_imports(self) -> None:
+        """A program using `ezpkg`'s API gets it in both exports.
+
+        The bootstrap goes, but the program's own `import ezpkg` still
+        needs the version the approvals pin (`I.uedepi`).  Without a
+        pin, the export is refused rather than written broken.
+        """
+        # As `test_write_pins_an_ezpkg_installed_from_a_wheel`, with
+        # the program importing `ezpkg` itself.
+        program: Path
+        home: Path
+        program, home = self.bootstrapped_program(
+            "imports_ezpkg",
+            'dependencies = ["ezpkg>=0.0.1.dev0", "needy"]',
+            f"import needy\nimport {MODULE}\nprint({MODULE}.__version__)")
+        info: Path = home / ".ezpkg" / f"{DISTRIBUTION}-{VERSION}.dist-info"
+        info.mkdir()
+        (info / "METADATA").write_text(
+            f"Metadata-Version: 2.1\nName: {DISTRIBUTION}\n"
+            f"Version: {VERSION}\n")
+        done: subprocess.CompletedProcess[str] = self.run_program(
+            program, HOME=str(home), EZPKG_APPROVE="write")
+        self.assertEqual(done.returncode, 0, done.stderr[-400:])
+
+        # The `.pyz` carries `ezpkg`, and its `__main__` imports it.
+        built: subprocess.CompletedProcess[str] = self.run_program(
+            program, HOME=str(home), EZPKG_EXPORT="zipapp")
+        self.assertEqual(built.returncode, 0, built.stderr[-400:])
+        with zipfile.ZipFile(program.with_suffix(".pyz")) as opened:
+            self.assertTrue([name for name in opened.namelist()
+                             if name.startswith(MODULE)])
+        if ezpkg.find_uv() is not None:
+            locked: subprocess.CompletedProcess[str] = self.run_program(
+                program, HOME=str(home), EZPKG_EXPORT="uv")
+            self.assertEqual(locked.returncode, 0, locked.stderr[-400:])
+            metadata: dict[str, Any] | None = ezpkg.script_metadata(
+                program.with_name("prog-uv.py").read_text())
+            assert metadata is not None
+            self.assertIn(f"{DISTRIBUTION}=={VERSION}",
+                          metadata["dependencies"])
+
+        # Unpinned, both exports refuse.
+        names: list[str] = ["needy==1.0.0", "widget==1.0.0"]
+        self.assertEqual(ezpkg.for_export(names, "import needy\n"), names)
+        with self.assertRaises(RuntimeError) as caught:
+            ezpkg.for_export(names, f"import {MODULE}\n")
+        self.assertIn("do not pin it", str(caught.exception))
+        self.assertEqual(
+            ezpkg.for_export([f"{DISTRIBUTION}=={VERSION}", *names],
+                             "import needy\n"), names)
+
     def test_export_zipapp_runs_without_a_network(self) -> None:
         """`EZPKG_EXPORT=zipapp` writes a `.pyz` that needs nothing.
 

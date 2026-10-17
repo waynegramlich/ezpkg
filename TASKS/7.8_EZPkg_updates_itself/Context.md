@@ -98,3 +98,16 @@
   39042860291), `release_check` passed, `check.yml` run 39042930963
   passed all 25.  Waiting on Wayne's dogfood (`run_testpypi`, then
   `I.uedepi`'s answer).
+
+## 2026-10-17: `I.uedepi` settled (Wayne: an export keeps `ezpkg`)
+
+* `for_export(names, program)`: an export keeps `ezpkg` only when the
+  program (bootstrap taken out) imports it; then it must be pinned,
+  or the export is refused ("the approvals do not pin it").  Used for
+  the `zipapp`'s trees and wheels, and the `uv` pins and lock check.
+* `providing`: an `EZPKG_EXPORT` run fetches `ezpkg==__version__` too
+  when the approvals pin `ezpkg`, so the `zipapp` finds its wheel.
+* Test `test_an_export_keeps_an_ezpkg_the_program_imports` (both
+  exports, and `for_export` refusing); fails with the keep removed.
+* Rehearsed `89ade59` (before this change): `0.0.1.dev202610171820`,
+  `release_check` passed.

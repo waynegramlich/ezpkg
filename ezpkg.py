@@ -791,6 +791,45 @@ def without_ezpkg(names: Collection[str]) -> list[str]:
             != "ezpkg"]
 
 
+def for_export(names: Collection[str], program: str) -> list[str]:
+    """Keep `ezpkg` in an export only when the program imports it.
+
+    The bootstrap is taken out of an export, and with it the need for
+    `ezpkg`, unless the program also imports `ezpkg` itself to use its
+    API: then the export has to carry the version the approvals pin
+    (`I.uedepi`).
+
+    Arguments:
+    * `names` (`Collection[str]`):
+      Pins, wheel names or version tree names, as for `without_ezpkg`.
+    * `program` (`str`):
+      The program's source, with its bootstrap taken out.
+
+    Returns:
+    * (`list[str]`): The names the export needs, in the same order.
+
+    Raises:
+    * `RuntimeError`:
+      If the program imports `ezpkg` but the approvals do not pin it.
+    """
+    # The bootstrap imports with `importlib`, so any import is the
+    # program's own.
+    try:
+        imported: bool = any(module == "ezpkg" for module, _, _
+                             in every_import(program))
+    except SyntaxError:
+        imported = False
+    others: list[str] = without_ezpkg(names)
+    if not imported:
+        return others
+    if len(others) == len(names):
+        raise RuntimeError(
+            "the program imports ezpkg, but the approvals do not pin "
+            "it; run once with EZPKG_APPROVE=write, using an ezpkg "
+            "installed from a wheel")
+    return list(names)
+
+
 def answer_from(reader: IO[str], writer: IO[str],
                 seconds: float | None = None) -> str:
     """Read one answer from a terminal, or nothing if none comes in time.
@@ -3892,7 +3931,8 @@ class EZPkg:
         trees: list[str]
         wheels: list[str]
         trees, wheels = remembered
-        trees, wheels = without_ezpkg(trees), without_ezpkg(wheels)
+        trees, wheels = (for_export(trees, stripped),
+                         for_export(wheels, stripped))
 
         # Approved, pure Python, and no `.pth` to go unrun.
         versions: Path = self.paths()[2]
@@ -3979,7 +4019,7 @@ class EZPkg:
                 "a uv script leaves ezpkg out, so the program needs "
                 "the pasted bootstrap for it to take out, and has none")
         pinned: str | None = pin_dependencies(
-            stripped, without_ezpkg(self.pins()))
+            stripped, for_export(self.pins(), stripped))
         if pinned is None:
             raise RuntimeError(
                 "cannot find the dependencies in Part 1 to pin")
@@ -4014,7 +4054,7 @@ class EZPkg:
         problems: list[str] = lock_mismatches(
             tomllib.loads(lock.read_text(encoding="utf-8")),
             {name: approved[name]
-             for name in without_ezpkg(approved)})
+             for name in for_export(approved, stripped)})
         if problems:
             raise RuntimeError(
                 "uv's lock disagrees with the approvals: "
@@ -4876,7 +4916,9 @@ class EZPkg:
         `EZPKG_APPROVE=write`, which fetches exactly this version so that
         the approvals pin it, and so a later run on another machine
         switches to it (`T.eui`).  A copy not installed from a wheel is
-        on no index, so it is left out, and the author is told.
+        on no index, so it is left out, and the author is told.  An
+        export fetches the pinned `ezpkg` too, for a program that
+        imports it (`for_export`).
 
         Arguments:
         * `asked` (`Sequence[str]`):
@@ -4894,6 +4936,13 @@ class EZPkg:
             return list(asked)
         others: list[str] = [one for one in asked if one != own]
         if os.environ.get("EZPKG_APPROVE", "").lower() != "write":
+            # An export of a program that imports `ezpkg` itself
+            # carries the pinned one (`for_export`), which `chosen`
+            # has checked is this version.
+            if os.environ.get("EZPKG_EXPORT"):
+                wheels: list[str] = list(self.approved() or {})
+                if len(without_ezpkg(wheels)) < len(wheels):
+                    return [f"ezpkg=={__version__}", *others]
             return others
         if not from_wheel():
             print(f"ezpkg: this ezpkg {__version__} was not installed "
