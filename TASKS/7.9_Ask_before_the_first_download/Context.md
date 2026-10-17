@@ -71,3 +71,19 @@
   does not know; `--time` times `prog.py` alone.  Measured: first run
   5.5 s (with the question), second run 0.13-0.18 s.  The 2.4 s Wayne
   saw was the harness reinstalling `ezpkg` every run.  Wayne: a win.
+
+## 2026-10-17: Rehearsed; next
+
+* `0.0.1.dev202610171830` passed every `check.yml` job, `--console`
+  ones included, once `release_check.py`'s `PROMPT` became `=>Explain]`
+  (the old `go ahead?` never appeared, so nothing answered).  The logs
+  show the three lines, Windows' full path, the 5-minute no and the
+  "stops here" line on all three systems.
+* Next (Wayne: the focus after a few other issues):
+  1. `n` on a first run (`self.pip_run is not None`) deletes all of
+     `~/.ezpkg`; on later runs only the new downloads.
+  2. README "Download Prompt" (about lines 130-160) rewritten to match,
+     proposed in HTML comments; also Wayne's verdict on the `stdout=2`
+     and `m.EZPkg()` bullet proposals already there.
+  3. Ask Wayne which of the four things the terse `?` dropped come
+     back (Claude suggests only marking packages that came along).

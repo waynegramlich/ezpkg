@@ -100,3 +100,27 @@
   what is being worked on).  README "Download Prompt" now says what CI
   is.  Newest test.pypi.org upload: `0.0.1.dev202610171424` (from
   `7f9fe8c`, with `T.eui`), passed `release_check` and `check.yml`.
+
+## 2026-10-17: State at the end of the session
+
+* Newest test.pypi.org upload: `0.0.1.dev202610171830` (from
+  `1efdcae`: `nopip7`, the 7.9 prompt, `for_export`), `release_check`
+  passed, `check.yml` run 39058484123 passed all 25.  Since then
+  (committed, not uploaded): the kept resolution date (`T.kdaiis`).
+* Rehearsal, as Claude runs it in the background (about 6 minutes):
+  `git push github main`; `gh workflow run release.yml -f
+  target=testpypi`; approve via `gh api -X POST
+  repos/waynegramlich/ezpkg/actions/runs/R/pending_deployments -F
+  "environment_ids[]=E" -f state=approved` (E from a GET of the same
+  URL, `.[0].environment.id`); `gh run watch R --exit-status`;
+  `./release_check.py testpypi` (its last line names the version);
+  `gh workflow run check.yml -f target=testpypi -f version=V`; watch.
+* Next session, in order:
+  1. Build `T.kdaiis`'s agreed batch question (its `Context.md`,
+     "Agreed, NOT built"), then rehearse.
+  2. `T.abfd` part 2 (its `Context.md`, "Next").
+  3. Keep asking Wayne for his dogfood: `zipapp`/`uv` exports, with and
+     without `import ezpkg` (closes `T.eui`, `I.uedepi`, and `T.reb`'s
+     last open point); the ranges offer (`T.kdaiis`).
+* Before `T.utpat` (Wayne, later): the `pypi` environment, the `v*` tag
+  ruleset, the pypi.org pending publisher; `I.wmau` closed.

@@ -33,7 +33,8 @@ needs live here instead.
   starts it).  Started by hand, not yet by `release.yml` (`T.gar`).
 * `~/ezpkg_dogfood/` (outside the project): Wayne's `prog.py`; `run`
   uses the project's `ezpkg.py`, `run_testpypi [--clean] [VERSION]`
-  the newest test.pypi.org upload (`--clean` empties its `~/.ezpkg`).
+  the newest test.pypi.org upload (`--clean` empties its `~/.ezpkg`;
+  it refuses a `prog.py` bootstrap that upload does not know).
   `run_testpypi --local` builds a wheel from the project's `ezpkg.py`
   (again only when it changed; `--time` reports `prog.py`'s own run time)
   (`release.py testpypi`) and installs that instead, to try uncommitted

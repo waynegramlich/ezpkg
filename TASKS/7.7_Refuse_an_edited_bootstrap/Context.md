@@ -90,3 +90,5 @@
 * No bootstrap (`uv run`, a `zipapp`, a direct call; only a call with
   `bootstrap=` is checked): stays open until Wayne dogfoods the
   `uv` and `zipapp` exports.
+* So: close after Wayne's `zipapp`/`uv` dogfood; then update
+  `Details.md`'s "Still To Discuss" only if Wayne asks (his file).
