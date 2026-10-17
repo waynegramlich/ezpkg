@@ -48,6 +48,7 @@ import io
 import json
 import os
 import re
+import select
 import shutil
 import site
 import subprocess
@@ -76,6 +77,12 @@ __version__: str = "0.0.1"
 # answer is neither yes nor no.  Bounded, so that a terminal feeding
 # nonsense cannot keep a program alive indefinitely.
 ATTEMPTS: int = 3
+
+# How long a question waits for its answer before taking it as no.  On
+# Windows a program started by Task Scheduler, a CI system or a service
+# often has a console with nobody at it, and would otherwise wait for
+# ever (`I.owenabd`).
+ANSWER_SECONDS: float = 300.0
 
 # How long something has to have been lying about before it is taken for
 # litter, and how often the cache is swept.  The grace period is about
@@ -609,6 +616,55 @@ def bootstrap_node(text: str) -> ast.Try | None:
             if block and "ezpkg" in block and "import_module" in block:
                 return node
     return None
+
+
+def answer_from(reader: IO[str], writer: IO[str],
+                seconds: float | None = None) -> str:
+    """Read one answer from a terminal, or nothing if none comes in time.
+
+    Nothing is what a terminal that has gone away gives, and every
+    question already takes it as no.  On Windows a console can exist
+    with nobody at it, so a question that nobody answers within
+    `ANSWER_SECONDS` says so and gives up (`I.owenabd`).  A terminal
+    returns at most one line per read, so nothing typed ahead is
+    lost to the wait.
+
+    Arguments:
+    * `reader` (`IO[str]`):
+      The terminal, open for reading.
+    * `writer` (`IO[str]`):
+      The terminal, open for writing, for the message.
+    * `seconds` (`float | None`):
+      How long to wait; `ANSWER_SECONDS` if not given.
+
+    Returns:
+    * (`str`): The line, with its newline, or empty.
+    """
+    # Something that is not a terminal, such as a test's string, is read
+    # at once.
+    limit: float = ANSWER_SECONDS if seconds is None else seconds
+    try:
+        handle: int = reader.fileno()
+    except (OSError, ValueError):
+        return reader.readline()
+
+    # Windows cannot `select` a console, but can ask whether a key is
+    # waiting.
+    arrived: bool
+    if os.name == "nt":
+        import msvcrt
+        deadline: float = time.monotonic() + limit
+        while not (arrived := msvcrt.kbhit()):  # type: ignore[attr-defined]
+            if time.monotonic() >= deadline:
+                break
+            time.sleep(0.1)
+    else:
+        arrived = bool(select.select([handle], [], [], limit)[0])
+    if arrived:
+        return reader.readline()
+    writer.write(f"\nNo answer in {limit / 60:g} minutes, so: no.\n")
+    writer.flush()
+    return ""
 
 
 def published_bootstraps() -> dict[str, list[str]]:
@@ -3190,7 +3246,7 @@ class EZPkg:
                          else "Please answer with one of the letters.\n"
                          + question)
             writer.flush()
-            reply: str = reader.readline()
+            reply: str = answer_from(reader, writer)
             if not reply:
                 return ""
             meaning: str | None = answers.get(reply.strip().lower())
@@ -3798,10 +3854,17 @@ class EZPkg:
         is a pipe, and fail to open when there is no console, as for a
         `.pyw` or a service.
 
+        A set `CI` (GitHub Actions, GitLab and most others set it) means
+        nobody is there either, whatever terminal or console exists.
+
         Returns:
         * (`tuple[IO[str], IO[str]] | None`): The terminal open for
           writing and for reading, or `None` when there is not one.
         """
+        # A CI system is nobody to ask, though it may provide a console.
+        if os.environ.get("CI", "").lower() not in ("", "0", "false"):
+            return None
+
         # Whether both open is the whole of the question.
         writing: str
         reading: str
@@ -3880,7 +3943,7 @@ class EZPkg:
                              f"go ahead? "
                              f"[y=>Yes/n=>No/a=>Always/?=>Explanation] ")
                 writer.flush()
-                answer = reader.readline()
+                answer = answer_from(reader, writer)
 
                 # An empty read is the terminal going away, not an
                 # answer, and asking again would never end.
@@ -3896,7 +3959,7 @@ class EZPkg:
                     # the only one asked about twice.
                     writer.write("Really never ask again? [y=>Yes/n=>No] ")
                     writer.flush()
-                    confirm = reader.readline()
+                    confirm = answer_from(reader, writer)
                     if not confirm:
                         return False
                     if confirm.strip().lower() not in ("y", "yes"):
@@ -3963,7 +4026,7 @@ class EZPkg:
             for _attempt in range(ATTEMPTS):
                 writer.write(f"{question} [y=>Yes/n=>No] ")
                 writer.flush()
-                answer = reader.readline()
+                answer = answer_from(reader, writer)
                 if not answer:
                     return False
                 answer = answer.strip().lower()

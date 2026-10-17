@@ -161,6 +161,16 @@ Some programs are run without access to terminal input (e.g. `cron`).  When
 this happens, the download prompt is skipped and the answer is taken to be
 `Yes`, for that run only: no `FOREVER_APPROVE` file is written, so a later
 run from a terminal still asks.
+<!-- Claude proposes replacing lines 159-162 above with this (`I.owenabd`):
+Some programs are run with nobody there to answer, such as from `cron`
+or a CI system.  When there is no terminal (on Windows, no console), or
+the `CI` variable is set, as CI systems set it, the download prompt is
+skipped and the answer is taken to be `Yes`, for that run only: no
+`FOREVER_APPROVE` file is written, so a later run from a terminal still
+asks.  A program started on Windows by Task Scheduler or a service can
+have a console with nobody at it, so any question left unanswered for
+5 minutes is taken as `No`.
+-->
 
 A package is code, and installing one can run some of it: a `.pth` file
 in a package runs when the package is put on `sys.path`, before your

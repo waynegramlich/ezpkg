@@ -4229,6 +4229,40 @@ class InstallTest(unittest.TestCase):
                                          side_effect=OSError("no console"))):
             self.assertIsNone(venv.terminal())
 
+    def test_ci_is_nobody_to_ask(self) -> None:
+        """A set `CI` means no terminal, whatever terminal there is."""
+        # Opened, it would be found; `CI` stops it being looked for.
+        venv: ezpkg.EZPkg = ezpkg.EZPkg(self.root / "ci")
+        value: str
+        for value in ("true", "1", "yes"):
+            with (self.subTest(value=value),
+                  unittest.mock.patch.dict(os.environ, {"CI": value}),
+                  unittest.mock.patch.object(
+                      ezpkg.Path, "open", side_effect=AssertionError)):
+                self.assertIsNone(venv.terminal())
+        for value in ("", "0", "false"):
+            with (self.subTest(value=value),
+                  unittest.mock.patch.dict(os.environ, {"CI": value}),
+                  unittest.mock.patch.object(
+                      ezpkg.Path, "open", return_value=_KeptStringIO())):
+                self.assertIsNotNone(venv.terminal())
+
+    def test_an_unanswered_question_is_no(self) -> None:
+        """Nothing typed within the time is taken as no, and said."""
+        # A pipe stands in for a terminal nobody types at, then one that
+        # has its answer waiting.
+        reading: int
+        writing: int
+        reading, writing = os.pipe()
+        spoken: _KeptStringIO = _KeptStringIO()
+        with open(reading, encoding="utf-8") as reader:
+            self.assertEqual(ezpkg.answer_from(reader, spoken, 0.2), "")
+            self.assertIn("No answer in 0.00333333 minutes, so: no.",
+                          spoken.getvalue())
+            os.write(writing, b"y\n")
+            self.assertEqual(ezpkg.answer_from(reader, spoken, 5.0), "y\n")
+        os.close(writing)
+
     def test_ask_wants_a_yes_and_a_terminal(self) -> None:
         """Only `y` or `yes` is a yes; a typo is asked again, once each.
 

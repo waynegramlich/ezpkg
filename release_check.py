@@ -309,14 +309,19 @@ def main() -> int:
     shown: str
     asked: bool = False
     if console:
+        # `CI`, which runners set, would tell `ezpkg` nobody is there.
+        environment.pop("CI", None)
         status, shown, asked = on_a_terminal(
             [python, "quick_start.py"], run, environment)
         sys.stdout.write(shown)
     else:
+        # On Windows a child shares the console, which `ezpkg` finds
+        # and asks on, so it is detached from it (`I.owenabd`).
         done: subprocess.CompletedProcess[str] = subprocess.run(
             [python, "quick_start.py"], cwd=run, env=environment,
             stdin=subprocess.DEVNULL, capture_output=True, text=True,
-            check=False)
+            check=False,
+            creationflags=getattr(subprocess, "DETACHED_PROCESS", 0))
         status, shown = done.returncode, done.stdout
         sys.stderr.write(done.stderr)
         sys.stdout.write(done.stdout)
