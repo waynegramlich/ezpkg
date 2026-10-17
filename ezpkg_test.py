@@ -4193,6 +4193,42 @@ class InstallTest(unittest.TestCase):
         self.assertIn(PROMPT, spoken.getvalue())
         self.assertEqual(spoken.getvalue().count("go ahead?"), 1)
 
+    def test_windows_asks_through_its_console(self) -> None:
+        """On Windows the terminal is `CONOUT$` and `CONIN$`, not `/dev/tty`.
+
+        Until 2026-10-16 a Windows console was never found, so nobody
+        there was asked (`I.owenabd`).  Pretended here, by name; a
+        Windows runner tries the real thing (`T.gar`).
+        """
+        # Which names are opened, and what a failure to open means.
+        venv: ezpkg.EZPkg = ezpkg.EZPkg(self.root / "windows")
+        opened: list[tuple[str, str]] = []
+
+        def pretend(path: Path, mode: str = "r",
+                    **_: object) -> _KeptStringIO:
+            opened.append((str(path), mode))
+            return _KeptStringIO()
+
+        name: str
+        wanted: list[tuple[str, str]]
+        for name, wanted in (("nt", [("CONOUT$", "w"), ("CONIN$", "r")]),
+                             ("posix", [("/dev/tty", "w"),
+                                        ("/dev/tty", "r")])):
+            with (self.subTest(name=name),
+                  unittest.mock.patch.object(ezpkg.os, "name", name),
+                  unittest.mock.patch.object(ezpkg.Path, "open",
+                                             autospec=True,
+                                             side_effect=pretend)):
+                opened.clear()
+                self.assertIsNotNone(venv.terminal())
+                self.assertEqual(opened, wanted)
+
+        # No console, as for a `.pyw`, is nobody to ask.
+        with (unittest.mock.patch.object(ezpkg.os, "name", "nt"),
+              unittest.mock.patch.object(ezpkg.Path, "open",
+                                         side_effect=OSError("no console"))):
+            self.assertIsNone(venv.terminal())
+
     def test_ask_wants_a_yes_and_a_terminal(self) -> None:
         """Only `y` or `yes` is a yes; a typo is asked again, once each.
 

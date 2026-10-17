@@ -66,3 +66,13 @@
   skipped.
 * README proposal (HTML comment) rewritten to match.  Rehearsal
   deferred until the comparison is settled (Wayne).
+
+## 2026-10-16: Rehearsed
+
+* Wayne accepted the README paragraph and committed `f1407fc`; pushed.
+  Release run 38986266250 (approved by Claude): `ezpkg
+  0.0.1.dev202610170025`.  `release_check.py testpypi` passed;
+  `check.yml` run 38986391862: 22 of 22.
+* `~/ezpkg_dogfood/run_testpypi --clean` with Wayne's `"choose
+  pipxxx"`: the published `ezpkg` refuses it at line 33.
+* Left: Wayne's dogfood, then `Summary.md` and close.

@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Check a published `ezpkg` by running the Quick Start as a new user.
 
-Run as `./release_check.py [--python PYTHON] TARGET [VERSION]`, where
-`TARGET` is `testpypi` or `pypi`.  `VERSION` defaults to the one the newest
+Run as `./release_check.py [--python PYTHON] [--console] TARGET
+[VERSION]`, where `TARGET` is `testpypi` or `pypi`.  `VERSION` defaults to the one the newest
 successful `release` run for `TARGET` built, found with `gh`; not the
 index's own newest, which is cached for up to 15 minutes and so names
 the previous upload just when a check is wanted.  A copy of `quick_start.py` runs outside the project, with a
@@ -16,6 +16,12 @@ running this script, such as python.org's macOS Python before its
 `Install Certificates.command`, which cannot fetch from the indexes
 the way this script must (`I.btosc`, `T.gar`).
 
+`--console` runs it on a terminal of its own, a pseudoterminal on
+Linux and macOS and a Windows pseudoconsole through `pywinpty`, and
+answers `y` when the download prompt appears; the check then also fails
+if the prompt never does.  Without it there is no terminal, and the
+prompt answers yes by itself.  See `I.owenabd`.
+
 * `pypi`:
   Exactly what a stranger gets: the bootstrap fetches `ezpkg` itself.
 * `testpypi`:
@@ -28,6 +34,7 @@ the way this script must (`I.btosc`, `T.gar`).
 import hashlib
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -46,6 +53,83 @@ JSON_APIS: dict[str, str] = {
 
 # What `quick_start.py` prints when it works.
 COW: str = "EZPkg works!"
+
+# The start of the download prompt, which `--console` answers.
+PROMPT: str = "go ahead?"
+
+# A terminal's control sequences, which a Windows pseudoconsole mixes
+# into what it passes on.
+CONTROL: re.Pattern[str] = re.compile(r"\x1b(\[[0-?]*[ -/]*[@-~]|\][^\x07]*\x07|.)")
+
+
+def on_a_terminal(command: list[str], cwd: Path,
+                  environment: dict[str, str]) -> tuple[int, str, bool]:
+    """Run a command on a terminal of its own, answering the prompt.
+
+    Arguments:
+    * `command` (`list[str]`):
+      The command.
+    * `cwd` (`Path`):
+      Where to run it.
+    * `environment` (`dict[str, str]`):
+      Its environment.
+
+    Returns:
+    * (`tuple[int, str, bool]`): The exit status, everything shown on
+      the terminal with control sequences removed, and whether the
+      prompt appeared.
+    """
+    # Windows: a pseudoconsole, which is what `CONIN$` then reaches.
+    seen: str = ""
+    asked: bool = False
+    if os.name == "nt":
+        import winpty  # type: ignore[import-not-found]  # Windows only.
+        child: Any = winpty.PtyProcess.spawn(command, cwd=str(cwd),
+                                             env=environment)
+        while True:
+            try:
+                seen += CONTROL.sub("", child.read(4096))
+            except EOFError:
+                break
+            if not asked and PROMPT in seen:
+                child.write("y\r\n")
+                asked = True
+        child.wait()
+        return child.exitstatus, seen, asked
+
+    # Elsewhere a pseudoterminal, made the child's controlling terminal
+    # by a launcher so that `/dev/tty` reaches it, as in `ezpkg_test.py`.
+    import pty
+    import select
+    master: int
+    slave: int
+    master, slave = pty.openpty()
+    launcher: str = ("import os, sys\n"
+                     "os.login_tty(int(sys.argv[1]))\n"
+                     "os.execv(sys.argv[2], sys.argv[2:])\n")
+    process: subprocess.Popen[bytes] = subprocess.Popen(
+        [sys.executable, "-c", launcher, str(slave), *command],
+        cwd=cwd, env=environment, pass_fds=(slave,))
+    os.close(slave)
+    deadline: float = time.monotonic() + 600
+    while time.monotonic() < deadline:
+        ready: list[int] = select.select([master], [], [], 1.0)[0]
+        if not ready:
+            if process.poll() is not None:
+                break
+            continue
+        try:
+            block: bytes = os.read(master, 4096)
+        except OSError:
+            break
+        if not block:
+            break
+        seen += CONTROL.sub("", block.decode(errors="replace"))
+        if not asked and PROMPT in seen:
+            os.write(master, b"y\n")
+            asked = True
+    os.close(master)
+    return process.wait(timeout=60), seen, asked
 
 
 def built_version(target: str) -> str:
@@ -152,14 +236,21 @@ def main() -> int:
     Returns:
     * (`int`): The exit status.
     """
-    # Perhaps a Python, then a target, and perhaps a version.
+    # Options, then a target, and perhaps a version.
     arguments: list[str] = sys.argv[1:]
     python: str = sys.executable
-    if arguments[:1] == ["--python"] and len(arguments) >= 2:
-        python = arguments[1]
-        arguments = arguments[2:]
+    console: bool = False
+    while arguments[:1] in (["--python"], ["--console"]):
+        if arguments[0] == "--console":
+            console = True
+            arguments = arguments[1:]
+        elif len(arguments) >= 2:
+            python = arguments[1]
+            arguments = arguments[2:]
+        else:
+            break
     if not 1 <= len(arguments) <= 2 or arguments[0] not in JSON_APIS:
-        print("usage: release_check.py [--python PYTHON] "
+        print("usage: release_check.py [--python PYTHON] [--console] "
               "{testpypi|pypi} [VERSION]", file=sys.stderr)
         return 2
     target: str = arguments[0]
@@ -212,23 +303,35 @@ def main() -> int:
         (wheels / info["filename"]).write_bytes(data)
         environment["PIP_FIND_LINKS"] = str(wheels)
 
-    # No terminal, so the download prompt answers yes by itself.
-    done: subprocess.CompletedProcess[str] = subprocess.run(
-        [python, "quick_start.py"], cwd=run, env=environment,
-        stdin=subprocess.DEVNULL, capture_output=True, text=True,
-        check=False)
-    sys.stderr.write(done.stderr)
-    sys.stdout.write(done.stdout)
+    # On a terminal the prompt is answered; with none it answers yes
+    # by itself.
+    status: int
+    shown: str
+    asked: bool = False
+    if console:
+        status, shown, asked = on_a_terminal(
+            [python, "quick_start.py"], run, environment)
+        sys.stdout.write(shown)
+    else:
+        done: subprocess.CompletedProcess[str] = subprocess.run(
+            [python, "quick_start.py"], cwd=run, env=environment,
+            stdin=subprocess.DEVNULL, capture_output=True, text=True,
+            check=False)
+        status, shown = done.returncode, done.stdout
+        sys.stderr.write(done.stderr)
+        sys.stdout.write(done.stdout)
     sys.stdout.flush()
 
     # Passed only if it ran, the cow appeared and the right `ezpkg` did it.
     installed: list[str] = sorted(
         path.name for path in (home / ".ezpkg").glob("ezpkg-*.dist-info"))
     problems: list[str] = []
-    if done.returncode != 0:
-        problems.append(f"exit status {done.returncode}")
-    if COW not in done.stdout:
+    if status != 0:
+        problems.append(f"exit status {status}")
+    if COW not in shown:
         problems.append(f"no {COW!r} in the output")
+    if console and not asked:
+        problems.append(f"no {PROMPT!r} on the terminal")
     if installed != [f"ezpkg-{version}.dist-info"]:
         problems.append(f"installed {installed}, not ezpkg {version}")
     if problems:

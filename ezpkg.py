@@ -3792,14 +3792,24 @@ class EZPkg:
         at all -- under `cron`, a service manager, a build, or a
         double-clicked launcher -- and then there is nobody to ask.
 
+        Windows has no `/dev/tty`, so until 2026-10-16 nobody there was
+        ever asked (`I.owenabd`).  Its console's own names are `CONOUT$`
+        and `CONIN$`, which reach the console even when standard input
+        is a pipe, and fail to open when there is no console, as for a
+        `.pyw` or a service.
+
         Returns:
         * (`tuple[IO[str], IO[str]] | None`): The terminal open for
           writing and for reading, or `None` when there is not one.
         """
-        # Whether it opens is the whole of the question.
+        # Whether both open is the whole of the question.
+        writing: str
+        reading: str
+        writing, reading = (("CONOUT$", "CONIN$") if os.name == "nt"
+                            else ("/dev/tty", "/dev/tty"))
         try:
-            return (Path("/dev/tty").open("w", encoding="utf-8"),
-                    Path("/dev/tty").open("r", encoding="utf-8"))
+            return (Path(writing).open("w", encoding="utf-8"),
+                    Path(reading).open("r", encoding="utf-8"))
         except OSError:
             return None
 
