@@ -31,7 +31,8 @@ needs live here instead.
   `--console` job per system: `gh workflow run check.yml -f
   target=testpypi -f version=V` (25 jobs, about 3 minutes; Claude
   starts it).  Started by hand, not yet by `release.yml` (`T.gar`).
-* `ux/drive.py [--keep] [--until STEP]`: Runs the scripted UX steps
+* `ux/drive.py [--keep] [--until STEP | --only STEP...] [--ux-dir
+  DIR]`: Runs the scripted UX steps
   (1.1-1.11) on a pseudoterminal in a temporary copy of the Quick
   Start, as a stranger's real first run: a fresh home, the bootstrap
   fetching `pip` from pypi.org and installing a wheel of the project's
@@ -43,6 +44,9 @@ needs live here instead.
   to `ux/uxNN_NAME.txt`, which Wayne edits into the agreed output and
   commits, so `git diff ux/` after a rerun shows what is left to build
   (`T.abfd`'s `Context.md`).  A rerun overwrites them.
+  `--only 1.4` runs one step from the snapshot the step before left
+  in `ux/.snapshots/` (ignored; dropped when the code changes), or
+  after running the earlier steps as unrecorded setup.
 * `git_hooks/`: `prepare-commit-msg` adds `Assisted-by: Claude
   Code:claude-opus-5-5` to Wayne's commit messages (deletable in the
   editor), and `commit-msg` refuses a message that is only that

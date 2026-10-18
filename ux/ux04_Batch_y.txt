@@ -1,11 +1,26 @@
 1.2 Batch y
 Two new imports: one question, y, and no second approval.
 -------------------------------------------------------------------------------
-`prog.py` has 2 entries in `dependencies` (line 5) that need to be updated.
+`prog.py` has changed since it was first run, so you may be working on it.  If
+you are, `ezpkg` will offer to keep its `dependencies` in step with its
+imports, and you can turn down any change until you are ready.  If the imports
+and dependencies are not in sync, the program will typically fail at an
+`import` statement.
+
+Are you working on `prog.py`? [y=>Yes|n=>No]: y
+
+`prog.py` has 2 entries in `dependencies` (line 5) that need to be updated:
+ 7:           "cowsay",
+ 8:    add    "requests>=2.34.2,<3",
+ 9:    add    "PyYAML>=6.0.3,<7",
+10:           ]
+63:    mypy   import requests  # type: ignore[import-not-found]  # For mypy.
+64:    mypy   import yaml  # type: ignore[import-not-found]  # For mypy.
 Update them? [y=>Yes|n=>No|i=>Individually|a=>Always|d=>Don't ask again]: y
 
 Your changes to `prog.py` need 6 more software package(s) from the internet.
-Answer `n` and they will be removed again, without running `prog.py`.
+They have been downloaded, but nothing in them has run yet.  Answer `n` and
+they will be removed again, without running `prog.py`.
 
 Keep them in `~/.ezpkg` and run `prog.py`?
 [y=>Yes, this time|n=>No|a=>Always, never ask again|?=>Explain]: y
@@ -18,13 +33,6 @@ The following 6 package(s) are now installed in `~/.ezpkg`:
 6. urllib3 2.8.0: HTTP library with thread-safe connection pooling, file pos...
 `ezpkg` (https://pypi.org/project/ezpkg/) manages `~/.ezpkg`.
 
-Changes made to `prog.py`:
- 7:           "cowsay",
- 8:    add    "requests>=2.34.2,<3",
- 9:    add    "PyYAML>=6.0.3,<7",
-10:           ]
-63:    mypy   import requests  # type: ignore[import-not-found]  # For mypy.
-64:    mypy   import yaml  # type: ignore[import-not-found]  # For mypy.
   ____________
 | EZPkg works! |
   ============

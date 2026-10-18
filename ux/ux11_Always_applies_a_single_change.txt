@@ -1,0 +1,14 @@
+1.8 Always applies a single change
+One import removed after a: done silently.
+-------------------------------------------------------------------------------
+  ____________
+| EZPkg works! |
+  ============
+            \
+             \
+               ^__^
+               (oo)\_______
+               (__)\       )\/\
+                   ||----w |
+                   ||     ||
+The cow above was drawn by cowsay 6.1.

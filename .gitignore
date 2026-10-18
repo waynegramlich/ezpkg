@@ -37,3 +37,6 @@ PyPI_Via_GitHub.md
 
 # Dogfood output for Wayne to edit (~/ezpkg_dogfood/drive); hg tracks it.
 ux/drive_output.txt
+
+# Copies kept by ux/drive.py after each step, for `--only`.
+ux/.snapshots/

@@ -286,3 +286,141 @@
   question being silent; later-step wording (1.4 onwards).
 * Next: `ux04` (1.4 Batch n), then 1.4b-1.11, then the download-answer
   steps (`?`, `x`, Enter, `n` first and later run, `a`, Control-D).
+
+## 2026-10-18: `drive --only`
+
+* Wayne: run UX steps individually.  `ux/drive.py --only 1.4 [1.6
+  ...]` restores the copy saved after the step before
+  (`ux/.snapshots/NN/`, keyed on the SHA-256 of `drive.py`,
+  `ezpkg.py`, `quick_start.py` and `ezpkg_test.py`), else runs the
+  earlier steps as setup (not written to ux files, not counted).  Only
+  the chosen steps' `uxNN_*.txt` files are written; `--ux-dir DIR`
+  writes them elsewhere.  A snapshot goes back to its original `/tmp`
+  path, since the cache records absolute paths.
+
+## 2026-10-18: Ask before developer mode (Wayne), agreed, NOT built
+
+* `ux02` and `ux04` list the changes before `Update them?`; the
+  "Changes made" display after `y` is gone.  Additions are fetched
+  silently first, so the list shows the real ranges.
+* A changed program is no longer put in developer mode silently.  When
+  the file has changed and `dependencies` and the imports disagree
+  (only then), `ux02` lines 4-8 ask "Are you working on `prog.py`?
+  [y=>Yes|n=>No]".  `y`: developer mode (then `n` to `Update them?`
+  is "later").  `n`: stays end-user, warned once, asked again at the
+  next change of the file.  No terminal: end-user, as now.
+* `drive.py`: 1.2 answers the new question `y`; new steps 1.12, 1.12b,
+  1.12c (answer `n`, unchanged rerun, changed again and `y`).  They
+  fail until the question is built.
+
+## 2026-10-18: "Are you working on `prog.py`?", built
+
+* `developing()` no longer switches modes: a changed end-user copy
+  sets `self.changed` (the new SHA-256).  `sync_dependencies` asks
+  `working_on` only when the file changed and there is a discrepancy,
+  on a terminal.  `y`: `mode` developer, `source` updated.  `n`:
+  `source` updated, `Discrepancy.unlisted()` line ("is left as it
+  is, although line 58 imports `tabulate` ..."), `self.declined`
+  silences `scan_imports` for that run.  A changed copy with nothing
+  to offer records the new `source` and asks nothing.
+* Paragraph wrapped like the others (`wrapped`), so `ux02`/`ux04`
+  lines 4-6 were rewrapped to match.
+* Tests: `synced_program` marks the program developer's;
+  `test_an_end_user_is_never_asked_about_dependencies` covers n, rerun,
+  second edit y.  Quick suite 300 OK, 18 skipped.
+* `drive`: new steps 1.1b and 1.1c (`ux02`, `ux03`; old `ux02`-`ux04`
+  renamed `ux04`-`ux06`); `forget_answers` drops only `answer`; the
+  temporary path shows as `/tmp/drive-...`.  All 15 steps pass; `ux01`,
+  `ux02`, `ux03`, `ux05` equal their targets.
+* Left in `ux04`/`ux06` (agreed, NOT built): the list before `Update
+  them?`, no "Changes made" after `y`, `ux06`'s "Nothing changed."
+  line.  Known cost: a changed end-user copy with no terminal reruns
+  the discrepancy check every run (its `source` is kept old so a later
+  terminal run still asks).
+
+## 2026-10-18: The list before `Update them?`, built
+
+* `reconcile` lists the changes before the batch question, headed by
+  `needing(count, ":")`, via `Discrepancy.display(..., heading=)`.
+  The additions are fetched silently first (`versions_of`: lock and
+  date as `provide`, holding directory thrown away) for their ranges.
+  After `y` nothing is listed again, unless what `provide` brought
+  differs from the list.  `n` prints `ux06`'s "Nothing changed." line
+  and silences `scan_imports` (`self.declined`).  New helpers
+  `fetching` (leaves out the `ezpkg` entry this one meets) and
+  `edit_for` (the three-stage edit).
+* `ux06`'s target lost a `cowsay` anchor line Claude had written by
+  mistake (only the nearest unchanged entry anchors).
+* `drive`: 15 of 15 pass; `ux01`-`ux04` and `ux06` equal their
+  targets.  `ux05` (Batch i) now gets the list too, then its "Changes
+  to be made" display: Claude proposes keeping both (asked, not
+  answered).
+* Quick suite: 300 OK, 18 skipped, before the last test edit
+  (`test_several_changes_are_one_question`, now passing alone).
+
+## 2026-10-18: Breaking imports, and `ux01`-`ux06` agreed
+
+* Wayne: a non-author who edits a program and blames `ezpkg` is the
+  worry.  So a missing package (an addition whose module
+  `importable()` cannot find) is "breaking": an end-user is asked
+  "Are you working on" on every run, changed copy or not (record
+  `breaking` = fingerprint), and `n` or no terminal prints
+  `Discrepancy.stopping` every run ("Line 58 of `prog.py` imports
+  `tabulate`, ... This is a mistake in `prog.py`, not in Python or
+  `ezpkg`.  To fix it, add "tabulate" to the `dependencies` list near
+  the top of `prog.py` (line 5), or run `prog.py` again and answer
+  `y`.").  Deleting `~/.ezpkg` no longer hides it.  Cosmetic
+  discrepancies (unused, order, `mypy`) stay a developer's business.
+* Wayne's added paragraph sentence ("If the imports and dependencies
+  are not in sync, ...") is in `working_on`.
+* `ux01`-`ux06` all agreed by Wayne; `drive` output equals every one.
+  `ux05` keeps both lists (before `Update them?`, and "Changes to be
+  made"); the heading/row line-number mix is left as is.
+* Test `test_a_missing_package_is_explained_every_run`.  Quick suite
+  301 OK, 18 skipped.
+* Next: `ux07` onwards (1.4b Batch n, run again, then 1.5-1.11).
+
+## 2026-10-18: Where this stopped (before Wayne's commit and `/clear`)
+
+* `ux01`-`ux09` agreed by Wayne; `drive` output equals each.  `ux10`
+  (renamed `ux10_Always.txt`, step "1.7 Always") is under review.
+* Built today, after the breaking-imports note above:
+  * Restart after every edit (`EZPkg.restart`, `run_again`, shared
+    with `switch`): Python compiled the old file, so a traceback named
+    new lines by old numbers (`ux08`).  `EZPKG_RESTARTED` marks the
+    second start (it holds `EZPKG_APPROVE`, which the restarted run
+    hides from `ezpkg` and gives back to the program, so `write` asks
+    nothing twice).  `install_declared` now wraps `provide_declared`.
+    The restarted run's `scan_imports` is silent.
+  * `statements_above_bootstrap` (allowed: docstring, imports, `def`,
+    `class`, assignments, `pass`; the `if` a bootstrap is indented in
+    ends it, compared by line since `bootstrap_node` parses its own
+    tree); reported by `import_problems`.
+  * Misspelt import (`ux08`): "prog.py:69: `import X` needs a package,
+    but no package "X" is currently available.  Please check the
+    spelling, or manually add the right package to `dependencies`
+    (lines 6-8)."; `self.reported` silences `scan_imports`' repeat.
+  * Download paragraph (developer): "... from the internet.  They have
+    been downloaded, but nothing in them has run yet.  Answer `n` and
+    they will be removed again, without running `prog.py`."
+  * One change is asked like a batch (`ux09`): list, then `Update it?
+    [y|n|a|d]` (plus `k=>Keep it, needed without an import` when the
+    one change is a removal); `needing` says "1 entry ... needs".
+    The per-item questions remain only behind a batch's `i`.
+  * Every question asked once (Wayne: "nobody wants to answer the same
+    question twice"): no "Really ...?" after `a`/`d` to `Update
+    them?`, nor after the download prompt's `a`.  `a`/`d` print "From
+    now on, `ezpkg` updates/never asks about `prog.py`'s
+    `dependencies` ...  To be asked again, delete `~/.ezpkg/develop/
+    HASH.json`."  A remembered `a` is silent (`ux11`).
+* Open:
+  * README still describes "Really never ask again?" (lines ~166 and
+    ~206) and the old prompts; propose rewrites in HTML comments.
+  * `ux10`-`ux15` to review; `ux10`'s record path is a hash that
+    changes every run, so `git diff` always shows that line.
+  * Last checks: `drive` 15 of 15; quick suite 301 of 302, the one
+    failure a wrapped-line assertion, fixed and passing alone.  The
+    silent remembered `a` went in mid-run, so rerun the quick suite.
+  * Next: Wayne reviews `ux10`-`ux15`; README proposals; then the
+    download-answer steps (`?`, `x`, Enter, `n` first and later run,
+    `a`, Control-D) and `n` on a first run removing `~/.ezpkg`.

@@ -207,3 +207,17 @@ rehearsal and dogfood run, then its `Summary.md` and closing.
 * `ux02`-`ux03` (see `T.abfd`'s `Context.md`) restyle the batch
   question and the changes display (line-numbered, `mypy` lines, no
   report lines) and make `a` silent.  Agreed, NOT built.
+
+## 2026-10-18: `reconcile` reshaped by the UX review (see `T.abfd`)
+
+* `T.abfd`'s `Context.md` (2026-10-18 entries) has the details; in
+  short: the changes are listed (ranges from a silent `versions_of`
+  fetch) before `Update them?`/`Update it?`; one change is asked like
+  a batch (`k` offered for a lone removal); no "Really?" after `a`/`d`;
+  a remembered `a` is silent; `n` says "Nothing changed. ...".
+  Helpers `fetching`, `edit_for`; `Discrepancy.display(heading=)`,
+  `needing(count, end)`.  Per-item questions remain behind `i`.
+* An end-user's copy with an unimportable import is asked "Are you
+  working on" every run and told whose mistake it is
+  (`Discrepancy.stopping`).  Every edit restarts the program
+  (`EZPkg.restart`).

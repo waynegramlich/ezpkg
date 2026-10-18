@@ -1,0 +1,11 @@
+1.9b Don't ask again, one more change
+After d, a change is only named: no question, no edit.
+-------------------------------------------------------------------------------
+EZPkg: prog.py: its `dependencies` (lines 11-12) and its imports (line 73)
+disagree.
+ezpkg: prog.py: line 73: `tabulate` is not importable here; add its package to Part 1
+ezpkg: prog.py: shown once; shown again when its imports, Part 1 or approvals change
+Traceback (most recent call last):
+  File "/tmp/drive-.../prog.py", line 73, in <module>
+    import tabulate
+ModuleNotFoundError: No module named 'tabulate'

@@ -1,0 +1,25 @@
+1.11 After Control-C
+The same first run again: asked again, y, and the cow.
+-------------------------------------------------------------------------------
+The author of `prog.py` has selected some software packages from the internet.
+If you agree, they will be retained in `~/.ezpkg`.  If you do not trust the
+author, answer `n` and `~/.ezpkg` will simply go away without running
+`prog.py`.
+
+Retain `~/.ezpkg` and run `prog.py`?
+[y=>Yes, this time|n=>No|a=>Always, never ask again|?=>Explain]: y
+The following 1 package(s) are now installed in `~/.ezpkg`:
+1. cowsay 6.1: The famous cowsay for GNU/Linux is now available for python
+`ezpkg` (https://pypi.org/project/ezpkg/) manages `~/.ezpkg`.
+
+  ____________
+| EZPkg works! |
+  ============
+            \
+             \
+               ^__^
+               (oo)\_______
+               (__)\       )\/\
+                   ||----w |
+                   ||     ||
+The cow above was drawn by cowsay 6.1.

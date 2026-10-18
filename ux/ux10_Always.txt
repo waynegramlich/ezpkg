@@ -1,0 +1,36 @@
+1.7 Always
+a, asked once: updated now, and from then on without asking.
+-------------------------------------------------------------------------------
+`prog.py` has 2 entries in `dependencies` (lines 6-11) that need to be updated:
+11:           "attrs>=26.1.0",
+12:    add    "click>=8.5.0,<9",
+13:    add    "tabulate>=0.10.0,<0.11",
+14:           ]
+75:    mypy   import click  # type: ignore[import-not-found]  # For mypy.
+76:    mypy   import tabulate  # type: ignore[import-not-found]  # For mypy.
+Update them? [y=>Yes|n=>No|i=>Individually|a=>Always|d=>Don't ask again]: a
+From now on, `ezpkg` updates `prog.py`'s `dependencies` without asking.  To be
+asked again, delete `~/.ezpkg/develop/b5f7d4c409d6c4eb.json`.
+
+Your changes to `prog.py` need 2 more software package(s) from the internet.
+They have been downloaded, but nothing in them has run yet.  Answer `n` and
+they will be removed again, without running `prog.py`.
+
+Keep them in `~/.ezpkg` and run `prog.py`?
+[y=>Yes, this time|n=>No|a=>Always, never ask again|?=>Explain]: y
+The following 2 package(s) are now installed in `~/.ezpkg`:
+1. click 8.5.0: Composable command line interface toolkit
+2. tabulate 0.10.0: Pretty-print tabular data
+`ezpkg` (https://pypi.org/project/ezpkg/) manages `~/.ezpkg`.
+
+  ____________
+| EZPkg works! |
+  ============
+            \
+             \
+               ^__^
+               (oo)\_______
+               (__)\       )\/\
+                   ||----w |
+                   ||     ||
+The cow above was drawn by cowsay 6.1.

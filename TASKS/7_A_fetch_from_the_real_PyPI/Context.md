@@ -130,3 +130,13 @@
 * `T.kdaiis`'s batch question built (not yet committed or rehearsed).
   `I.ffspo` (a failed fetch shows `pip`'s output) filed, priority 1,
   open; must close before `T.utpat`, beside `I.wmau`.
+
+## 2026-10-18: State at the end of the session
+
+* The UX review (`T.abfd`, `ux/`): `ux01`-`ux09` agreed and built;
+  `ux10`-`ux15` waiting on Wayne.  Big changes: developer mode is
+  asked ("Are you working on `prog.py`?"), breaking imports explained
+  every run, the program restarts after every `ezpkg` edit, every
+  question asked once.  `ux/drive.py --only STEP` runs single steps.
+* Not rehearsed on test.pypi.org since `1efdcae`; a rehearsal is due
+  once the UX review settles.

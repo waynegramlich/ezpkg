@@ -15,11 +15,20 @@ Everything happens in a fresh temporary copy, starting from the
 project's `quick_start.py`, so nothing of the project's or of `~/.ezpkg`
 is touched.
 
-Usage: `ux/drive.py [--keep] [--until STEP] [OUTPUT]`.  OUTPUT defaults
-to `ux/drive_output.txt` (ignored by git and hg); it is written as the
-steps run, each step framed by `^` and `v` lines.
-`--keep` leaves the temporary copy, and says where; `--until 1.4`
-stops after the step whose name starts `1.4 `.
+Usage: `ux/drive.py [--keep] [--until STEP | --only STEP...]
+[--ux-dir DIR] [OUTPUT]`.  OUTPUT defaults to `ux/drive_output.txt`
+(ignored by git and hg); it is written as the steps run, each step
+framed by `^` and `v` lines.  `--keep` leaves the temporary copy, and
+says where; `--until 1.4` stops after the step numbered `1.4`.
+
+`--only 1.4 1.6` runs just those steps.  The copy after every step run
+is kept in `ux/.snapshots/NN/` (ignored), so a step starts from the
+snapshot of the step before it; without one, the steps before it run
+first as setup, not written to ux files and not counted.  Snapshots
+are thrown away when `drive.py`, `ezpkg.py`, `quick_start.py` or
+`ezpkg_test.py` changes.  A snapshot goes back to the temporary path
+it was taken at, since the cache records absolute paths.
+`--ux-dir DIR` writes the per-step files there instead of `ux/`.
 
 Each step's output is also written on its own, without the frame, as
 `ux/uxNN_NAME.txt` (`NN` the step's place, from `01`).  Wayne edits
@@ -29,6 +38,7 @@ A rerun overwrites them; commit first.
 """
 
 import dataclasses
+import hashlib
 import json
 import os
 import pty
@@ -44,6 +54,7 @@ from pathlib import Path
 
 UX: Path = Path(__file__).resolve().parent
 PROJECT: Path = UX.parent
+SNAPSHOTS: Path = UX / ".snapshots"
 sys.path.insert(0, str(PROJECT))
 import ezpkg
 import ezpkg_test
@@ -96,9 +107,11 @@ class Step:
 
 
 def forget_answers(work: Path) -> None:
-    """Remove the program's development record (undoes `a` and `d`)."""
+    """Undo `a` and `d`, keeping the program's mode."""
     for record in (work / "home" / ".ezpkg" / "develop").glob("*.json"):
-        record.unlink()
+        kept: dict[str, str] = json.loads(record.read_text())
+        kept.pop("answer", None)
+        record.write_text(json.dumps(kept, indent=1, sort_keys=True))
 
 
 def first_run_again(work: Path) -> None:
@@ -114,9 +127,22 @@ STEPS: list[Step] = [
          [], present=["EZPkg works!"],
          absent=["exclude-newer", "dependencies", "Traceback"],
          declared=BASE, mode="end-user"),
+    Step("1.1b Not working on it",
+         "An end-user's copy changed, answered n: no edit, only a warning.",
+         ["tabulate"], [("Are you working on", "n")],
+         present=["No module named 'tabulate'", "not in Python or `ezpkg`"],
+         absent=["Update them?", "Add \"tabulate\"?"],
+         declared=BASE, mode="end-user"),
+    Step("1.1c Not working on it, run again",
+         "Still broken, so asked again; n again, and the same explanation.",
+         None, [("Are you working on", "n")],
+         present=["not in Python or `ezpkg`"],
+         absent=["disagree", "Update them?", "not importable here"],
+         declared=BASE, mode="end-user"),
     Step("1.2 Batch y",
          "Two new imports: one question, y, and no second approval.",
-         ["requests", "yaml"], [("Update them?", "y")],
+         ["requests", "yaml"],
+         [("Are you working on", "y"), ("Update them?", "y")],
          present=["2 entries in `dependencies`", "mypy   import requests",
                   "EZPkg works!"],
          absent=["Make these changes?", "Traceback"],
@@ -141,37 +167,35 @@ STEPS: list[Step] = [
     Step("1.5 A misspelt import in a batch",
          "A third import nobody publishes: named, not counted, not added.",
          ["yaml", "rich", "bogus_pkg_xyzzy"], [("Update them?", "y")],
-         present=['no package "bogus_pkg_xyzzy" is on the index',
+         present=['no package "bogus_pkg_xyzzy"',
                   "2 entries in `dependencies`"],
          declared=[*BASE, "requests", "pyyaml", "rich"]),
     Step("1.6 One change",
-         "One new import: the old single question and approval, no batch.",
-         ["yaml", "rich", "attrs"],
-         [('Add "attrs"?', "y"), ("Make these changes?", "y")],
-         present=["disagree"], absent=["Update them?", "Traceback"],
+         "One new import: listed and asked like a batch, in the singular.",
+         ["yaml", "rich", "attrs"], [("Update it?", "y")],
+         present=["1 entry in `dependencies`"],
+         absent=["Make these changes?", "disagree", "Traceback"],
          declared=[*BASE, "requests", "pyyaml", "rich", "attrs"]),
-    Step("1.7 Always, with a Really? n",
-         "a, then n to Really? goes back; a, y updates without approval.",
+    Step("1.7 Always",
+         "a, asked once: updated now, and from then on without asking.",
          ["yaml", "rich", "attrs", "click", "tabulate"],
-         [("Update them?", "a"), ("Really update", "n"),
-          ("Update them?", "a"), ("Really update", "y")],
+         [("Update them?", "a")],
          present=["To be asked again, delete"],
-         absent=["Make these changes?", "Traceback"],
+         absent=["Really", "Make these changes?", "Traceback"],
          declared=[*BASE, "requests", "pyyaml", "rich", "attrs", "click",
                    "tabulate"]),
     Step("1.8 Always applies a single change",
-         "One import removed after a: done with no question at all.",
+         "One import removed after a: done silently.",
          ["yaml", "rich", "attrs", "click"],
-         present=['remove "tabulate'],
-         absent=["Update them?", "Remove it?", "Make these changes?",
+         absent=["Update", "Remove it?", "Make these changes?", "remove",
                  "Traceback"],
          declared=[*BASE, "requests", "pyyaml", "rich", "attrs", "click"]),
     Step("1.9 Don't ask again",
-         "a forgotten; two changes answered d, y: nothing changes.",
+         "a forgotten; two changes answered d, once: nothing changes.",
          ["yaml", "rich", "attrs", "tabulate"],
-         [("Update them?", "d"), ("Really never", "y")],
-         present=["Really never ask about prog.py again?",
-                  "No module named 'tabulate'"],
+         [("Update them?", "d")],
+         present=["never asks about", "No module named 'tabulate'"],
+         absent=["Really"],
          declared=[*BASE, "requests", "pyyaml", "rich", "attrs", "click"],
          before=forget_answers),
     Step("1.9b Don't ask again, one more change",
@@ -312,8 +336,81 @@ def check(step: Step, shown: str, program: Path) -> list[str]:
     return problems
 
 
+def key() -> str:
+    """Return what a snapshot must match: the files that make a step."""
+    digest = hashlib.sha256()
+    name: str
+    for name in ("ux/drive.py", "ezpkg.py", "quick_start.py",
+                 "ezpkg_test.py"):
+        digest.update((PROJECT / name).read_bytes())
+    return digest.hexdigest()
+
+
+def snapshot(index: int, work: Path) -> None:
+    """Keep the copy as it is after step `index` (from 0)."""
+    place: Path = SNAPSHOTS / f"{index + 1:02d}"
+    shutil.rmtree(place, ignore_errors=True)
+    shutil.copytree(work, place / "work", symlinks=True)
+    (place / "path").write_text(str(work), encoding="utf-8")
+
+
+def restorable(index: int, work: Path) -> bool:
+    """Say whether the snapshot after step `index` can be restored.
+
+    A snapshot goes back where it was taken, since the cache records
+    absolute paths; that place must be free, or be the copy itself.
+    """
+    place: Path = SNAPSHOTS / f"{index + 1:02d}"
+    if not (place / "path").exists() or not (place / "work").is_dir():
+        return False
+    path: Path = Path((place / "path").read_text(encoding="utf-8"))
+    return path == work or not path.exists()
+
+
+def restore(index: int, work: Path) -> Path:
+    """Replace the copy with the snapshot after step `index`; return it."""
+    place: Path = SNAPSHOTS / f"{index + 1:02d}"
+    path: Path = Path((place / "path").read_text(encoding="utf-8"))
+    shutil.rmtree(work, ignore_errors=True)
+    shutil.copytree(place / "work", path, symlinks=True)
+    return path
+
+
+def run_step(step: Step, work: Path) -> tuple[str, list[str], int]:
+    """Run one step on the copy.
+
+    Returns:
+    * (`tuple[str, list[str], int]`): Its framed-to-be body, its
+      problems and the exit status.
+    """
+    if step.before is not None:
+        step.before(work)
+    if step.imports is not None:
+        program: Path = work / "prog.py"
+        program.write_text(with_imports(program.read_text(),
+                                        step.imports))
+    shown: str
+    problems: list[str]
+    status: int
+    shown, problems, status = run_on_a_terminal(work, step.script)
+    problems += check(step, shown, work / "prog.py")
+    body: str = (step.name + "\n" + step.description + "\n"
+                 + "-" * WIDTH + "\n" + shown
+                 + ("" if shown.endswith("\n") else "\n"))
+    return body, problems, status
+
+
+def numbered(name: str) -> str:
+    """Return a step's number, such as `1.4b`."""
+    return name.split(" ", 1)[0]
+
+
+USAGE: str = ("usage: ux/drive.py [--keep] [--until STEP | --only STEP...]"
+              " [--ux-dir DIR] [OUTPUT]")
+
+
 def main() -> int:
-    """Run every step, writing the transcript as it goes."""
+    """Run the steps, writing the transcript as it goes."""
     arguments: list[str] = sys.argv[1:]
     keep: bool = "--keep" in arguments
     arguments = [one for one in arguments if one != "--keep"]
@@ -322,11 +419,41 @@ def main() -> int:
         at: int = arguments.index("--until")
         until = arguments[at + 1]
         del arguments[at:at + 2]
-    if len(arguments) > 1 or (arguments and arguments[0].startswith("-")):
-        print("usage: ux/drive.py [--keep] [--until STEP] [OUTPUT]",
-              file=sys.stderr)
+    ux: Path = UX
+    if "--ux-dir" in arguments[:-1]:
+        at = arguments.index("--ux-dir")
+        ux = Path(arguments[at + 1])
+        del arguments[at:at + 2]
+    only: list[str] = []
+    if "--only" in arguments:
+        at = arguments.index("--only")
+        end: int = at + 1
+        while (end < len(arguments)
+               and re.fullmatch(r"\d+(\.\d+)*[a-z]?", arguments[end])):
+            end += 1
+        only = arguments[at + 1:end]
+        del arguments[at:end]
+    known: list[str] = [numbered(step.name) for step in STEPS]
+    if ((until and only) or "--only" in arguments
+            or any(one not in known for one in only)
+            or len(arguments) > 1
+            or (arguments and arguments[0].startswith("-"))):
+        print(USAGE, file=sys.stderr)
         return 2
     output: Path = Path(arguments[0]) if arguments else UX / "drive_output.txt"
+    chosen: list[int] = (
+        [known.index(one) for one in only] if only
+        else list(range(next((index for index, number in enumerate(known)
+                              if number == until), len(STEPS) - 1) + 1)))
+    chosen.sort()
+
+    # Snapshots from other code are of no use.
+    wanted: str = key()
+    if (not (SNAPSHOTS / "key").exists()
+            or (SNAPSHOTS / "key").read_text(encoding="utf-8") != wanted):
+        shutil.rmtree(SNAPSHOTS, ignore_errors=True)
+        SNAPSHOTS.mkdir(parents=True)
+        (SNAPSHOTS / "key").write_text(wanted, encoding="utf-8")
 
     # A fresh copy: the Quick Start, an empty home, and the project's
     # `ezpkg` as the wheel pypi.org will one day serve.
@@ -339,42 +466,53 @@ def main() -> int:
     shutil.copy2(built, work / "links" / built.name)
 
     results: list[tuple[str, list[str]]] = []
+    done: int = -1  # The last step whose effects the copy holds.
     with open(output, "w", encoding="utf-8") as transcript:
         def write(text: str) -> None:
             transcript.write(text)
             transcript.flush()
         write(f"drive: {time.strftime('%Y-%m-%d %H:%M:%S')}, ezpkg "
               f"{ezpkg.__version__} from {PROJECT}, in {work}\n\n")
-        step: Step
-        for step in STEPS:
+        index: int
+        for index in chosen:
+            # Bring the copy to just after the step before: from the
+            # latest usable snapshot, then the rest run quietly.
+            latest: int = next((one for one in range(index - 1, done, -1)
+                                if restorable(one, work)), done)
+            if latest > done:
+                work = restore(latest, work)
+                done = latest
+                write(f"drive: restored the copy after "
+                      f"{STEPS[latest].name}, in {work}\n\n")
+            for setup in range(done + 1, index):
+                print(f"drive: {STEPS[setup].name} (setup) ...",
+                      file=sys.stderr, flush=True)
+                problems: list[str] = run_step(STEPS[setup], work)[1]
+                snapshot(setup, work)
+                write(f"{STEPS[setup].name}: setup, "
+                      f"{'PASS' if not problems else 'FAIL'}\n")
+                for problem in problems:
+                    write(f"    {problem}\n")
+            step: Step = STEPS[index]
             print(f"drive: {step.name} ...", file=sys.stderr, flush=True)
-            if step.before is not None:
-                step.before(work)
-            if step.imports is not None:
-                program: Path = work / "prog.py"
-                program.write_text(with_imports(program.read_text(),
-                                                step.imports))
-            shown: str
-            problems: list[str]
+            body: str
             status: int
-            shown, problems, status = run_on_a_terminal(work, step.script)
-            problems += check(step, shown, work / "prog.py")
-            body: str = (step.name + "\n" + step.description + "\n"
-                         + "-" * WIDTH + "\n" + shown
-                         + ("" if shown.endswith("\n") else "\n"))
+            body, problems, status = run_step(step, work)
+            snapshot(index, work)
+            done = index
             write("^" * WIDTH + "\n" + body + "v" * WIDTH + "\n")
-            UX.mkdir(exist_ok=True)
+            ux.mkdir(parents=True, exist_ok=True)
             title: str = re.sub(r"\W+", "_", step.name.split(" ", 1)[1])
-            (UX / f"ux{len(results) + 1:02d}_{title.strip('_')}.txt"
-             ).write_text(body, encoding="utf-8")
+            # The copy's name changes every run, so it is left out.
+            (ux / f"ux{index + 1:02d}_{title.strip('_')}.txt"
+             ).write_text(body.replace(str(work), "/tmp/drive-..."),
+                          encoding="utf-8")
             write(f"{step.name}: {'PASS' if not problems else 'FAIL'} "
                   f"(exit {status})\n")
             for problem in problems:
                 write(f"    {problem}\n")
             write("\n")
             results.append((step.name, problems))
-            if until and step.name.startswith(until + " "):
-                break
         failed: list[str] = [name for name, problems in results if problems]
         write(f"drive: {len(results) - len(failed)} of {len(results)} "
               f"passed" + (f"; failed: {', '.join(failed)}" if failed

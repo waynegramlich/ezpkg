@@ -1,7 +1,13 @@
 1.4 Batch n
 Two more imports, answered n: nothing changes.
 -------------------------------------------------------------------------------
-`prog.py` has 2 entries in `dependencies` (lines 6-8) that need to be updated.
+`prog.py` has 2 entries in `dependencies` (lines 6-8) that need to be updated:
+ 8:           "requests>=2.34.2,<3",
+ 9:    add    "PyYAML>=6.0.3,<7",
+10:    add    "rich>=15.0.0",
+11:           ]
+69:    mypy   import yaml  # type: ignore[import-not-found]  # For mypy.
+70:    mypy   import rich  # type: ignore[import-not-found]  # For mypy.
 Update them? [y=>Yes|n=>No|i=>Individually|a=>Always|d=>Don't ask again]: n
 Nothing changed.  This is asked again when the imports or `dependencies` of
 `prog.py` change.

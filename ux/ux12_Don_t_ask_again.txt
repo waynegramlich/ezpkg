@@ -1,0 +1,18 @@
+1.9 Don't ask again
+a forgotten; two changes answered d, once: nothing changes.
+-------------------------------------------------------------------------------
+`prog.py` has 2 entries in `dependencies` (lines 6-12) that need to be updated:
+11:           "attrs>=26.1.0",
+  :    remove "click>=8.5.0,<9",
+12:    add    "tabulate>=0.10.0,<0.11",
+13:           ]
+74:    mypy   import tabulate  # type: ignore[import-not-found]  # For mypy.
+Update them? [y=>Yes|n=>No|i=>Individually|a=>Always|d=>Don't ask again]: d
+From now on, `ezpkg` never asks about `prog.py`'s `dependencies`.  To be asked
+again, delete `~/.ezpkg/develop/b5f7d4c409d6c4eb.json`.
+ezpkg: prog.py: line 74: `tabulate` is not importable here; add its package to Part 1
+ezpkg: prog.py: shown once; shown again when its imports, Part 1 or approvals change
+Traceback (most recent call last):
+  File "/tmp/drive-.../prog.py", line 74, in <module>
+    import tabulate
+ModuleNotFoundError: No module named 'tabulate'

@@ -1,0 +1,18 @@
+1.1b Not working on it
+An end-user's copy changed, answered n: no edit, only a warning.
+-------------------------------------------------------------------------------
+`prog.py` has changed since it was first run, so you may be working on it.  If
+you are, `ezpkg` will offer to keep its `dependencies` in step with its
+imports, and you can turn down any change until you are ready.  If the imports
+and dependencies are not in sync, the program will typically fail at an
+`import` statement.
+
+Are you working on `prog.py`? [y=>Yes|n=>No]: n
+Line 58 of `prog.py` imports `tabulate`, but its `dependencies` (line 5) do not
+list it, so `prog.py` will stop there.  This is a mistake in `prog.py`, not in
+Python or `ezpkg`.  To fix it, add "tabulate" to the `dependencies` list near
+the top of `prog.py` (line 5), or run `prog.py` again and answer `y`.
+Traceback (most recent call last):
+  File "/tmp/drive-.../prog.py", line 58, in <module>
+    import tabulate
+ModuleNotFoundError: No module named 'tabulate'

@@ -1,0 +1,32 @@
+1.5 A misspelt import in a batch
+A third import nobody publishes: named, not counted, not added.
+-------------------------------------------------------------------------------
+prog.py:69: `import bogus_pkg_xyzzy` needs a package, but no package
+"bogus_pkg_xyzzy" is currently available.  Please check the spelling, or
+manually add the right package to `dependencies` (lines 6-8).
+`prog.py` has 2 entries in `dependencies` (lines 6-8) that need to be updated:
+ 8:           "requests>=2.34.2,<3",
+ 9:    add    "PyYAML>=6.0.3,<7",
+10:    add    "rich>=15.0.0",
+11:           ]
+69:    mypy   import yaml  # type: ignore[import-not-found]  # For mypy.
+70:    mypy   import rich  # type: ignore[import-not-found]  # For mypy.
+Update them? [y=>Yes|n=>No|i=>Individually|a=>Always|d=>Don't ask again]: y
+
+Your changes to `prog.py` need 4 more software package(s) from the internet.
+They have been downloaded, but nothing in them has run yet.  Answer `n` and
+they will be removed again, without running `prog.py`.
+
+Keep them in `~/.ezpkg` and run `prog.py`?
+[y=>Yes, this time|n=>No|a=>Always, never ask again|?=>Explain]: y
+The following 4 package(s) are now installed in `~/.ezpkg`:
+1. markdown-it-py 4.2.0: Python port of markdown-it. Markdown parsing, done...
+2. mdurl 0.1.2: Markdown URL utilities
+3. Pygments 2.21.0: Pygments is a syntax highlighting package written in Pyt...
+4. rich 15.0.0: Render rich text, tables, progress bars, syntax highlighting...
+`ezpkg` (https://pypi.org/project/ezpkg/) manages `~/.ezpkg`.
+
+Traceback (most recent call last):
+  File "/tmp/drive-.../prog.py", line 71, in <module>
+    import bogus_pkg_xyzzy
+ModuleNotFoundError: No module named 'bogus_pkg_xyzzy'
