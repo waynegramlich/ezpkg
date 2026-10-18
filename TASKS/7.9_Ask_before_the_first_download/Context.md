@@ -191,3 +191,98 @@
   `zipapp` and `uv` exports, with and without `import ezpkg`;
   `T.kdaiis`: the ranges offer under `EZPKG_APPROVE=write`) becomes new
   `drive` steps.  Older notes naming `~/ezpkg_dogfood/` are history.
+
+## 2026-10-18: `ux01` built, with `pip` and `ezpkg` listed
+
+* Wayne: on a first run the bootstrap has already stored `pip` and
+  `ezpkg`, and `n` removes them too, so hiding them "feels like we are
+  hiding something".  Agreed (#1-#5): list them first, `pip` marked
+  `(used by `EZPkg`)` before its summary (so a cut keeps the mark);
+  `?` lists the same packages; only what this run stored (later runs:
+  only the new downloads); a switched-to `ezpkg` (`T.eui`) is listed
+  as an arrived wheel anyway.
+* Built in `ezpkg.py`: `columns`, `wrapped`, `cut`, `metadata_fields`
+  (headers end at the first blank line), `LINE_WIDTH` 79, `HOME_PAGE`;
+  `EZPkg.metadata`, `bootstrapped` (only with `pip_run`, once:
+  `told`), `described`, `place`, `listing`; `details` uses `described`
+  (sorted by normal name, metadata `Name` spelling); `consent` asks
+  `ux01`'s paragraph once, then the question with `|` and `]:`;
+  `provide` prints `listing` (built before `unpack` moves the wheels)
+  instead of `ezpkg: N packages stored in ...`.
+* `ux/drive.py` now does a real first run: no `PYTHONPATH`, no
+  pre-fetched `pip.whl`; the bootstrap fetches `pip` from pypi.org and
+  installs a `release_wheel` of `ezpkg.py` (version `__version__`)
+  via `PIP_FIND_LINKS`.  `first_run_again` removes the whole cache.
+  Step 1.1's output equals `ux01` except the new list lines.
+* NOT built: `n` on a first run removing `.ezpkg` (which `ux01` line 7
+  promises); later downloads not asked (`ux02`); the rest of `ux02`-`ux04`.
+
+## 2026-10-18: `~/.ezpkg` in every message; `ux01` built
+
+* Wayne: PowerShell understands `~`, so user-facing text says
+  `~/.ezpkg`, not "a sub-directory called `.ezpkg`".  On Windows the
+  full path (`shown`), since `cmd.exe` and Explorer do not ("ugly, but
+  so is Windows").  No "(in your home directory)": redundant (Wayne).
+  `place()` is now `` `shown(root)` `` for every root.
+* Wayne's line 15: `` `ezpkg` (HOME_PAGE) manages `~/.ezpkg`. `` then a
+  blank line (the list ends with one, wherever it appears).  `pip` is
+  marked `(used by `ezpkg`)`.  Names keep the author's capitalisation
+  (`PyYAML`), from the metadata.
+* The list counts only packages not already unpacked (`ux02` had
+  counted the stored `cowsay`), and prints nothing when none are new.
+* `drive` 1.1 output equals `ux01`; quick suite 299 OK, 18 skipped.
+* README: proposals in HTML comments at 94-104 (Quick Start paragraph)
+  and 170-213 (Download Prompt); they describe the unbuilt `n` removal
+  and silent later downloads, and say so.
+* `ux02` left: batch question style (4-5), no download question on a
+  later run (6-12), an extra blank line (22), changes display (23-30).
+
+## 2026-10-18: End-user and developer mode (Wayne), built
+
+* Two customers.  A program is assumed to be an end-user's until its
+  file changes; from then on it is in developer mode.  Per program, in
+  its `develop/` record (`mode`, `source` = the file's SHA-256), set by
+  `EZPkg.developing()` at the start of `install_declared`.  Deleting
+  the record makes it an end-user's again.  Accepted edge: an end-user
+  given a newer copy by its author looks like a developer.
+* End-user mode: only the download question (`ux01`'s words); never a
+  `dependencies` question or an edit (the discrepancy is only warned
+  about once per change, as with no terminal).
+* Developer mode: the batch/per-item questions and display; the
+  download question says "Your changes to `prog.py` need N more
+  software package(s) from the internet.  Answer `n` and they will be
+  removed again, without running `prog.py`." / "Keep them in
+  `~/.ezpkg` and run `prog.py`?" (Claude's wording, for Wayne's review
+  in `ux02`).
+* The download answers (Wayne, B): `y=>Yes, this time`,
+  `a=>Always, never ask again`.  `AGREED` was built and removed again.
+  Open: drop "Really never ask again?" after `a`?
+* A fetch with nothing new asks nothing (`gate(..., new)`), which
+  fixed `ux03`'s two needless download questions.
+* `ux/drive.py`: each `Step` has a `mode` (default `developer`;
+  1.1, 1.10, 1.11 `end-user`), checked against the record.
+* Open: `ux03` line 4 says lines 6-9 (the entries); Wayne's target
+  5-10 (the whole array).
+* `ux02` agreed by Wayne as `drive` now prints it (developer-mode
+  download question included).
+* `k` (Wayne): label `k=>Keep it, needed without an import`; then
+  `What needs `X`? (a few words, or Enter to skip):`; `with_unimported`
+  writes one entry per line with `# Needed by ...` (or `# Needed, but
+  not imported.`), adds before an existing array's `]`, keeps comments.
+* `inserted` compares a script block change as one block (common start
+  and end), since line-by-line matching paired the new `]` with the
+  `dependencies` `]` (Wayne spotted the missing `14: add ]` in `ux03`).
+
+## 2026-10-18: Where this stopped (before Wayne's commit)
+
+* Agreed and built: `ux01`, `ux02`, `ux03` (`drive` output equals the
+  files; `ux03` line 4 stays "lines 6-9", the entry lines).  Quick
+  suite 300 OK, 18 skipped; `drive --until 1.3` 3 of 3.
+* Deferred to step 1.7 (Wayne): whether "Really never ask again?"
+  after the download question's `a` goes (the label now says it), and
+  the batch question's `a` label and its "Really update ...?".
+* README proposals at 94-104 and 170-213 still await Wayne ("apply").
+* NOT built: `n` on a first run removing `~/.ezpkg`; `a` to the batch
+  question being silent; later-step wording (1.4 onwards).
+* Next: `ux04` (1.4 Batch n), then 1.4b-1.11, then the download-answer
+  steps (`?`, `x`, Enter, `n` first and later run, `a`, Control-D).

@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """Drive the UX steps on a real terminal, and write a transcript.
 
-Each step edits `prog.py`'s imports, runs it (the project's `ezpkg.py`
-on `PYTHONPATH`, a home of its own, a private `pip.whl` fetched from
-pypi.org at the start), on a pseudoterminal, so `ezpkg`'s questions are asked as
-they are of a person.  Each question is answered from the step's
+Each step edits `prog.py`'s imports and runs it on a pseudoterminal,
+so `ezpkg`'s questions are asked as they are of a person.  The first
+run is a stranger's: a home of its own, and the bootstrap fetches `pip`
+from pypi.org and installs `ezpkg` from a wheel of the project's
+`ezpkg.py` (`PIP_FIND_LINKS`), as it will from pypi.org.  Each question is answered from the step's
 script, in order, and checked against the text it expects; a download
 question ("... and run prog.py?") is answered `y` wherever it comes,
 since whether one comes depends on what this Python already has.
@@ -28,13 +29,13 @@ A rerun overwrites them; commit first.
 """
 
 import dataclasses
+import json
 import os
 import pty
 import re
 import select
 import shutil
 import signal
-import subprocess
 import sys
 import tempfile
 import time
@@ -45,13 +46,15 @@ UX: Path = Path(__file__).resolve().parent
 PROJECT: Path = UX.parent
 sys.path.insert(0, str(PROJECT))
 import ezpkg
+import ezpkg_test
 
 WIDTH: int = 79
 IDLE_SECONDS: float = 180.0
 STEP_SECONDS: float = 900.0
 # A question ends the output with its answers in brackets.
-QUESTION: re.Pattern[str] = re.compile(r"\[[^\[\]\n]*=>[^\[\]\n]*\] $")
-DOWNLOAD: str = "and run prog.py? ["
+QUESTION: re.Pattern[str] = re.compile(
+    r"(\[[^\[\]\n]*=>[^\[\]\n]*\]:?|Enter to skip\):) $")
+DOWNLOAD: str = "and run `prog.py`?"
 CONTROL_C: str = "\x03"
 
 
@@ -75,6 +78,9 @@ class Step:
       What `[tool.ezpkg] unimported` must then list.
     * `before` (`Callable[[Path], None] | None`):
       Run on the copy first, such as removing a record.
+    * `mode` (`str`):
+      The program's mode afterwards, `end-user` until it has changed
+      and `developer` from then on (`EZPkg.developing`).
     """
 
     name: str
@@ -86,6 +92,7 @@ class Step:
     declared: list[str] | None = None
     kept: list[str] | None = None
     before: Callable[[Path], None] | None = None
+    mode: str = "developer"
 
 
 def forget_answers(work: Path) -> None:
@@ -95,15 +102,9 @@ def forget_answers(work: Path) -> None:
 
 
 def first_run_again(work: Path) -> None:
-    """Make the next run a first one: Quick Start, empty cache but `pip`."""
+    """Make the next run a first one: the Quick Start, and no cache."""
     shutil.copy2(PROJECT / "quick_start.py", work / "prog.py")
-    cache: Path = work / "home" / ".ezpkg"
-    for item in cache.iterdir():
-        if item.name != "pip.whl":
-            if item.is_dir():
-                shutil.rmtree(item)
-            else:
-                item.unlink()
+    shutil.rmtree(work / "home" / ".ezpkg", ignore_errors=True)
 
 
 BASE: list[str] = ["ezpkg", "cowsay"]
@@ -112,19 +113,21 @@ STEPS: list[Step] = [
          "The Quick Start as it is: a download question, then the cow.",
          [], present=["EZPkg works!"],
          absent=["exclude-newer", "dependencies", "Traceback"],
-         declared=BASE),
+         declared=BASE, mode="end-user"),
     Step("1.2 Batch y",
          "Two new imports: one question, y, and no second approval.",
          ["requests", "yaml"], [("Update them?", "y")],
-         present=["2 entries in `dependencies`", "and its mypy comment",
+         present=["2 entries in `dependencies`", "mypy   import requests",
                   "EZPkg works!"],
          absent=["Make these changes?", "Traceback"],
          declared=[*BASE, "requests", "pyyaml"]),
     Step("1.3 Batch i, with keep",
          "Both imports removed: i, then k for requests, y for PyYAML.",
          [], [("Update them?", "i"), ('"requests', "k"),
+              ("What needs `requests`?", "the sync script"),
               ('"PyYAML', "y"), ("Make these changes?", "y")],
-         present=['kept "requests" as unimported', 'removed "PyYAML'],
+         present=['"requests", # Needed by the sync script.',
+                  'remove "PyYAML'],
          absent=["Traceback"],
          declared=[*BASE, "requests"], kept=["requests"]),
     Step("1.4 Batch n",
@@ -159,7 +162,7 @@ STEPS: list[Step] = [
     Step("1.8 Always applies a single change",
          "One import removed after a: done with no question at all.",
          ["yaml", "rich", "attrs", "click"],
-         present=['removed "tabulate'],
+         present=['remove "tabulate'],
          absent=["Update them?", "Remove it?", "Make these changes?",
                  "Traceback"],
          declared=[*BASE, "requests", "pyyaml", "rich", "attrs", "click"]),
@@ -178,12 +181,13 @@ STEPS: list[Step] = [
          declared=[*BASE, "requests", "pyyaml", "rich", "attrs", "click"]),
     Step("1.10 Control-C at the download question",
          "A first run, interrupted at the question: what does it print?",
-         None, [("and run prog.py?", CONTROL_C)],
-         absent=["Traceback", "EZPkg works!"], before=first_run_again),
+         None, [("and run `prog.py`?", CONTROL_C)],
+         absent=["Traceback", "EZPkg works!"], before=first_run_again,
+         mode="end-user"),
     Step("1.11 After Control-C",
          "The same first run again: asked again, y, and the cow.",
          None, present=["EZPkg works!"], absent=["Traceback"],
-         declared=BASE),
+         declared=BASE, mode="end-user"),
 ]
 
 
@@ -215,7 +219,8 @@ def run_on_a_terminal(work: Path, script: list[tuple[str, str]]
         key: value for key, value in os.environ.items()
         if not key.startswith(("PIP_", "EZPKG_"))
         and key not in ("PYTHONPATH", "VIRTUAL_ENV", "CI")}
-    environment.update(HOME=str(work / "home"), PYTHONPATH=str(PROJECT))
+    environment.update(HOME=str(work / "home"),
+                       PIP_FIND_LINKS=str(work / "links"))
     python: str = shutil.which("python3") or sys.executable
     pid: int
     master: int
@@ -291,6 +296,16 @@ def check(step: Step, shown: str, program: Path) -> list[str]:
         if names != step.declared:
             problems.append(f"dependencies are {names}, expected "
                             f"{step.declared}")
+    modes: list[str] = []
+    record: Path
+    for record in (program.parent / "home" / ".ezpkg" / "develop").glob(
+            "*.json"):
+        try:
+            modes.append(json.loads(record.read_text()).get("mode", ""))
+        except (OSError, ValueError):
+            modes.append("unreadable")
+    if modes != [step.mode]:
+        problems.append(f"mode is {modes}, expected [{step.mode!r}]")
     if step.kept is not None and ezpkg.unimported(text) != step.kept:
         problems.append(f"unimported is {ezpkg.unimported(text)}, "
                         f"expected {step.kept}")
@@ -313,23 +328,15 @@ def main() -> int:
         return 2
     output: Path = Path(arguments[0]) if arguments else UX / "drive_output.txt"
 
-    # A fresh copy: the Quick Start, a home with only a private `pip`.
+    # A fresh copy: the Quick Start, an empty home, and the project's
+    # `ezpkg` as the wheel pypi.org will one day serve.
     work: Path = Path(tempfile.mkdtemp(prefix="drive-"))
     shutil.copy2(PROJECT / "quick_start.py", work / "prog.py")
-    cache: Path = work / "home" / ".ezpkg"
-    cache.mkdir(parents=True)
-    # The bootstrap never fetches `pip` when `ezpkg` is importable, and
-    # this Python's own `pip` may be old, so fetch the newest wheel.
-    fetched: subprocess.CompletedProcess[str] = subprocess.run(
-        [sys.executable, "-m", "pip", "download", "--quiet", "--no-deps",
-         "--only-binary", ":all:", "--dest", str(work), "pip"],
-        capture_output=True, text=True, check=False)
-    wheels: list[Path] = sorted(work.glob("pip-*.whl"))
-    if fetched.returncode or not wheels:
-        print(f"drive: cannot fetch pip.whl:\n{fetched.stderr}",
-              file=sys.stderr)
-        return 1
-    wheels[-1].rename(cache / "pip.whl")
+    (work / "home").mkdir()
+    built: Path = ezpkg_test.release_wheel(
+        work / "build", distribution="ezpkg", version=ezpkg.__version__)
+    (work / "links").mkdir()
+    shutil.copy2(built, work / "links" / built.name)
 
     results: list[tuple[str, list[str]]] = []
     with open(output, "w", encoding="utf-8") as transcript:

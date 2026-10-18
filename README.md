@@ -91,6 +91,17 @@ The first run creates `~/.ezpkg/` in your home directory, which is where
 the packages the program lists at the top (line 5): `ezpkg` itself,
 which says which `ezpkg` runs the program, and `cowsay`.  It asks once
 whether `EZPkg` may keep them.  Answer `y`, and the program runs:
+<!-- Claude: proposed replacement for lines 89-93 above (T.abfd,
+ux01, 2026-10-18):
+
+The first run creates `~/.ezpkg` in your home directory, which is where
+`EZPkg` keeps everything it fetches.  The bootstrap fetches `pip` and
+`ezpkg` into it, then `ezpkg` fetches the packages the program lists at
+the top (line 5): `ezpkg` itself, which says which `ezpkg` runs the
+program, and `cowsay`.  It asks once whether to keep them, and then
+lists what it installed (see [Download Prompt](#download-prompt)).
+Answer `y`, and the program runs:
+-->
 
 ```
   ______________
@@ -156,6 +167,51 @@ into your program's own output.  The prompt takes one of four answers:
   This is sticky.  To reset it, remove the `~/.ezpkg/FOREVER_APPROVE` file.
 * **`?=>Explanation`** - This lists all requested downloads and then prompts
   again.
+<!-- Claude: proposed replacement for lines 142-169 above (T.abfd,
+ux01, 2026-10-18).  NOT built yet: `n` on a first run removing
+`~/.ezpkg`, and later runs downloading without asking (ux02).
+
+If you tried the Quick Start, you have already seen the download prompt.
+The very first run of `quick_start.py`, with no `~/.ezpkg` yet, begins
+like this:
+
+```
+$ python3 quick_start.py
+The author of `quick_start.py` has selected some software packages from the
+internet.  If you agree, they will be retained in `~/.ezpkg`.  If you do not
+trust the author, answer `n` and `~/.ezpkg` will simply go away without running
+`quick_start.py`.
+
+Retain `~/.ezpkg` and run `quick_start.py`?
+[y=>Yes|n=>No|a=>Always|?=>Explain]: y
+The following 3 package(s) are now installed in `~/.ezpkg`:
+1. pip 26.2.1 (used by `ezpkg`): The PyPA recommended tool for installing Py...
+2. ezpkg 0.0.1: Automatic Package Fetching for One-File Programs
+3. cowsay 6.1: The famous cowsay for GNU/Linux is now available for python
+`ezpkg` (https://pypi.org/project/ezpkg/) manages `~/.ezpkg`.
+
+```
+
+The text is wrapped to fit your terminal, up to 79 columns.  On
+Windows, which has no `~` everywhere, the full path is shown instead,
+such as `C:\Users\you\.ezpkg`.  The list includes `pip` and `ezpkg`
+only on a machine's very first run, when the bootstrap has just fetched
+them; `pip` is the tool `ezpkg` uses, not one the program's author
+chose.  The prompt takes one of four answers:
+* **`n=>No`** - Nothing runs.  On a first run `~/.ezpkg` is removed
+  entirely, `pip` and `ezpkg` included; on a later run, only what was
+  just downloaded.
+* **`y=>Yes`** - The packages are kept and the program runs.
+* **`a=>Always`** - As `y`, and no download is asked about again, after
+  `Really never ask again? [y=>Yes|n=>No]:` (`n` goes back to the
+  prompt).  This is sticky.  To reset it, remove the
+  `~/.ezpkg/FOREVER_APPROVE` file.
+* **`?=>Explain`** - The same packages are listed, one line each with
+  its own summary, and the prompt is asked again.
+
+Once you have answered `y`, later downloads (such as a package newly
+added to `dependencies`) are not asked about; their list is shown.
+-->
 
 Some programs are run with nobody there to answer, such as from `cron`,
 or by an automated build and test service such as GitHub Actions (known
@@ -316,7 +372,7 @@ ezpkg: prog.py: added "requests>=2.32.3,<3" to dependencies
 ezpkg: prog.py: added "PyYAML>=6.0.2,<7" to dependencies (for yaml)
 ```
 
-<!-- Claude: proposed replacement for lines 265-317 above (the batch
+<!-- Claude: proposed replacement for lines 321-373 above (the batch
 question of T.kdaiis, built 2026-10-17):
 
 `EZPkg` keeps `dependencies` in step with your imports: one package for
@@ -374,7 +430,7 @@ plugin that another package loads for itself.  It is listed in Part 1
 as `[tool.ezpkg] unimported`, and is not raised again.  The changes are
 then shown as above, followed by `Make these changes? [y=>Yes/n=>No]`.
 
-Also proposed, for lines 385-386 below: a package your Python already
+Also proposed, for lines 441-442 below: a package your Python already
 has is not downloaded again, so the range starts where the program
 really ran:
 

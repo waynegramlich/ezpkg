@@ -4,15 +4,19 @@ Two new imports: one question, y, and no second approval.
 `prog.py` has 2 entries in `dependencies` (line 5) that need to be updated.
 Update them? [y=>Yes|n=>No|i=>Individually|a=>Always|d=>Don't ask again]: y
 
-The following 6 package(s) are now installed in the `.ezpkg` sub-directory:
-1. certifi 2026.7.22: Python package for providing Mozilla's CA Bundle.
-2. charset-normalizer 3.5.2: The Real First Universal Charset Detector. Ope...
+Your changes to `prog.py` need 6 more software package(s) from the internet.
+Answer `n` and they will be removed again, without running `prog.py`.
+
+Keep them in `~/.ezpkg` and run `prog.py`?
+[y=>Yes, this time|n=>No|a=>Always, never ask again|?=>Explain]: y
+The following 6 package(s) are now installed in `~/.ezpkg`:
+1. certifi 2026.10.18: Python package for providing Mozilla's CA Bundle.
+2. charset-normalizer 3.5.2: The Real First Universal Charset Detector. Open...
 3. idna 3.20: Internationalized Domain Names in Applications (IDNA)
 4. PyYAML 6.0.3: YAML parser and emitter for Python
 5. requests 2.34.2: Python HTTP for Humans.
-6. urllib3 2.8.0: HTTP library with thread-safe connection pooling, file po...
-The `.ezpkg` sub-directory is managed by `EZPkg`
-(https://pypi.org/project/ezpkg/).
+6. urllib3 2.8.0: HTTP library with thread-safe connection pooling, file pos...
+`ezpkg` (https://pypi.org/project/ezpkg/) manages `~/.ezpkg`.
 
 Changes made to `prog.py`:
  7:           "cowsay",

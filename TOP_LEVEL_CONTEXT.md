@@ -33,9 +33,12 @@ needs live here instead.
   starts it).  Started by hand, not yet by `release.yml` (`T.gar`).
 * `ux/drive.py [--keep] [--until STEP]`: Runs the scripted UX steps
   (1.1-1.11) on a pseudoterminal in a temporary copy of the Quick
-  Start, with the project's `ezpkg.py`, a fresh home and a newly
-  fetched `pip.whl`, against real pypi.org.  Claude runs it (about 5
-  minutes, in the background).  The transcript, with framed steps, is
+  Start, as a stranger's real first run: a fresh home, the bootstrap
+  fetching `pip` from pypi.org and installing a wheel of the project's
+  `ezpkg.py` (`PIP_FIND_LINKS`), everything else from real pypi.org.
+  Each step declares the program's mode (`end-user` or `developer`,
+  `EZPkg.developing`) and is checked against it.  Claude runs it (about
+  5 minutes, in the background).  The transcript, with framed steps, is
   `ux/drive_output.txt` (ignored); each step is also written unframed
   to `ux/uxNN_NAME.txt`, which Wayne edits into the agreed output and
   commits, so `git diff ux/` after a rerun shows what is left to build
@@ -94,5 +97,5 @@ entry chooses which `ezpkg` runs it (`T.eui`).
   runs, but never commits; Wayne commits staged changes.
 * `ezpkg` is on test.pypi.org (`T.uttat`) but not yet on pypi.org
   (`T.utpat`), so the Quick Start does not yet work for a new user;
-  `ux/drive.py` uses `PYTHONPATH` pointing at the project, and
+  `ux/drive.py` installs a wheel of the project's `ezpkg.py`, and
   `release_check.py` checks what was published.
