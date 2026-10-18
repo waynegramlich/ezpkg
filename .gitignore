@@ -36,4 +36,4 @@ dist/
 PyPI_Via_GitHub.md
 
 # Dogfood output for Wayne to edit (~/ezpkg_dogfood/drive); hg tracks it.
-ux/
+ux/drive_output.txt

@@ -83,7 +83,7 @@ import cowsay  # type: ignore[import-not-found]  # For mypy.
 
 # Part 5: The program itself.
 cowsay.cow("EZPkg works!")
-print(f"cowsay {cowsay.__version__} was loaded from {cowsay.__file__}")
+print(f"The cow above was drawn by cowsay {cowsay.__version__}.")
 ```
 
 The first run creates `~/.ezpkg/` in your home directory, which is where
@@ -103,7 +103,7 @@ whether `EZPkg` may keep them.  Answer `y`, and the program runs:
                  (__)\       )\/\
                      ||----w |
                      ||     ||
-cowsay 6.1 was loaded from /home/you/.ezpkg/versions/cowsay-6.1-.../...
+The cow above was drawn by cowsay 6.1.
 ```
 
 Now run it a second time.  There is no question and no download, and it

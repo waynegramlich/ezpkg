@@ -1,0 +1,25 @@
+1.1 Baseline
+The Quick Start as it is: a download question, then the cow.
+-------------------------------------------------------------------------------
+The author of `prog.py` has selected some software packages from the internet.
+If you agree, they will be retained in a sub-directory called `.ezpkg` located
+in your home directory.  If you do not trust the author, answer `n` and the
+entire `.ezpkg` sub-directory will simply go away without running `prog.py`.
+
+Retain the `.ezpkg` sub-directory and run `prog.py`?
+[y=>Yes|n=>No|a=>Always|?=>Explain]: y
+The following 1 package(s) are now installed in the `.ezpkg` sub-directory:
+1. cowsay 6.1: The famous cowsay for GNU/Linux is now available for python
+The `.ezpkg` sub-directory is managed by `EZPkg`
+(https://pypi.org/project/ezpkg/).
+  ____________
+| EZPkg works! |
+  ============
+            \
+             \
+               ^__^
+               (oo)\_______
+               (__)\       )\/\
+                   ||----w |
+                   ||     ||
+The cow above was drawn by cowsay 6.1.

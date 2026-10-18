@@ -31,26 +31,15 @@ needs live here instead.
   `--console` job per system: `gh workflow run check.yml -f
   target=testpypi -f version=V` (25 jobs, about 3 minutes; Claude
   starts it).  Started by hand, not yet by `release.yml` (`T.gar`).
-* `~/ezpkg_dogfood/` (outside the project): Wayne's `prog.py`; `run`
-  uses the project's `ezpkg.py`, `run_testpypi [--clean] [VERSION]`
-  the newest test.pypi.org upload (`--clean` empties its `~/.ezpkg`;
-  it refuses a `prog.py` bootstrap that upload does not know).
-  `run_testpypi --local` builds a wheel from the project's `ezpkg.py`
-  (again only when it changed; `--time` reports `prog.py`'s own run time)
-  (`release.py testpypi`) and installs that instead, to try uncommitted
-  code as a stranger gets it.  `--reset` (both) puts back `quick_start.py` as `prog.py` (old one in
-  `prog.py.reset~`) and removes approvals, exports, `develop/` and
-  `scans/`.  Each keeps its own approvals, since each pins the `ezpkg`
-  it ran with: the other's `prog.ezpkg` waits as `prog.ezpkg.run` or
-  `prog.ezpkg.testpypi`, and `.approvals_owner` names whose is in place.
-  `run` also gives its home a private `pip.whl` (the bootstrap never
-  does when `ezpkg` is importable), so the system's `pip` 24.0 is not
-  used.  `drive [--keep] [--until STEP]` runs the scripted dogfood
-  steps (1.1-1.11) on a pseudoterminal in a temporary copy, against
-  real pypi.org, and writes `drive_output`; Claude runs it (about 5
-  minutes, in the background) instead of Wayne typing the steps.  Each step is
-  also written to `ux/uxNN_NAME.txt` for Wayne's UX review (`T.abfd`'s
-  `Context.md`).
+* `ux/drive.py [--keep] [--until STEP]`: Runs the scripted UX steps
+  (1.1-1.11) on a pseudoterminal in a temporary copy of the Quick
+  Start, with the project's `ezpkg.py`, a fresh home and a newly
+  fetched `pip.whl`, against real pypi.org.  Claude runs it (about 5
+  minutes, in the background).  The transcript, with framed steps, is
+  `ux/drive_output.txt` (ignored); each step is also written unframed
+  to `ux/uxNN_NAME.txt`, which Wayne edits into the agreed output and
+  commits, so `git diff ux/` after a rerun shows what is left to build
+  (`T.abfd`'s `Context.md`).  A rerun overwrites them.
 * `git_hooks/`: `prepare-commit-msg` adds `Assisted-by: Claude
   Code:claude-opus-5-5` to Wayne's commit messages (deletable in the
   editor), and `commit-msg` refuses a message that is only that
@@ -105,5 +94,5 @@ entry chooses which `ezpkg` runs it (`T.eui`).
   runs, but never commits; Wayne commits staged changes.
 * `ezpkg` is on test.pypi.org (`T.uttat`) but not yet on pypi.org
   (`T.utpat`), so the Quick Start does not yet work for a new user;
-  dogfood runs use `PYTHONPATH` pointing at the project, and
+  `ux/drive.py` uses `PYTHONPATH` pointing at the project, and
   `release_check.py` checks what was published.

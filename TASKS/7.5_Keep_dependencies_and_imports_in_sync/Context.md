@@ -201,3 +201,9 @@ rehearsal and dogfood run, then its `Summary.md` and closing.
 * Tests: `test_satisfied_ignores_the_cache`,
   `test_a_silent_distribution_provides_its_namesake`,
   `test_control_c_stops_with_one_line` (`MetadataTest`, 34 OK).
+
+## 2026-10-17: The UX review changes this task's output
+
+* `ux02`-`ux03` (see `T.abfd`'s `Context.md`) restyle the batch
+  question and the changes display (line-numbered, `mypy` lines, no
+  report lines) and make `a` silent.  Agreed, NOT built.

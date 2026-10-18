@@ -125,3 +125,69 @@
   319-375 (batch question) and 376-382 (range sentence); Wayne's R1
   (silent packages never offered for removal) and R2 (no cap for
   `rich>=15`) accepted.
+
+## 2026-10-17: `ux/` is in git
+
+* Wayne changed his mind: `ux/` is tracked by git (staged) and hg, no
+  longer ignored by either.  The ux files lost their `^^^` and `vvv`
+  frame lines (`drive` now writes them without; `drive_output` keeps
+  the frames, since it holds every step).  A `drive` rerun still
+  overwrites Wayne's edited files, so `git diff ux/` shows where the
+  real output departs from the agreed one.
+
+## 2026-10-17: `ux01`-`ux03` agreed, NOT built
+
+* The files in `ux/` are now the target output (Wayne: "everything
+  looks great").  `ux04` (1.4 Batch n) is `drive`'s real output
+  rewritten in the same style by Claude, not yet reviewed.  Nothing in
+  `ezpkg.py` is built to them yet; `git diff ux/` after a `drive`
+  rerun shows what is left (commit Wayne's edits first: a rerun
+  overwrites them).
+* Conventions, from Wayne's edits:
+  * No `ezpkg:` prefix on these lines.  Backticks around names.  `|`
+    separators and `]:` in every question.
+  * Paragraphs wrapped at print time (`textwrap`) to the narrower of
+    the terminal and 79 columns, since the program name's length is
+    unknown.  Lines that cannot wrap (a long `mypy` line) run long.
+  * "N package(s)" is literal: the count, then `package(s)`, for any N.
+  * Explanation paragraph, blank line, then the question.
+* First download (`ux01`): Wayne's 4-line paragraph ("The author of
+  `prog.py` has selected some software packages from the internet.
+  If you agree, they will be retained ...").  It deliberately does not
+  say they are already downloaded: "retained" is true, and nothing runs
+  and everything goes on `n`.  Then `Retain the `.ezpkg` sub-directory
+  and run `prog.py`?`.
+* After the `y`: "The following N package(s) are now installed in the
+  `.ezpkg` sub-directory:", then `1. name version: Summary` per package
+  (metadata `Summary`, cut to 79 with `...`, as `details` does for
+  `?`), then "The `.ezpkg` sub-directory is managed by `EZPkg`
+  (https://pypi.org/project/ezpkg/)." (wrapped).
+* Later downloads are never asked about (Wayne: the person has bought
+  into downloads), and only new packages are counted and listed
+  (`ux02`; the real run counted 7, including the stored `cowsay`).
+* Changes display (`ux02`, `ux03`): "Changes made to `prog.py`:" (after
+  `y`/`a`, no further question) or "Changes to be made to `prog.py`:"
+  (before "Make these changes?").  Each line `NN:` (colon-aligned, the
+  line number in the file after the change; a removed line has a blank
+  number), a marker column (`add`, `remove`, `mypy`, or none for an
+  anchor) and the line's text.  `mypy` lines show the whole import with
+  its new comment; `k` shows the added `[tool.ezpkg]` lines.  No report
+  lines after the display ("added ...", "kept ... as unimported").
+* `a` to the batch question: the changes are made silently (Wayne);
+  today it shows the display.
+* Removing imports must never ask a download question (`ux03`; the
+  real run asked twice, a bug).
+* Done today: `quick_start.py`'s last line (and `QUICK_START`, README
+  86 and 106) is `The cow above was drawn by cowsay 6.1.`; Part 5, so
+  no new bootstrap.
+* Next: Wayne reviews `ux04`; then the remaining `drive` steps
+  (1.4b-1.11) and the extra download-answer steps (`?`, `x`, Enter,
+  `n` first and later run, `a`, Control-D); then build.
+* `~/ezpkg_dogfood/` deleted (Wayne).  `drive` is now `ux/drive.py`
+  (in git): it fetches its own `pip.whl` with `pip download` and writes
+  `ux/drive_output.txt` (ignored); `--until 1.1` passed.  `run` and
+  `run_testpypi` are gone; `drive` replaced them.
+* So the dogfood still awaited elsewhere (`T.eui` and `T.reb`: the
+  `zipapp` and `uv` exports, with and without `import ezpkg`;
+  `T.kdaiis`: the ranges offer under `EZPKG_APPROVE=write`) becomes new
+  `drive` steps.  Older notes naming `~/ezpkg_dogfood/` are history.
