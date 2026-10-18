@@ -87,3 +87,41 @@
      and `m.EZPkg()` bullet proposals already there.
   3. Ask Wayne which of the four things the terse `?` dropped come
      back (Claude suggests only marking packages that came along).
+
+## 2026-10-17: The UX review (`ux/`), in progress
+
+* Wayne reviews the user experience from `~/ezpkg_dogfood/drive`'s
+  output: each step is also written to `ux/uxNN_NAME.txt` (git- and
+  hg-ignored, but the files are `hg add`ed by name, so Claude
+  checkpoints before and after each of Wayne's edits; a `drive` rerun
+  overwrites them).  Wayne edits a file into the output he wants;
+  Claude answers with issues by file and line.  Nothing built yet:
+  the code still prints the old wording.
+* `ux01_Baseline.txt` (first run) is agreed, lines 5-11:
+  "`prog.py` needs to save 1 software package, chosen by its author or
+  needed by them, into a directory called `.ezpkg` in your home
+  directory.  If you do not trust the author of `prog.py`, answer `n`
+  and the directory will be immediately removed.  Retain the `.ezpkg`
+  directory and run `prog.py`?" / `[y=>Yes|n=>No|a=>Always|?=>Explain]:
+  y` / "ezpkg: 1 software package stored into the newly created `.ezpkg`
+  directory in your home directory."  Exact singular/plural, not "(s)".
+* Wayne's decisions: `|` separators and `]:` in every `ezpkg` question
+  (`/n` reads as newline); "in your home directory", but the full path
+  when `EZPkg` was given another root; first run `n` removes `.ezpkg`
+  entirely (build it, this task's part 2); a later run says something
+  like "the N recently downloaded software packages will be removed"
+  (to be written into `ux03` lines 5 and 16); the `?` text stays.
+* Waiting on Wayne:
+  1. Line 5 has no `ezpkg:` prefix, line 10 does: intended?
+  2. New `drive` steps testing every answer to the download question
+     (Wayne's #6): `?`; `x` (Claude: ask again); bare Enter (Claude:
+     no); `n` first run; `n` later run; `a`; Control-C (1.10 exists);
+     Control-D; the 5-minute timeout left out.  Shall Claude add them?
+* Then `ux02` and `ux03`, where Claude noted: `ux03` 5-8 asks again
+  for the 7 packages 1.2 stored (cause unknown); `ux03` 16-19 a second
+  download question in one run; `ux03` 22 and 25 show the kept
+  `requests` twice; `ux02` 17 "its import of requests, yaml".
+* Also open, from `T.kdaiis`: the README proposals at `README.md`
+  319-375 (batch question) and 376-382 (range sentence); Wayne's R1
+  (silent packages never offered for removal) and R2 (no cap for
+  `rich>=15`) accepted.

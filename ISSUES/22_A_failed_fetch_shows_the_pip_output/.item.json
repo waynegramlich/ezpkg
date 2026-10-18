@@ -1,0 +1,17 @@
+{
+  "state": "Open",
+  "created": "2026-10-17T21:04:45Z",
+  "updated": "2026-10-17T21:05:00Z",
+  "history": [
+    {
+      "state": "Pending",
+      "time": "2026-10-17T21:04:45Z"
+    },
+    {
+      "state": "Open",
+      "time": "2026-10-17T21:05:00Z"
+    }
+  ],
+  "tag": "ffspo",
+  "priority": 1
+}

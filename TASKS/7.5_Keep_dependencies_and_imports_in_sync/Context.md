@@ -145,3 +145,59 @@ rehearsal and dogfood run, then its `Summary.md` and closing.
   * `d`: never ask about this program, after "Really?", as today.
   * One change: today's single-item question for it, no list question.
   * Guessed additions that fail `prove` are still reported and skipped.
+
+## 2026-10-17: The batch question, built
+
+* `reconcile` now proves guessed additions first (failures reported,
+  not counted), then counts the entries that would change
+  (`Discrepancy.updating`, from `rows`, which `changes` now formats).
+  Two or more: `Discrepancy.needing` ("ezpkg: prog.py: N entries in
+  dependencies (line 5) need to be updated.", plus the `ezpkg` mypy
+  comment if needed) and `Update them? [y/n/i/a/d]`.  `y` and `a` make
+  every change (removals included, never `k`), show the display, write,
+  no "Make these changes?".  `i`, or one change: the old per-item
+  questions (after the old `disagree` line), then "Make these changes?".
+  A `n` to either "Really?" goes back to the question.
+* `a` is recorded as `answer: "update"`, and then applies even a single
+  change without asking (on a terminal only; no terminal still only
+  warns).  An old record's `"always"` (show the list) now just asks.
+* Only guessed names fail `prove`, so with none the count is free.
+* Tests: `test_several_changes_are_one_question` (y with a misspelt
+  third, n, i); `test_always_and_never_outlive_the_run` rewritten (a,
+  "Really?" n, d); single-change tests lost their `o`.  `InstallTest`:
+  157 OK, 2 skipped; quick suite 295 OK, 18 skipped.
+* README: replacement for "Keeping `dependencies` in Sync" proposed in
+  an HTML comment.
+* Next: Wayne's verdict, commit, rehearse (also carries the kept
+  resolution date).
+
+## 2026-10-17: `~/ezpkg_dogfood/drive`, and what it found
+
+* Wayne found the hand-run dogfood steps tedious, so `drive` (outside
+  the project, beside `run`) runs them on a pseudoterminal in a
+  temporary copy (Quick Start, fresh home, a private `pip.whl`),
+  answers each scripted question, `y` to any download question, and
+  checks output and `prog.py`.  Transcript `drive_output`, each step
+  framed by 79-character `^`, `-` and `v` lines (Wayne's layout).
+  `--until 1.4`, `--keep`.  Steps 1.1-1.11.
+* Fixed from its first run (4 of 13 passed):
+  * `providing(module, providers)`: Debian/Ubuntu strip `RECORD` and
+    `top_level.txt`, so `packages_distributions` missed `python3-rich`
+    and `attrs`, and `discrepancy` skipped `import rich` silently.  A
+    distribution named as the module (or `MODULE_PACKAGES`) with no
+    file listing at all now counts; used by `discrepancy` and
+    `import_problems`.  (`Distribution.files` skips missing files, so
+    the listings are read directly.)
+  * `satisfied(requirement, cache)`: a copy in `EZPkg`'s own cache,
+    put on `sys.path` earlier in the process, no longer counts.  It
+    made `reconcile` skip the fetch and take ranges from Ubuntu's
+    `requests` 2.31.0, while the next run fetched 2.34.2.
+  * Control-C: `install()`'s no-argument form is now
+    `install_declared`, and a `KeyboardInterrupt` there becomes
+    `\nezpkg: interrupted, so prog.py stops here.` (`I.ffspo`).
+* Left alone: a declared package with silent metadata that nothing
+  imports is still never offered for removal (its modules are not
+  known; guessing them could remove a needed one).
+* Tests: `test_satisfied_ignores_the_cache`,
+  `test_a_silent_distribution_provides_its_namesake`,
+  `test_control_c_stops_with_one_line` (`MetadataTest`, 34 OK).

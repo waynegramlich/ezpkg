@@ -40,7 +40,17 @@ needs live here instead.
   (`release.py testpypi`) and installs that instead, to try uncommitted
   code as a stranger gets it.  `--reset` (both) puts back `quick_start.py` as `prog.py` (old one in
   `prog.py.reset~`) and removes approvals, exports, `develop/` and
-  `scans/`.
+  `scans/`.  Each keeps its own approvals, since each pins the `ezpkg`
+  it ran with: the other's `prog.ezpkg` waits as `prog.ezpkg.run` or
+  `prog.ezpkg.testpypi`, and `.approvals_owner` names whose is in place.
+  `run` also gives its home a private `pip.whl` (the bootstrap never
+  does when `ezpkg` is importable), so the system's `pip` 24.0 is not
+  used.  `drive [--keep] [--until STEP]` runs the scripted dogfood
+  steps (1.1-1.11) on a pseudoterminal in a temporary copy, against
+  real pypi.org, and writes `drive_output`; Claude runs it (about 5
+  minutes, in the background) instead of Wayne typing the steps.  Each step is
+  also written to `ux/uxNN_NAME.txt` for Wayne's UX review (`T.abfd`'s
+  `Context.md`).
 * `git_hooks/`: `prepare-commit-msg` adds `Assisted-by: Claude
   Code:claude-opus-5-5` to Wayne's commit messages (deletable in the
   editor), and `commit-msg` refuses a message that is only that

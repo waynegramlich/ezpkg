@@ -20,6 +20,8 @@
 @../ISSUES/3_Reviewer_thoughts_have_two_formats/Details.md
 @../ISSUES/19_How_to_deal_with_compiled_packages/Details.md
 @../ISSUES/20_A_uv_export_drops_an_ezpkg_the_program_imports/Details.md
+@../ISSUES/22_A_failed_fetch_shows_the_pip_output/Details.md
+@../ISSUES/22_A_failed_fetch_shows_the_pip_output/Context.md
 @../ISSUES/21_On_Windows_EZPkg_never_asks_before_downloading/Summary.md
 @../ISSUES/1_The_bootstrap_trusts_only_system_certificates/Summary.md
 @7.6.2_QEMU_virtual_machines/Summary.md

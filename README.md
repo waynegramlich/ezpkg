@@ -316,6 +316,72 @@ ezpkg: prog.py: added "requests>=2.32.3,<3" to dependencies
 ezpkg: prog.py: added "PyYAML>=6.0.2,<7" to dependencies (for yaml)
 ```
 
+<!-- Claude: proposed replacement for lines 265-317 above (the batch
+question of T.kdaiis, built 2026-10-17):
+
+`EZPkg` keeps `dependencies` in step with your imports: one package for
+each module you import, in the order the modules are first imported.
+Whenever your imports or `dependencies` change and the two disagree (a
+package is missing, one is no longer imported, or the order differs),
+`EZPkg` says so once.  When two or more entries need to change, it asks
+about them together:
+
+```
+ezpkg: prog.py: 3 entries in `dependencies` (line 5) need to be updated.
+Update them? [y=>Yes/n=>No/i=>Individually/a=>Always/d=>Don't ask again] y
+```
+
+* **`y=>Yes`** - This makes every change, and shows what it did.
+* **`n=>No`** - This changes nothing; you are asked again the next time
+  your imports or `dependencies` change.
+* **`i=>Individually`** - This asks about each change, as below.
+* **`a=>Always`** - This is `y`, now and from then on without asking,
+  after `Really update prog.py's dependencies from now on, without
+  asking?` (`n` goes back to the question).
+* **`d=>Don't ask again`** - This never asks about this program again,
+  after `Really never ask about prog.py again?`.
+
+The packages to add are downloaded first (asking first, as any download
+does), and then the changes to `dependencies` are shown, next to the
+unchanged entries around them:
+
+```
+dependencies in prog.py:
+   line 5     "widget",
+   remove     "rich",
+   add        "requests>=2.32.3,<3",
+   add        "PyYAML>=6.0.2,<7",
+              ]
+ezpkg: prog.py: removed "rich" from dependencies
+ezpkg: prog.py: added "requests>=2.32.3,<3" to dependencies
+ezpkg: prog.py: added "PyYAML>=6.0.2,<7" to dependencies (for yaml)
+```
+
+With only one change, or after `i`, each change is asked about in line
+order, since only you know whether an import is coming or going:
+
+```
+line 6: "rich" is in dependencies, but nothing imports it.
+Remove it? [y=>Yes/n=>No/k=>Keep it, and stop asking] y
+line 14: `requests` is imported, but not in dependencies.
+Add "requests"? [y=>Yes/n=>No] y
+line 15: `yaml` is imported, but not in dependencies.
+Add "PyYAML"? [y=>Yes/n=>No] y
+```
+
+`k` is for a package your program needs but never imports, such as a
+plugin that another package loads for itself.  It is listed in Part 1
+as `[tool.ezpkg] unimported`, and is not raised again.  The changes are
+then shown as above, followed by `Make these changes? [y=>Yes/n=>No]`.
+
+Also proposed, for lines 385-386 below: a package your Python already
+has is not downloaded again, so the range starts where the program
+really ran:
+
+Each package added gets a range of versions, starting at the version
+your program ran with; see [Choosing Versions](#choosing-versions).
+-->
+
 Each package added gets a range of versions, starting at the version
 that was downloaded; see [Choosing Versions](#choosing-versions).
 

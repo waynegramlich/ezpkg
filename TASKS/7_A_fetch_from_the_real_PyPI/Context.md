@@ -124,3 +124,9 @@
      last open point); the ranges offer (`T.kdaiis`).
 * Before `T.utpat` (Wayne, later): the `pypi` environment, the `v*` tag
   ruleset, the pypi.org pending publisher; `I.wmau` closed.
+
+## 2026-10-17: `I.ffspo` blocks `T.utpat`
+
+* `T.kdaiis`'s batch question built (not yet committed or rehearsed).
+  `I.ffspo` (a failed fetch shows `pip`'s output) filed, priority 1,
+  open; must close before `T.utpat`, beside `I.wmau`.
