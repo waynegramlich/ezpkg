@@ -518,3 +518,151 @@
   `1efdcae`; the bootstrap is unchanged, `nopip7`) with
   `release_check.py` and `check.yml` (its `--console` jobs look for
   `=>Explain]`, which still matches); then close `T.abfd`, `T.kdaiis`, `T.reb`, `T.eui`.
+
+## 2026-10-19: Reversal: no prompts for the developer (Wayne), being settled
+
+* Wayne: two experiences, both extremely easy.  The end user gets one
+  Yes/No per program ("we downloaded stuff, OK to run it?"); a yes
+  covers this and every later version, as Ubuntu updates do.  The
+  developer gets no prompts at all.
+* Settled: `[tool.ezpkg]` in Part 1 holds the configuration (names
+  not decided), including auto upkeep of `dependencies` (on: just do
+  it; off: do nothing).  No typo-squatting guard (the developer's
+  care).  Removals are silent; a chattier option may come later.  No
+  mode detection: end-user/developer mode, "Are you working on",
+  `Update them?`, Manual, per-item questions all go.  Removed
+  packages stay in `~/.ezpkg` until `remove.py`.
+* Also settled: "the program" is its path; additions are silent too,
+  `report = true` makes both report; no auto-upkeep setting means the
+  developer's responsibility; the download prompt is `[y=>Yes|n=>No]`
+  (no `a`, `s`, `?`, `FOREVER_APPROVE`); all configuration is the user
+  editing `[tool.ezpkg]`; `cull` stays.
+* Wayne's next round: developer mode is a `PROG.py.toml` beside
+  `PROG.py` (TOML, like `dependencies`); without it, an end user.  An
+  author's forgotten package: let the `ImportError` happen.  Download
+  prompt `[y|n|?]`.  `PROG.py.toml` may replace `EZPKG_APPROVE`.
+  An entry needed but not imported gets a `# Needed by ...` comment.
+* Settled: an empty `PROG.py.toml` is developer mode with defaults
+  (auto-upkeep on, silent); the developer never sees the download
+  prompt; a hand-added unimported entry is kept and marked, a vanished
+  import's entry removed; `ux01`'s list after `y` stays.  Wayne wants
+  user-facing environment variables minimised or gone, and a release
+  trigger that cleans up and builds the exports (proposal: a command
+  script in `~/.ezpkg`, like `remove.py`).
+* Earlier open list (superseded): what an empty `PROG.py.toml` means; whether
+  the developer sees the download prompt at all; how a hand-added
+  unimported entry is told from a stale one; where the approvals and
+  date live, and when they change; `EZPKG_EXPORT`; `ux01`'s list.
+* Agreed in principle, NOT built; no major coding until every point is
+  settled (Wayne).
+* Release trigger settled: `release = "X.Y.Z"` in `prog.py.toml`; the
+  first run whose value differs from the last recorded (`# Released:`
+  in the approvals file) releases once, names its outputs by version,
+  and stops instead of running the program.  Every key in
+  `prog.py.toml` is checked; an unknown one stops the run ("did you
+  mean ...?").  No user-facing environment variables.
+* Upgrade (Wayne leaning yes): deleting the `exclude-newer` line makes
+  the next run fetch the newest and stamp a new date.
+
+## 2026-10-19: The design, for Wayne's read (agreed in chat, NOT built)
+
+### The two modes
+
+* **Developer mode** is a `prog.py.toml` beside `prog.py` (an empty
+  one will do).  Without it the program is an end user's.  No other
+  detection: the old `develop/` modes, "Are you working on", and the
+  breaking-import messages all go.
+* `ezpkg` only reads `prog.py.toml`; the developer edits it.  Every
+  key is checked: an unknown one stops the run with `prog.py.toml line
+  N: unknown setting X (did you mean Y?)`.
+
+### End user (no `prog.py.toml`)
+
+* One question per program (its path): `ux01`'s paragraph, then
+  `[y=>Yes|n=>No|?=>Explain]:`.  `?` is today's terse list.
+* `y` covers this program and its later versions: anything it needs
+  later is downloaded and run without asking, as Ubuntu updates are.
+* After the first `y`: `ux01`'s list of stored packages and the
+  `` `ezpkg` (HOME_PAGE) manages `~/.ezpkg`. `` line.
+* `n` (or Control-C before Enter): the downloads are removed (the whole
+  cache on a first run) and the program does not run.
+* Never a reconciliation or an edit.  An author's forgotten package is
+  Python's `ImportError`, with no `ezpkg` line.
+* Gone: `a`, `s`, `FOREVER_APPROVE`.
+
+### Developer (`prog.py.toml` present)
+
+* No prompts at all, not even the first download.
+* `auto-dependencies` (default `true`): `dependencies` is reconciled
+  silently: an entry for each new import (named from metadata,
+  `MODULE_PACKAGES`, or the module; checked by `prove`; ranged as
+  now), the order of first imports, the author's `mypy` comment copied,
+  the program restarted after the edit.  An entry whose import
+  disappeared is removed.  An entry added by hand with no import is
+  kept and marked; the program's record of its last imports tells the
+  two apart.  `report = true` prints one line per change.
+* Marks: a module named in a string (`importlib.import_module("X")`)
+  is an import; an extra of another declared package gets `# Needed by
+  pandas (excel)`; anything else `# Needed, but not imported`, for the
+  developer to reword.  An entry whose comment starts `# Needed` is
+  never removed.  Commands and plugins: not now.
+* `auto-dependencies = false`: nothing edited, nothing said.
+* Versions never change by themselves.  The approvals (`prog.ezpkg`,
+  written by `ezpkg`, kept up to date in developer mode) change only
+  when `dependencies` does; the `exclude-newer` date is stamped on the
+  first run and moves only on an upgrade.
+* Upgrade: delete the `exclude-newer` line; the next run fetches the
+  newest and stamps a new date (Wayne leaning yes; trigger not final).
+* Release: `release = "X.Y.Z"`.  The first run whose value differs from
+  `# Released:` in `prog.ezpkg` reconciles, checks the bootstrap (what
+  `EZPKG_BOOTSTRAP=check` did), checks the imports, gives bare entries
+  ranges if `ranges = true`, builds what `exports` lists, records
+  `# Released: X.Y.Z`, prints what it built, and stops without running
+  the program.  Outputs are named by version (`prog-1.0.0.pyz`).
+* Settings: `auto-dependencies`, `report`, `release`, `exports`
+  (default empty; the README template's comment names `zipapp` and
+  `uv`), `ranges`.
+
+### Unchanged
+
+* The bootstrap (`nopip7`), the `ezpkg` switch (`T.eui`), the edited-
+  bootstrap refusal (`T.reb`), the restart, `remove.py`, `cull`.
+
+### Environment variables
+
+* `EZPKG_APPROVE` and `EZPKG_EXPORT` go.  `EZPKG_BOOTSTRAP=check` folds
+  into the release; `unchecked` stays for the test harness only.
+  `EZPKG_SWITCHED`, `EZPKG_RESTARTED`, `EZPKG_PYTHONPATH` stay: they
+  pass state from `ezpkg` to its own re-run, and no user sets them.
+
+### Still open
+
+* The upgrade trigger.
+* What a failed `prove` (no such package, source only) says in
+  developer mode: one line, then the `ImportError`?
+* A package added after the date was stamped may not exist before that
+  date, so the fetch finds nothing; delete the date, or retry without
+  it and say so?
+* Whether an end user's later downloads print anything.
+
+### Order (Wayne)
+
+1. Wayne reads this; we iterate.  2. Code (with tests).  3. UX
+testing (`ux/drive.py` steps rewritten).  4. README, with a new
+developers section.  5. Iterate.
+* The four open points settled (upgrade: delete the date line; a
+  failed `prove`: one line, then the `ImportError`; a package newer
+  than the date stops the run, telling the developer to delete the
+  date; an end user's later downloads are silent).  At Wayne's request
+  the whole design is now `Details.md`'s "The Design" (the old
+  sections kept below it as "Earlier Design"); it supersedes the block
+  above.  Waiting on Wayne's read and commit before any code.
+* `Details.md` now also has: the empty `prog.py.toml` filled with a
+  commented template; "Lessons From the Earlier Design" in place of
+  the old sections; a developer run mentioning a newer bootstrap once.
+  Wayne is committing the design, then `/clear`; next session starts
+  the code, slice 1 (`Details.md`, "The Order of Work").
+* Wayne: a release offers to update an older bootstrap and refuses to
+  go on with the old one (`Details.md`, release step 2).  How the
+  offer is made without a developer prompt (a message saying how, or
+  `ezpkg` replacing it) is to be settled when building the release.

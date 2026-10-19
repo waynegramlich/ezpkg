@@ -86,14 +86,6 @@ cowsay.cow("EZPkg works!")
 print(f"The cow above was drawn by cowsay {cowsay.__version__}.")
 ```
 
-The first run creates `~/.ezpkg/` in your home directory, which is where
-`EZPkg` keeps everything it fetches.  It fetches `ezpkg` into it, then
-the packages the program lists at the top (line 5): `ezpkg` itself,
-which says which `ezpkg` runs the program, and `cowsay`.  It asks once
-whether `EZPkg` may keep them.  Answer `y`, and the program runs:
-<!-- Claude: proposed replacement for lines 89-93 above (T.abfd,
-ux01, 2026-10-18):
-
 The first run creates `~/.ezpkg` in your home directory, which is where
 `EZPkg` keeps everything it fetches.  The bootstrap fetches `pip` and
 `ezpkg` into it, then `ezpkg` fetches the packages the program lists at
@@ -101,7 +93,6 @@ the top (line 5): `ezpkg` itself, which says which `ezpkg` runs the
 program, and `cowsay`.  It asks once whether to keep them, and then
 lists what it installed (see [Download Prompt](#download-prompt)).
 Answer `y`, and the program runs:
--->
 
 ```
   ______________
