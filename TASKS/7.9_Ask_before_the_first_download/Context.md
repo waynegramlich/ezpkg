@@ -811,3 +811,166 @@ developers section.  5. Iterate.
   assertion, fixed and passing alone.
 * Order of work: slices 1-5 done.  Next (Wayne): the issues list, then
   `ux/drive.py` (step 3), README (step 4).
+
+## 2026-10-19: Wayne's answers, slice 1 (items now numbered S1.n etc.)
+
+* S1.1 yes; S1.2 `release` versions good enough for now; S1.3 the
+  `ux/uxNN_prog*.py` snapshots excluded in `ruff.toml` and `mypy.ini`
+  (done; long term Wayne would like `ux/*.py` clean); S1.4 skipped.
+* S1.5: Wayne suggests `verbosity = none|low|medium|high` for a
+  developer debugging; Claude's proposal (replacing `report`) is in
+  chat, waiting on Wayne.  Items are never renumbered.
+
+## 2026-10-19: Wayne's answers, S1.5 and slice 2
+
+* S1.5a `verbosity` replaces `report`; S1.5b levels as proposed
+  (`none`: nothing extra; `low` default; `medium`; `high`), to adjust
+  over time; S1.5c `none` means no extra output, and the template does
+  not default to it.  S1.5d build it now (a forked agent does).
+* S2.1: asked once, ever.  `stale` never ages out a `develop/` record
+  holding `agreed` (built; `test_a_yes_covers_later_versions` culls
+  and checks).  Culled packages are fetched again silently.
+* S2.2: not yet answered.  S2.3: yes.  S2.4: tentative yes, but Wayne
+  sees only two user-visible files (`PROG.py`, `PROG.py.toml`), so
+  where the approvals (`prog.ezpkg`) live is S2.4a, open.
+
+## 2026-10-19: S1.5 verbosity (built)
+
+* `verbosity = "none"|"low"|"medium"|"high"` (default `low`) replaces
+  `report` (`Settings.verbosity`, `VERBOSITY`, template line, checked
+  by `read_settings`).  `EZPkg.verbosity()` (0-3; an end user's program
+  counts as `low`) and `EZPkg.say(level, text, wrap=True)`.
+* `low`: prove failure line, "`dependencies` is left as it is",
+  newer-bootstrap notice, release summary (the "was empty" line prints
+  directly, since a filled template is `low`).  `medium`: the
+  per-change lines (`Discrepancy.reported`, "marked"), the
+  "fetching without the date" note, and the stored-package list for a
+  developer.  `high`: `ezpkg: lock: ...`, `date: ...`, `fetching ...`
+  or `request remembered, nothing fetched`, `approvals written to` /
+  `unchanged`, `date ... stamped into Part 1`, and the full error text
+  (`pip`'s output) after a failed `reconcile` fetch.
+* `reconcile` lost its `settings` parameter.  Tests: `report = true`
+  became `verbosity = "medium"`; settings test cases for `verbosity`;
+  `test_verbosity_none_says_nothing_extra`,
+  `test_verbosity_high_says_what_was_decided`.  Quick suite (scratch
+  `HOME`): 304 OK, 17 skipped.
+
+## 2026-10-19: Wayne's answers, round 3 (agreed, NOT built)
+
+* S2.2 agreed: ask every program once on its first run, whether or
+  not anything new arrived.  S3.3b agreed: `cull` keeps the packages
+  of agreed programs.  H.1, H.2 skipped for now.
+* S5.1: Wayne leans no (never change the code the author emailed);
+  Claude's counter: a release edits the author's own copy, before
+  sending.  S2.4a reopened as "can `prog.py.toml` and `prog.ezpkg`
+  combine?" (Wayne had not met `prog.ezpkg`).  S1.5g: Wayne asked what
+  "prefix" means and who reads it.
+
+## 2026-10-19: Wayne's answers, round 4 (agreed, NOT built)
+
+* S2.4a: option B.  `prog.ezpkg` goes: versions and checksums move
+  into Part 1 (`[tool.ezpkg]`); author-only state elsewhere (where
+  `# Released:` goes is the next question, since `ezpkg` never writes
+  `prog.py.toml` after filling it).
+* S5.1: a `.toml` setting for the bootstrap, default `update`; naming
+  a bootstrap locks it, which takes explicit effort (Wayne).
+* S1.5g: no `ezpkg:` prefix on the developer's sentences; `high`
+  diagnostic lines keep it.  S3.3a: retry after a failed fetch (don't
+  record as settled).  S3.2a: stop reading `[tool.ezpkg] unimported`.
+
+## 2026-10-19: Wayne's answers, round 5
+
+* S2.4b: `released = "X.Y.Z"` in Part 1's `[tool.ezpkg]` (agreed).
+* S2.4c: in the `.py`, checksums as `id:XXXXXXXX` (Wayne: 8 hex
+  digits); full SHA-256 only if stored elsewhere.  Claude raised that
+  8 digits can be forged; open.
+* S5.1a: Wayne's aim is that the developer never forgets anything:
+  in `update` mode a release updates "various things"
+  automatically; which things is open (Claude listed candidates).
+* S3.4: Wayne prefers `# pandas needs excel`-style wording, and finds
+  `# Needed, but not imported` uninformative; wording open.
+* Batch build waits until S2.4c and S5.1a settle.
+
+## 2026-10-19: Wayne's answers, round 6
+
+* S2.4c: `id:` + 16 hex digits.  S5.1a: a release in `update` mode
+  refreshes (a) the bootstrap, (b) the `ezpkg` entry's range, (c)
+  bare entries' ranges, (e) the checksums; not (d) the date.  S3.4:
+  `# pandas needs this for excel` / `# pandas needs this` / `# not
+  imported: say why it is needed`; any comment keeps an entry
+  (document in README).  S4.3 accepted.  S5.2: never add a bootstrap.
+* Wayne: "Feel free to code."  A forked agent builds the batch (S2.2,
+  S3.3a/b, S1.5g, S3.2a, S3.4, S2.4a-c, S5.1); its entry follows.
+
+## 2026-10-19: Wayne's answers, round 7 (agreed, NOT built; after the batch)
+
+* S2.4d: platform-specific wheels: record the platform tag beside the
+  `id:`; check the checksum only for a wheel of that platform.
+* S5.1b: drop `ranges`; `update` mode gives bare entries ranges; an
+  author locks an entry by writing a range or `==` themselves.
+* S1.5e: the template may grow, with commented-out suggestions; goal
+  being clarified (whether developers should need the docs first).
+* S1.5f: a developer's failed first download: one plain line with
+  `pip`'s `ERROR:` reason at low/medium, full output at high.
+* S5.3, S5.5: agreed as they are.
+
+## 2026-10-19: Wayne's answers, round 8
+
+* S1.5e: the template must explain itself, so a developer never needs
+  README to get started (commented-out suggestions are fine).
+* S3.1e agreed: an import that now explains an entry removes a mark
+  only if it is exactly one `ezpkg` writes.  S2.4e: `quick_start.py`
+  ships WITHOUT approvals (shorter is better; it is already too long).
+  S4.1 closed (`medium`).
+* Next: a GitHub Actions / test.pypi.org run early, to catch OS issues;
+  `ux/drive.py` may be redone any time (much simpler now); README not
+  until the UX work is done.
+
+## 2026-10-19: Batch: S2.2, S3.3, S1.5g, S3.2a, S3.4, S2.4, S5.1 (built)
+
+* S2.4 (`prog.ezpkg` gone): approvals are Part 1's `[tool.ezpkg]
+  approved = ["name==version  id:<16 hex>", ...]` (`ID_DIGITS`,
+  `wheel_pin`, `normal_pin`, `approvals_in`, `approvals_array`);
+  `released = "X.Y.Z"` beside it; `# Resolved:` gone (the
+  `exclude-newer` date is it).  `EZPkg.approved()` reads Part 1 (pin →
+  id); `approvals()`, `approve()`, `resolution()` gone; `edit_part1`
+  sets several `[tool.*]` keys in one write (encoding kept), and
+  `stamp` uses it.  `record_approvals` writes `approved` and the date
+  together.  `verify`, `pins`, `build_zipapp`, `build_uv`,
+  `lock_mismatches` (by pin, `id:` as hash prefix), `give_ranges` and
+  the approved-name sets follow.  `uv_setting` now replaces or writes
+  an array over several lines.  Old `prog.ezpkg` files are ignored.
+* S2.2: `agree(wheels, asking, fresh)` asks once per program, also on
+  a warm run whose packages another program fetched (`provide`'s warm
+  path); a no then only says it did not run.  Approvals still answer
+  for the question.  A fileless program is not asked on a warm run.
+* S3.3a: a failed fetch, or a guess that could not be proved, leaves
+  the fingerprint unsettled, so the next run retries.  S3.3b:
+  `note_request` keeps an agreed program's last 4 request keys in its
+  `develop/` record; `stale` never ages those request records out.
+* S1.5g: the developer's sentences lost `ezpkg:` (reconcile, report
+  lines `Added`/`Removed`/`Moved`/`Marked`, scan lines, `Wrote ...`,
+  release lines, restart note); `high` lines keep it.
+* S3.2a: `unimported()` and `[tool.ezpkg] unimported` gone.  S3.4: any
+  comment on an entry keeps it; marks are `# pandas needs this for
+  excel`, `# pandas needs this`, `# not imported: say why it is needed`.
+* S5.1: setting `bootstrap` (`"update"` default, or a published short
+  name), in the template and checked.  Update: a release replaces a
+  stale bootstrap in place (`replace_bootstrap`, indentation kept,
+  "Replaced the bootstrap `nopip6` (lines A-B of `prog.py`) with
+  `nopip7`.") and gives the `ezpkg` entry `version_range("ezpkg",
+  __version__)` (`range_ezpkg`); the newer-bootstrap notice says "The
+  next release replaces it."  Named: `named_bootstrap` stops any run
+  whose bootstrap is another (or none, or edited); no notice.  S5.2: a
+  program without a bootstrap releases without one.
+* Tests: `program()` programs carry an empty Part 1 (approvals need
+  one); `approvals_of`, `corrupt_approvals`; edits to programs touch
+  only the `install(...)` line or the `dependencies` line, since a
+  blanket replace hit the approvals; new/rewritten tests for each item.
+  Quick suite (scratch `HOME` with pip 26): 305 OK, 17 skipped; ruff
+  and mypy clean.
+* The batch agent's own sub-items collided with numbers already used
+  in chat, so they are renumbered (never reused): its S2.2a → S2.2b
+  (`python -c`), S2.4d → S2.4g (Part 1 grows 3 + 1 per package),
+  S2.4e → S2.4h (search-and-replace hits the approvals); S3.3c,
+  S3.3d, S5.1c, S5.1d keep their numbers.

@@ -422,9 +422,10 @@ def check(step: Step, shown: str, program: Path) -> list[str]:
             modes.append("unreadable")
     if modes != [step.mode]:
         problems.append(f"mode is {modes}, expected [{step.mode!r}]")
-    if step.kept is not None and ezpkg.unimported(text) != step.kept:
-        problems.append(f"unimported is {ezpkg.unimported(text)}, "
-                        f"expected {step.kept}")
+    # Kept entries are now the commented ones (S3.2a, S3.4).
+    kept: list[str] = list(ezpkg.dependency_comments(text))
+    if step.kept is not None and kept != step.kept:
+        problems.append(f"kept is {kept}, expected {step.kept}")
     return problems
 
 

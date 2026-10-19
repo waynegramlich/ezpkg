@@ -3227,9 +3227,9 @@ class InstallTest(unittest.TestCase):
     def program(self, name: str, requirement: str) -> Path:
         """Write a little program that installs one requirement.
 
-        Approvals live beside the main program, so they can only be
-        exercised by a real program in a directory of its own: an
-        in-process test would put `ezpkg_test.ezpkg` in the project.
+        Approvals live in the program's Part 1, so it has an empty
+        `script` block for them, and they can only be exercised by a
+        real program in a directory of its own (`T.abfd`, S2.4).
 
         Arguments:
         * `name` (`str`):
@@ -3245,6 +3245,9 @@ class InstallTest(unittest.TestCase):
         where.mkdir(parents=True, exist_ok=True)
         program: Path = where / "prog.py"
         program.write_text(
+            "# /// script\n"
+            "# dependencies = []\n"
+            "# ///\n"
             "import sys\n"
             f"sys.path.insert(0, {str(Path(__file__).resolve().parent)!r})\n"
             "import ezpkg\n"
@@ -3252,6 +3255,30 @@ class InstallTest(unittest.TestCase):
             f"v = ezpkg.EZPkg(Path({str(where / 'cache')!r}))\n"
             f"print(v.install({requirement!r}).__version__)\n")
         return program
+
+    def approvals_of(self, program: Path) -> dict[str, str] | None:
+        """Return the approvals a program's Part 1 records, pin to id.
+
+        Arguments:
+        * `program` (`Path`):
+          The program.
+
+        Returns:
+        * (`dict[str, str] | None`): As `ezpkg.approvals_in` reads them.
+        """
+        # The file as it is now.
+        return ezpkg.approvals_in(program.read_text())
+
+    def corrupt_approvals(self, program: Path) -> None:
+        """Change every `id:` in a program's Part 1, as a swapped wheel would.
+
+        Arguments:
+        * `program` (`Path`):
+          The program.
+        """
+        # Sixteen hex digits after each `id:`.
+        program.write_text(re.sub(r"id:[0-9a-f]{16}", "id:" + "0" * 16,
+                                  program.read_text()))
 
     def run_program(self, program: Path,
                     **extra: str) -> subprocess.CompletedProcess[str]:
@@ -3267,8 +3294,8 @@ class InstallTest(unittest.TestCase):
         * (`subprocess.CompletedProcess[str]`): The finished child.
         """
         # The index is local; everything else is inherited.
-        environment: dict[str, str] = dict(
-            os.environ, PIP_INDEX_URL=self.index_url, **extra)
+        environment: dict[str, str] = {
+            **os.environ, "PIP_INDEX_URL": self.index_url, **extra}
         environment.pop("VIRTUAL_ENV", None)
         return subprocess.run([sys.executable, str(program)],
                               env=environment, capture_output=True,
@@ -3350,26 +3377,28 @@ class InstallTest(unittest.TestCase):
         self.assertTrue(" ".join(done.stderr.split()).startswith(
             f"The following 1 package(s) are now installed in "
             f"`{program.parent / 'cache'}`: 1. widget 1.2.3"), done.stderr)
-        self.assertFalse(program.with_suffix(".ezpkg").exists())
+        self.assertIsNone(self.approvals_of(program))
 
     def test_the_author_records_approvals(self) -> None:
-        """A developer's run writes the file beside the program."""
-        # Wheel name and digest, one per line, sorted for the diff.
+        """A developer's run writes the approvals into Part 1.
+
+        One pin and `id:` per package, sorted for the diff, and dated
+        by the `exclude-newer` line beside them (S2.4).
+        """
+        # The pin, and sixteen hex digits of the wheel's SHA-256.
         program: Path = self.program("record", "widget")
         done: subprocess.CompletedProcess[str] = self.run_as_developer(
             program)
         self.assertEqual(done.returncode, 0, done.stderr[-300:])
-        record: Path = program.with_suffix(".ezpkg")
-        self.assertTrue(record.is_file())
-        rows: list[str] = [line for line in record.read_text().splitlines()
-                           if not line.startswith("#")]
-        self.assertEqual(len(rows), 1)
-        self.assertTrue(rows[0].startswith("widget-1.2.3-py3-none-any.whl "))
-        self.assertEqual(len(rows[0].split()[1]), 64)
-
-        # And dated, since the list is what `pip` chose that day.
-        self.assertRegex(record.read_text(),
-                         r"(?m)^# Resolved: \d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$")
+        approved: dict[str, str] | None = self.approvals_of(program)
+        assert approved is not None
+        self.assertEqual(list(approved), ["widget==1.2.3"])
+        self.assertRegex(approved["widget==1.2.3"], r"^[0-9a-f]{16}$")
+        self.assertIn('#   "widget==1.2.3  id:', program.read_text())
+        self.assertRegex(program.read_text(),
+                         r'(?m)^# exclude-newer = "\d{4}-\d\d-\d\dT\d\d:'
+                         r'\d\d:\d\dZ"$')
+        self.assertFalse(program.with_suffix(".ezpkg").exists())
 
     def test_matching_approvals_are_silent(self) -> None:
         """A recipient whose approvals match is not bothered at all."""
@@ -3396,7 +3425,8 @@ class InstallTest(unittest.TestCase):
         program: Path = self.program("refused", "widget")
         self.assertEqual(
             self.run_as_developer(program).returncode, 0)
-        program.write_text(program.read_text().replace("widget", "sprocket"))
+        program.write_text(program.read_text().replace(
+            "install('widget')", "install('sprocket')"))
         done: subprocess.CompletedProcess[str] = self.run_program(program)
         self.assertNotEqual(done.returncode, 0)
         self.assertIn("is not approved", done.stderr)
@@ -3419,7 +3449,8 @@ class InstallTest(unittest.TestCase):
         program: Path = self.program("locking", "sprocket==1.0.0")
         self.assertEqual(
             self.run_as_developer(program).returncode, 0)
-        program.write_text(program.read_text().replace("==1.0.0", ""))
+        program.write_text(program.read_text().replace(
+            "install('sprocket==1.0.0')", "install('sprocket')"))
         shutil.rmtree(program.parent / "cache")
         done: subprocess.CompletedProcess[str] = self.run_program(program)
         self.assertEqual(done.returncode, 0, done.stderr[-300:])
@@ -3438,7 +3469,8 @@ class InstallTest(unittest.TestCase):
         self.assertEqual(self.run_as_developer(program).returncode, 0)
         dated: str = program.read_text()
         self.assertIn("# exclude-newer = ", dated)
-        program.write_text(dated.replace("==1.0.0", ""))
+        program.write_text(dated.replace('dependencies = ["sprocket==1.0.0"]',
+                                         'dependencies = ["sprocket"]'))
         shutil.rmtree(program.parent / "cache")
         done: subprocess.CompletedProcess[str] = self.run_as_developer(
             program)
@@ -3451,8 +3483,7 @@ class InstallTest(unittest.TestCase):
         done = self.run_as_developer(program)
         self.assertEqual(done.returncode, 0, done.stderr[-300:])
         self.assertEqual(done.stdout.strip(), "2.0.0")
-        self.assertIn("sprocket-2.0.0",
-                      program.with_suffix(".ezpkg").read_text())
+        self.assertIn("sprocket==2.0.0", self.approvals_of(program) or {})
         self.assertIn("# exclude-newer = ", program.read_text())
 
     def test_a_lock_dependencies_moved_past_names_the_file(self) -> None:
@@ -3461,24 +3492,25 @@ class InstallTest(unittest.TestCase):
         program: Path = self.program("moved", "sprocket==1.0.0")
         self.assertEqual(
             self.run_as_developer(program).returncode, 0)
-        program.write_text(program.read_text().replace("1.0.0", "2.0.0"))
+        program.write_text(program.read_text().replace(
+            "install('sprocket==1.0.0')", "install('sprocket==2.0.0')"))
         done: subprocess.CompletedProcess[str] = self.run_program(program)
         self.assertNotEqual(done.returncode, 0)
         self.assertIn("may be the conflict", done.stderr)
-        self.assertIn("prog.ezpkg", done.stderr)
+        self.assertIn("Part 1 of prog.py", done.stderr)
 
     def test_the_developer_stamps_the_date_into_the_block(self) -> None:
         """The first developer run puts the date in Part 1, unasked.
 
-        As `exclude-newer`, the same date as the approvals' `# Resolved:`
-        line, so the `.py` carries it when it travels alone; later runs
-        keep it (`T.abfd`, `T.srdisb`).
+        As `exclude-newer`, beside the approvals, so the `.py` carries
+        both when it travels alone; later runs keep it (`T.abfd`,
+        `T.srdisb`).
         """
         # Not asked, even on a terminal.
         program: Path = self.declaring_program(
             "stamped", 'dependencies = ["widget"]',
             "import widget\nprint(widget.__version__)")
-        program.with_name("prog.py.toml").write_text("report = false\n")
+        program.with_name("prog.py.toml").write_text('verbosity = "low"\n')
         seen: str = self.answer_on_a_terminal(program, b"")
         self.assertNotIn("[y=>Yes", seen)
         self.assertIn("1.2.3", seen)
@@ -3486,19 +3518,16 @@ class InstallTest(unittest.TestCase):
             program.read_text())
         assert metadata is not None
         when: str = metadata["tool"]["uv"]["exclude-newer"]
-        self.assertIn(f"# Resolved: {when}\n",
-                      program.with_suffix(".ezpkg").read_text())
+        self.assertEqual(list(metadata["tool"]["ezpkg"]["approved"][0]
+                              .split()[:1]), ["widget==1.2.3"])
         self.assertEqual(metadata["dependencies"], ["widget"])
 
-        # Another run keeps an older date, in both places.
+        # Another run keeps an older date.
         older: str = "2026-01-01T00:00:00Z"
-        for path in (program, program.with_suffix(".ezpkg")):
-            path.write_text(path.read_text().replace(when, older))
+        program.write_text(program.read_text().replace(when, older))
         shutil.rmtree(program.parent / "cache")
         done: subprocess.CompletedProcess[str] = self.run_program(program)
         self.assertEqual(done.returncode, 0, done.stderr[-300:])
-        self.assertIn(f"# Resolved: {older}\n",
-                      program.with_suffix(".ezpkg").read_text())
         self.assertIn(f'exclude-newer = "{older}"', program.read_text())
 
         # An end user's copy runs under its lock, where the date is not
@@ -3632,7 +3661,7 @@ class InstallTest(unittest.TestCase):
                     program)
                 self.assertEqual(done.returncode, 0, done.stderr[-300:])
                 self.assertEqual(done.stdout.strip(), "2.0.0")
-                # Said only with `report = true` (`T.abfd`).
+                # Said only from `verbosity = "medium"` up (S1.5).
                 self.assertNotIn("fetching without", done.stderr)
 
     def test_an_altered_wheel_is_refused(self) -> None:
@@ -3642,9 +3671,7 @@ class InstallTest(unittest.TestCase):
         program: Path = self.program("altered", "widget")
         self.assertEqual(
             self.run_as_developer(program).returncode, 0)
-        record: Path = program.with_suffix(".ezpkg")
-        record.write_text(record.read_text().replace(
-            record.read_text().split()[-1], "0" * 64))
+        self.corrupt_approvals(program)
         shutil.rmtree(program.parent / "cache")
         done: subprocess.CompletedProcess[str] = self.run_program(program)
         self.assertNotEqual(done.returncode, 0)
@@ -3659,7 +3686,7 @@ class InstallTest(unittest.TestCase):
         # Populate the cache first, with no approvals at all.
         program: Path = self.program("warm", "widget")
         self.assertEqual(self.run_program(program).returncode, 0)
-        self.assertFalse(program.with_suffix(".ezpkg").exists())
+        self.assertIsNone(self.approvals_of(program))
 
         # Now record: only a fetch writes approvals.  What arrived was
         # already unpacked, so nothing new is listed.
@@ -3667,11 +3694,8 @@ class InstallTest(unittest.TestCase):
             program)
         self.assertEqual(done.returncode, 0, done.stderr[-300:])
         self.assertNotIn("The following", done.stderr)
-        rows: list[str] = [line for line in
-                           program.with_suffix(".ezpkg").read_text(
-                               ).splitlines() if not line.startswith("#")]
-        self.assertEqual(len(rows), 1)
-        self.assertTrue(rows[0].startswith("widget-1.2.3"))
+        self.assertEqual(list(self.approvals_of(program) or {}),
+                         ["widget==1.2.3"])
 
     def answer_on_a_terminal(self, program: Path, reply: bytes,
                              **extra: str) -> str:
@@ -3711,8 +3735,8 @@ class InstallTest(unittest.TestCase):
             "import os, sys\n"
             "os.login_tty(int(sys.argv[1]))\n"
             "os.execv(sys.executable, [sys.executable, sys.argv[2]])\n")
-        environment: dict[str, str] = dict(
-            os.environ, PIP_INDEX_URL=self.index_url, **extra)
+        environment: dict[str, str] = {
+            **os.environ, "PIP_INDEX_URL": self.index_url, **extra}
         environment.pop("VIRTUAL_ENV", None)
         child: subprocess.Popen[bytes] = subprocess.Popen(
             [sys.executable, "-c", launcher, str(slave), str(program)],
@@ -3767,14 +3791,37 @@ class InstallTest(unittest.TestCase):
         self.assertNotIn("now installed", seen)
         self.assertIn("1.2.3", seen)
 
-        # Another program, needing the same, cold: asked.
+        # Long idle and swept: still never asked again (Wayne, S2.1),
+        # and its packages kept, so nothing is fetched (S3.3b).
+        venv: ezpkg.EZPkg = ezpkg.EZPkg(cache)
+        record: Path
+        for record in [*(cache / "develop").glob("*.json"),
+                       *(cache / "requests").glob("*.json")]:
+            os.utime(record, (0, 0))
+        venv.cull(grace=-1, days=-1)
+        self.assertTrue(list((cache / "develop").glob("*.json")))
+        self.assertTrue(list((cache / "requests").glob("*.json")))
+        self.assertTrue(list((cache / "versions").glob("widget-*")))
+        seen = self.answer_on_a_terminal(program, b"",
+                                         PIP_INDEX_URL="http://127.0.0.1:1/")
+        self.assertNotIn(PROMPT, seen)
+        self.assertIn("1.2.3", seen)
+
+        # Another program, its packages already cached: still asked
+        # (S2.2), and a no runs nothing and removes nothing.
         other: Path = program.with_name("other.py")
         other.write_text(program.read_text())
-        shutil.rmtree(cache / "versions")
-        shutil.rmtree(cache / "requests")
-        seen = self.answer_on_a_terminal(other, b"y\n")
+        seen = self.answer_on_a_terminal(other, b"n\n")
         self.assertEqual(seen.count(PROMPT), 1, seen)
         self.assertIn("`other.py`", seen)
+        self.assertIn("declined", seen)
+        self.assertNotIn("1.2.3", seen)
+        self.assertTrue(list((cache / "versions").glob("widget-*")))
+        seen = self.answer_on_a_terminal(other, b"y\n")
+        self.assertEqual(seen.count(PROMPT), 1, seen)
+        self.assertIn("1.2.3", seen)
+        seen = self.answer_on_a_terminal(other, b"")
+        self.assertNotIn(PROMPT, seen)
 
     def test_a_yes_never_hides_a_mismatch(self) -> None:
         """An altered wheel is still refused, after a yes or not.
@@ -3788,9 +3835,7 @@ class InstallTest(unittest.TestCase):
         self.assertEqual(
             self.run_as_developer(program).returncode,
             0)
-        record: Path = program.with_suffix(".ezpkg")
-        record.write_text(record.read_text().replace(
-            record.read_text().split()[-1], "0" * 64))
+        self.corrupt_approvals(program)
         shutil.rmtree(program.parent / "cache" / "versions")
         shutil.rmtree(program.parent / "cache" / "requests")
 
@@ -4947,8 +4992,8 @@ class InstallTest(unittest.TestCase):
         done: subprocess.CompletedProcess[str] = self.run_as_developer(
             program, HOME=str(home))
         self.assertEqual(done.returncode, 0, done.stderr[-400:])
-        self.assertIn(f"\n{DISTRIBUTION}-{VERSION}-",
-                      program.with_suffix(".ezpkg").read_text())
+        self.assertIn(f"{DISTRIBUTION}=={VERSION}",
+                      self.approvals_of(program) or {})
 
         # An ordinary run keeps to the pin, which this `ezpkg` meets.
         again: subprocess.CompletedProcess[str] = self.run_program(
@@ -4989,8 +5034,8 @@ class InstallTest(unittest.TestCase):
         done: subprocess.CompletedProcess[str] = self.run_as_developer(
             program, HOME=str(home))
         self.assertEqual(done.returncode, 0, done.stderr[-400:])
-        self.assertNotIn(f"{DISTRIBUTION}-",
-                         program.with_suffix(".ezpkg").read_text())
+        self.assertNotIn(f"{DISTRIBUTION}=={VERSION}",
+                         self.approvals_of(program) or {})
         built: subprocess.CompletedProcess[str] = self.release_as_developer(
             program, "zipapp", HOME=str(home))
         self.assertEqual(built.returncode, 0, built.stderr[-400:])
@@ -5066,7 +5111,7 @@ class InstallTest(unittest.TestCase):
             program, "zipapp", HOME=str(home))
         self.assertEqual(built.returncode, 0, built.stderr[-400:])
         archive: Path = self.built
-        self.assertEqual(built.stdout.strip(), f"ezpkg: wrote {archive}")
+        self.assertEqual(built.stdout.strip(), f"Wrote {archive}")
         with zipfile.ZipFile(archive) as opened:
             self.assertFalse([name for name in opened.namelist()
                               if name.startswith(MODULE)])
@@ -5128,11 +5173,10 @@ class InstallTest(unittest.TestCase):
         pure: str = "hooked-1.0-py3-none-any.whl"
         native: str = "fast-1.0-cp312-cp312-linux_x86_64.whl"
         cases: list[tuple[list[str], dict[str, str], bool, str]] = [
-            ([native], {native: "0" * 64}, False, "compiled"),
+            ([native], {"fast==1.0": "0" * 16}, False, "compiled"),
             ([pure], {}, False, "no approvals"),
-            ([pure], {"other-1.0-py3-none-any.whl": "0" * 64}, False,
-             "not approved"),
-            ([pure], {pure: "0" * 64}, True, ".pth file"),
+            ([pure], {"other==1.0": "0" * 16}, False, "not approved"),
+            ([pure], {"hooked==1.0": "0" * 16}, True, ".pth file"),
         ]
         wheels: list[str]
         approved: dict[str, str]
@@ -5187,7 +5231,7 @@ class InstallTest(unittest.TestCase):
         script: Path = self.built
         lock: Path = self.built.with_name(self.built.name + ".lock")
         self.assertEqual(built.stdout.splitlines(),
-                         [f"ezpkg: wrote {path}"
+                         [f"Wrote {path}"
                           for path in (script, lock)])
         self.assertFalse(self.built.with_name(
             f"pylock.{self.built.stem}.toml").exists())
@@ -5540,8 +5584,8 @@ class InstallTest(unittest.TestCase):
     def test_a_release_happens_once_per_value(self) -> None:
         """A new `release` value releases, once, and the program stops.
 
-        `ranges = true` gives bare entries ranges; the approvals record
-        `# Released:`; the next run with the same value just runs
+        `ranges = true` gives bare entries ranges; Part 1 records
+        `released`; the next run with the same value just runs
         (`T.abfd`).
         """
         # Released: ranged, recorded, not run.
@@ -5556,8 +5600,11 @@ class InstallTest(unittest.TestCase):
                       "run this time.", done.stderr)
         self.assertEqual(self.declared_now(program),
                          ["widget>=1.2.3,<2", "sprocket>=1"])
-        self.assertIn("\n# Released: 1.0.0\n",
-                      program.with_suffix(".ezpkg").read_text())
+        metadata: dict[str, Any] | None = ezpkg.script_metadata(
+            program.read_text())
+        assert metadata is not None
+        self.assertEqual(metadata["tool"]["ezpkg"]["released"], "1.0.0")
+        self.assertFalse(program.with_suffix(".ezpkg").exists())
 
         # Same value: an ordinary run.
         done = self.run_program(program)
@@ -5605,6 +5652,28 @@ class InstallTest(unittest.TestCase):
                          "prog.py.toml line 3: unknown setting `relase` "
                          "(did you mean `release`?)")
 
+    def test_a_failed_addition_is_tried_again(self) -> None:
+        """A fetch that fails while adding an entry is retried next run.
+
+        Nothing is recorded as settled, so a developer who was offline
+        just runs the program again (Wayne, S3.3a).
+        """
+        # No index: the guess cannot be proved, and nothing changes.
+        program: Path = self.synced_program(
+            "offline", '["widget"]', "import sprocket")
+        done: subprocess.CompletedProcess[str] = self.run_program(
+            program, PIP_INDEX_URL="http://127.0.0.1:1/")
+        self.assertIn('"sprocket" could not be fetched',
+                      " ".join(done.stderr.split()))
+        self.assertNotIn("ezpkg: prog.py", done.stderr)
+        self.assertEqual(self.declared_now(program), ["widget"])
+
+        # The index back: added.
+        done = self.run_program(program)
+        self.assertEqual(done.returncode, 0, done.stderr[-400:])
+        self.assertEqual(self.declared_now(program),
+                         ["widget", "sprocket>=2.0.0,<3"])
+
     def test_a_removed_import_removes_its_entry(self) -> None:
         """An entry whose import has gone goes too.
 
@@ -5635,27 +5704,27 @@ class InstallTest(unittest.TestCase):
     def test_an_entry_added_by_hand_is_marked(self) -> None:
         """An entry no import ever explained is kept, and marked.
 
-        A comment starting `# Needed` keeps it for good, in the
-        developer's own words if they reword it (`T.abfd`).
+        Any comment on an entry keeps it for good, so the developer can
+        reword the mark in their own words (`T.abfd`, S3.4).
         """
         # Never imported: marked, not removed.
         program: Path = self.synced_program(
             "kept", '["widget", "sprocket"]', "")
         done: subprocess.CompletedProcess[str] = self.run_program(program)
         self.assertEqual((done.returncode, done.stderr), (0, ""))
-        self.assertIn('#   "sprocket",  # Needed, but not imported\n',
-                      program.read_text())
+        self.assertIn('#   "sprocket",  # not imported: say why it is '
+                      'needed\n', program.read_text())
         self.assertEqual(self.declared_now(program), ["widget", "sprocket"])
 
         # Reworded, and still kept, through other changes too.
         program.write_text(program.read_text().replace(
-            "# Needed, but not imported", "# Needed by the build").replace(
+            "# not imported: say why it is needed", "# for the build").replace(
             "import widget\n", "import widget\nimport needy\n"))
         done = self.run_program(program)
         self.assertEqual((done.returncode, done.stderr), (0, ""))
         self.assertEqual(self.declared_now(program),
                          ["widget", "sprocket", "needy>=1.0.0,<2"])
-        self.assertIn('#   "sprocket",  # Needed by the build\n',
+        self.assertIn('#   "sprocket",  # for the build\n',
                       program.read_text())
 
     def test_dependencies_follow_the_order_of_the_imports(self) -> None:
@@ -5673,10 +5742,10 @@ class InstallTest(unittest.TestCase):
         program: Path = self.synced_program(
             "optional", '["widget", "sprocket"]',
             "try:\n    import sprocket\nexcept ImportError:\n    pass")
-        before: str = program.read_text()
         done: subprocess.CompletedProcess[str] = self.run_program(program)
         self.assertEqual((done.returncode, done.stderr), (0, ""))
-        self.assertEqual(program.read_text(), before)
+        self.assertEqual(self.declared_now(program), ["widget", "sprocket"])
+        self.assertNotIn("not imported", program.read_text())
 
     def test_a_string_import_counts_as_an_import(self) -> None:
         """`importlib.import_module("sprocket")` explains its entry."""
@@ -5684,30 +5753,63 @@ class InstallTest(unittest.TestCase):
         program: Path = self.synced_program(
             "string", '["widget", "sprocket"]',
             'import importlib\nimportlib.import_module("sprocket")')
-        before: str = program.read_text()
         done: subprocess.CompletedProcess[str] = self.run_program(program)
         self.assertEqual((done.returncode, done.stderr), (0, ""))
-        self.assertEqual(program.read_text(), before)
+        self.assertEqual(self.declared_now(program), ["widget", "sprocket"])
+        self.assertNotIn("not imported", program.read_text())
 
     def test_report_prints_a_line_per_change(self) -> None:
-        """`report = true` names each change made to `dependencies`."""
+        """`verbosity = "medium"` names each change to `dependencies`."""
         # Two additions, a misspelt one, and a mark.
         program: Path = self.synced_program(
             "reported", '["widget", "sprocket"]',
             "import needy\nimport bogus_package",
-            settings="report = true\n")
+            settings='verbosity = "medium"\n')
         done: subprocess.CompletedProcess[str] = self.run_program(program)
         flat: str = " ".join(done.stderr.split())
         self.assertIn('no package "bogus_package" is currently available',
                       flat)
-        self.assertRegex(flat, r'ezpkg: added "needy>=1\.0\.0,<2" to '
+        self.assertRegex(flat, r'Added "needy>=1\.0\.0,<2" to '
                          r"`prog\.py`'s `dependencies` \(line \d+\)\.")
-        self.assertRegex(flat, r'ezpkg: marked "sprocket" in `prog\.py`\'s '
-                         r"`dependencies` \(line \d+\) `# Needed, but not "
-                         r"imported`\.")
+        self.assertRegex(flat, r'Marked "sprocket" in `prog\.py`\'s '
+                         r"`dependencies` \(line \d+\) `# not imported: say "
+                         r"why it is needed`\.")
+        self.assertNotIn("ezpkg: ", done.stderr)
         self.assertIn("No module named 'bogus_package'", done.stderr)
         self.assertEqual(self.declared_now(program),
                          ["widget", "sprocket", "needy>=1.0.0,<2"])
+
+    def test_verbosity_none_says_nothing_extra(self) -> None:
+        """`verbosity = "none"`: a misspelt import gets only Python's error."""
+        # No line of `ezpkg`'s, only the traceback.
+        program: Path = self.synced_program(
+            "silenced", '["widget"]', "import bogus_package",
+            settings='verbosity = "none"\n')
+        done: subprocess.CompletedProcess[str] = self.run_program(program)
+        self.assertNotEqual(done.returncode, 0)
+        self.assertNotIn("needs a package", done.stderr)
+        self.assertTrue(done.stderr.startswith("Traceback"), done.stderr)
+        self.assertIn("No module named 'bogus_package'", done.stderr)
+
+    def test_verbosity_high_says_what_was_decided(self) -> None:
+        """`verbosity = "high"` names the lock, the date and the fetch."""
+        # An addition, so something is fetched and recorded.
+        program: Path = self.synced_program(
+            "chatty", '["widget"]', "import sprocket",
+            settings='verbosity = "high"\n')
+        done: subprocess.CompletedProcess[str] = self.run_program(program)
+        self.assertEqual(done.returncode, 0, done.stderr[-400:])
+        self.assertRegex(done.stderr, r"ezpkg: lock: (\d+ pin\(s\)|none)")
+        self.assertIn("ezpkg: date: ", done.stderr)
+        self.assertIn("ezpkg: fetching ", done.stderr)
+        self.assertIn("ezpkg: approvals written into Part 1", done.stderr)
+        self.assertRegex(done.stderr, r'Added "sprocket>=2\.0\.0,<3"')
+        self.assertIn("The following", done.stderr)
+
+        # Nothing to do: the remembered request is said.
+        done = self.run_program(program)
+        self.assertIn("ezpkg: request remembered, nothing fetched",
+                      done.stderr)
 
     def test_a_name_the_index_lacks_is_not_added(self) -> None:
         """A misspelt import is named in one line, then Python's error.
@@ -5721,7 +5823,7 @@ class InstallTest(unittest.TestCase):
         before: str = program.read_text()
         done: subprocess.CompletedProcess[str] = self.run_program(program)
         flat: str = " ".join(done.stderr.split())
-        self.assertIn("prog.py:15: `import bogus_package` needs a package, "
+        self.assertIn("prog.py:20: `import bogus_package` needs a package, "
                       'but no package "bogus_package" is currently '
                       "available. Please check the spelling", flat)
         self.assertIn("No module named 'bogus_package'", flat)
@@ -5740,7 +5842,7 @@ class InstallTest(unittest.TestCase):
         before: str = program.read_text()
         done: subprocess.CompletedProcess[str] = self.run_program(program)
         flat: str = " ".join(done.stderr.split())
-        self.assertIn("prog.py:15: `import decoy` needs a package, but the "
+        self.assertIn("prog.py:20: `import decoy` needs a package, but the "
                       "index's "
                       '"decoy" does not provide `decoy`. Please check the '
                       "spelling",
@@ -5760,7 +5862,7 @@ class InstallTest(unittest.TestCase):
             "sourced", '["widget"]', "import sourceonly")
         done: subprocess.CompletedProcess[str] = self.run_program(program)
         flat: str = " ".join(done.stderr.split())
-        self.assertIn("prog.py:15: `import sourceonly` needs a package, but "
+        self.assertIn("prog.py:20: `import sourceonly` needs a package, but "
                       "the index's "
                       '"sourceonly" has no wheel, only source code, so it '
                       "cannot be installed. Please check the spelling",
@@ -5888,8 +5990,8 @@ class InstallTest(unittest.TestCase):
         # Approvals as a hand-edited file might have them.
         venv: ezpkg.EZPkg = ezpkg.EZPkg(self.root / "two")
         approved: dict[str, str] = {
-            "sprocket-1.0.0-py3-none-any.whl": "0" * 64,
-            "sprocket-2.0.0-py3-none-any.whl": "1" * 64}
+            "sprocket==1.0.0": "0" * 16,
+            "sprocket==2.0.0": "1" * 16}
         with (unittest.mock.patch.object(venv, "approved",
                                          return_value=approved),
               self.assertRaises(RuntimeError) as caught):
@@ -5905,7 +6007,7 @@ class InstallTest(unittest.TestCase):
               self.assertRaises(RuntimeError) as caught):
             venv.pins()
         self.assertIn("other.whl", str(caught.exception))
-        self.assertIn("is not a wheel name", str(caught.exception))
+        self.assertIn("is not `name==version`", str(caught.exception))
 
     def test_a_declaration_needs_no_import_name(self) -> None:
         """A distribution named apart from its module just works.
@@ -6326,7 +6428,7 @@ class BootstrapCheckTest(unittest.TestCase):
                   unittest.mock.patch.object(ezpkg, "BOOTSTRAPS", table)):
                 self.assertEqual(venv.bootstrap_status(), wanted)
                 if wanted[0] == "stale":
-                    self.assertIn("carries the bootstrap `nopip5`, but",
+                    self.assertIn("carries the bootstrap `nopip5` (lines",
                                   venv.stale_bootstrap())
                 else:
                     self.assertEqual(venv.stale_bootstrap(), "")
@@ -6339,12 +6441,14 @@ class BootstrapCheckTest(unittest.TestCase):
                                         return_value=None):
             self.assertEqual(venv.bootstrap_status(), ("absent", ""))
 
-    def test_a_newer_bootstrap_is_told_once_and_refused_at_release(
+    def test_a_newer_bootstrap_is_told_once_and_replaced_at_release(
             self) -> None:
-        """A developer hears of a newer bootstrap once; a release refuses.
+        """A developer hears of a newer bootstrap once; a release replaces it.
 
-        A program left with the old one goes on working, but a release
-        must carry the current one (`T.abfd`).
+        With `bootstrap = "update"`, the default, the release puts in the
+        current one and gives the `ezpkg` entry this `ezpkg`'s range; a
+        named bootstrap is kept, and any other stops the run (Wayne,
+        S5.1).
         """
         # A real program carrying `nopip6`, which must not run it.  Its
         # `ezpkg` entry is the one the paste implies (`T.eui`).
@@ -6376,20 +6480,45 @@ class BootstrapCheckTest(unittest.TestCase):
         first: subprocess.CompletedProcess[str] = run()
         self.assertEqual((first.returncode, first.stdout), (0, "ran\n"),
                          first.stderr)
-        self.assertIn("`prog.py` carries the bootstrap `nopip6`, but "
-                      "`ezpkg` now has `nopip7`. To move to it, replace "
-                      "lines 6-", " ".join(first.stderr.split()))
+        self.assertRegex(" ".join(first.stderr.split()),
+                         r"`prog\.py` carries the bootstrap `nopip6` \(lines "
+                         r"6-\d+\), but `ezpkg` now has `nopip7`\. The next "
+                         r"release replaces it\.")
         second: subprocess.CompletedProcess[str] = run()
         self.assertEqual((second.returncode, second.stderr), (0, ""))
 
-        # A release refuses, and the program does not run.
+        # Named: kept, and nothing said; another name stops the run.
+        settings.write_text('auto-dependencies = false\nbootstrap = "nopip6"\n')
+        named: subprocess.CompletedProcess[str] = run()
+        self.assertEqual((named.returncode, named.stdout), (0, "ran\n"),
+                         named.stderr)
+        settings.write_text('auto-dependencies = false\nbootstrap = "nopip5"\n')
+        wrong: subprocess.CompletedProcess[str] = run()
+        self.assertNotEqual(wrong.returncode, 0)
+        self.assertEqual(wrong.stdout, "")
+        self.assertIn("`prog.py.toml` asks for the bootstrap `nopip5`, but "
+                      "`prog.py` carries `nopip6`.",
+                      " ".join(wrong.stderr.split()))
+
+        # A release replaces it, indented as it was, and stops.
         settings.write_text('auto-dependencies = false\nrelease = "1.0.0"\n')
         released: subprocess.CompletedProcess[str] = run()
-        self.assertNotEqual(released.returncode, 0)
-        self.assertEqual(released.stdout, "")
-        self.assertIn("`prog.py` 1.0.0 was not released. `prog.py` carries "
-                      "the bootstrap `nopip6`",
-                      " ".join(released.stderr.split()))
+        self.assertEqual((released.returncode, released.stdout), (0, ""),
+                         released.stderr)
+        flat: str = " ".join(released.stderr.split())
+        self.assertRegex(flat, r"Replaced the bootstrap `nopip6` \(lines "
+                         r"6-\d+ of `prog\.py`\) with `nopip7`\.")
+        self.assertIn("Released `prog.py` 1.0.0.", flat)
+        text: str = program.read_text()
+        self.assertIn("if False:\n    try:", text)
+        self.assertEqual(ezpkg.bootstrap_name(
+            ezpkg.find_bootstrap(text) or ""),
+            list(ezpkg.BOOTSTRAPS.values())[-1])
+        metadata: dict[str, Any] | None = ezpkg.script_metadata(text)
+        assert metadata is not None
+        self.assertEqual(metadata["dependencies"],
+                         [ezpkg.version_range("ezpkg", ezpkg.__version__)])
+        self.assertEqual(metadata["tool"]["ezpkg"]["released"], "1.0.0")
 
     def test_an_edit_is_refused_where_it_is(self) -> None:
         """An edited bootstrap is refused, naming the line, indented or not.
@@ -7554,9 +7683,11 @@ class MetadataTest(unittest.TestCase):
             try:
                 venv: ezpkg.EZPkg = ezpkg.EZPkg(Path(scratch) / "cache")
                 self.assertEqual(venv.needed_by("guest", ["host", "guest"]),
-                                 "# Needed by host (fancy)")
+                                 "# host needs this for fancy")
                 self.assertEqual(venv.needed_by("other", ["host", "other"]),
-                                 "# Needed, but not imported")
+                                 "# host needs this")
+                self.assertEqual(venv.needed_by("loner", ["host", "loner"]),
+                                 "# not imported: say why it is needed")
             finally:
                 sys.path.remove(scratch)
 
@@ -7581,18 +7712,27 @@ class MetadataTest(unittest.TestCase):
             path: Path = Path(scratch) / "prog.py.toml"
             cases: list[tuple[str, str | ezpkg.Settings]] = [
                 ("", ezpkg.Settings()),
-                (('report = true\nrelease = "1.2.0"\nexports = ["uv"]\n'
-                 "ranges = true\nauto-dependencies = false\n"),
-                 ezpkg.Settings(False, True, "1.2.0", ("uv",), True)),
+                (('verbosity = "high"\nrelease = "1.2.0"\nexports = ["uv"]\n'
+                 'ranges = true\nauto-dependencies = false\n'
+                 'bootstrap = "nopip6"\n'),
+                 ezpkg.Settings(False, "high", "1.2.0", ("uv",), True,
+                                "nopip6")),
+                ('bootstrap = "nopip9"\n',
+                 ('prog.py.toml line 1: `bootstrap` must be "update" or a '
+                  'published bootstrap, "nopip3", "nopip4", "nopip5", '
+                  '"nopip6" or "nopip7"')),
                 ("\nauto_dependencies = true\n",
                  ("prog.py.toml line 2: unknown setting `auto_dependencies` "
                  "(did you mean `auto-dependencies`?)")),
                 ("\n\n[colour]\nx = 1\n",
                  ("prog.py.toml line 3: unknown setting `colour` (the "
-                 "settings are `auto-dependencies`, `report`, `release`, "
-                 "`exports` and `ranges`)")),
-                ('report = "yes"\n',
-                 "prog.py.toml line 1: `report` must be `true` or `false`"),
+                 "settings are `auto-dependencies`, `verbosity`, `release`, "
+                 "`exports`, `ranges` and `bootstrap`)")),
+                ('ranges = "yes"\n',
+                 "prog.py.toml line 1: `ranges` must be `true` or `false`"),
+                ('verbosity = "loud"\n',
+                 ('prog.py.toml line 1: `verbosity` must be one of "none", '
+                 '"low", "medium" or "high"')),
                 ("release = 1.0\n",
                  ('prog.py.toml line 1: `release` must be a version in '
                  'quotes, such as "1.0.0"')),
@@ -7602,7 +7742,7 @@ class MetadataTest(unittest.TestCase):
                 ('exports = ["uv", "uv"]\n',
                  ('prog.py.toml line 1: `exports` must be a list of '
                  '"zipapp" or "uv", each at most once')),
-                ("report = \n", ("prog.py.toml: Invalid value (at line 1, "
+                ("ranges = \n", ("prog.py.toml: Invalid value (at line 1, "
                  "column 10)")),
             ]
             text: str
@@ -7819,11 +7959,17 @@ class MetadataTest(unittest.TestCase):
             "uv": {"x": 1, "exclude-newer": "new"},
             "other": {"exclude-newer": 1}})
 
-        # Dotted keys, or a value over several lines, are not guessed at.
+        # Dotted keys are not guessed at; an array over several lines
+        # is replaced whole, by one of any length (S2.4).
         self.assertIsNone(ezpkg.uv_setting(
             "tool.uv.x = 1\n", "no-build", "true"))
-        self.assertIsNone(ezpkg.uv_setting(
-            "[tool.uv]\nexclude-newer = [\n 1,\n]\n", "exclude-newer", '"x"'))
+        self.assertEqual(ezpkg.uv_setting(
+            "[tool.uv]\nexclude-newer = [\n 1,\n]\n", "exclude-newer", '"x"'),
+            '[tool.uv]\nexclude-newer = "x"\n')
+        self.assertEqual(ezpkg.uv_setting(
+            '[tool.ezpkg]\napproved = [\n "a",\n]\nx = 1\n', "approved",
+            '[\n  "b",\n  "c",\n]', "ezpkg"),
+            '[tool.ezpkg]\napproved = [\n  "b",\n  "c",\n]\nx = 1\n')
 
     def test_stamp_keeps_encoding_and_line_endings(self) -> None:
         """A latin-1 program with CRLF lines is dated and otherwise kept."""
@@ -7861,19 +8007,19 @@ class MetadataTest(unittest.TestCase):
              "hash": "sha256:" + "a" * 64},
             {"url": "https://x/b/widget-1.0-cp312-win_amd64.whl",
              "hash": "sha256:" + "b" * 64}]}]}
-        pure: str = "widget-1.0-py3-none-any.whl"
-        self.assertEqual(ezpkg.lock_mismatches(lock, {pure: "a" * 64}),
-                         [])
+        pin: str = "widget==1.0"
+        self.assertEqual(ezpkg.lock_mismatches(lock, {pin: "a" * 16}), [])
         self.assertEqual(
-            ezpkg.lock_mismatches(lock, {pure: "c" * 64}),
-            [f"{pure}: lock has sha256:{'a' * 64}"])
+            ezpkg.lock_mismatches(lock, {pin: "c" * 16}),
+            [(f"{pin}: lock has another file (sha256:{'a' * 64}, "
+              f"sha256:{'b' * 64})")])
         self.assertEqual(
-            ezpkg.lock_mismatches(lock, {"needy-2.0-py3-none-any.whl":
-                                            "a" * 64}),
-            ["needy-2.0-py3-none-any.whl: not in the lock"])
-        del lock["package"][0]["wheels"][0]["hash"]
-        self.assertEqual(ezpkg.lock_mismatches(lock, {pure: "a" * 64}),
-                         [f"{pure}: lock has no hash"])
+            ezpkg.lock_mismatches(lock, {"needy==2.0": "a" * 16}),
+            ["needy==2.0: not in the lock"])
+        for wheel in lock["package"][0]["wheels"]:
+            del wheel["hash"]
+        self.assertEqual(ezpkg.lock_mismatches(lock, {pin: "a" * 16}),
+                         [f"{pin}: lock has no hash"])
 
     def test_our_own_block_reads_back(self) -> None:
         """`ezpkg.py`'s own block parses, and declares nothing.
@@ -8094,28 +8240,32 @@ class LocatorTest(unittest.TestCase):
         self.assertIn(f"path= {program}", output)
         self.assertIn("text= False", output)
 
-    def test_approvals_sit_beside_the_program(self) -> None:
-        """`approvals` names `prog.ezpkg` beside `prog.py`."""
-        # The one caller that wants the path and not the text.
+    def test_approvals_live_in_part1(self) -> None:
+        """`approved` reads `[tool.ezpkg] approved` in the program's Part 1."""
+        # One package, as a developer's run writes it.
         program: Path = self.program(
-            "beside",
+            "inside",
             "import pathlib\n"
             "venv = ezpkg.EZPkg(pathlib.Path('cache'))\n"
-            "print('approvals=', venv.approvals())\n")
+            "print('approvals=', venv.approved())\n")
+        program.write_text(
+            "# /// script\n# dependencies = []\n# [tool.ezpkg]\n"
+            '# approved = [\n#   "widget==1.2.3  id:0123456789abcdef",\n'
+            "# ]\n# ///\n" + program.read_text())
         output: str = self.run_program(str(program))
-        self.assertIn(f"approvals= {program.with_suffix('.ezpkg')}",
+        self.assertIn("approvals= {'widget==1.2.3': '0123456789abcdef'}",
                       output)
 
     def test_approvals_need_a_program(self) -> None:
-        """`python3 -c` gets no approvals file, and so no verification."""
-        # Nowhere to put one means the gate cannot check anything.
+        """`python3 -c` gets no approvals, and so no verification."""
+        # Nowhere to put them means the gate cannot check anything.
         here: str = str(Path(__file__).resolve().parent)
         output: str = self.run_program(
             "-c", f"import sys; sys.path.insert(0, {here!r}); "
             "import ezpkg; "
             "import pathlib; "
             "venv = ezpkg.EZPkg(pathlib.Path('cache')); "
-            "print('approvals=', venv.approvals())")
+            "print('approvals=', venv.approved())")
         self.assertIn("approvals= None", output)
 
 

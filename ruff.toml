@@ -13,6 +13,11 @@
 # `test_the_linters_agree_with_the_block` is what stops them drifting.
 target-version = "py311"
 
+# The programs `ux/drive.py` leaves behind (`uxNN_prog.py` and
+# `uxNN_prog_after.py`) are snapshots of what `ezpkg` made, unused
+# imports and all, so they are not linted for now (Wayne, 2026-10-19).
+extend-exclude = ["ux/ux*_prog*.py"]
+
 [lint.per-file-ignores]
 # Every case in `bootstrap.py` is text that a person pastes into their
 # own program, so it carries its own `try`, and that `try` catches
