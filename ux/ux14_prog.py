@@ -3,6 +3,15 @@
 # /// script
 # requires-python = ">=3.11"
 # dependencies = ["ezpkg>=0.0.1.dev0,<0.1", "cowsay"]
+#
+# [tool.ezpkg]
+# approved = [
+#   "cowsay==6.1  id:274b1e6fc1b966d5",
+#   "ezpkg==0.0.1  id:481ad6d4bb9df1c4",
+# ]
+#
+# [tool.uv]
+# exclude-newer = "2026-10-19T23:19:49Z"
 # ///
 """Try `EZPkg`: fetch the `cowsay` package on first use, then run."""
 
@@ -55,6 +64,7 @@ except Exception as x:
 
 # Part 4: Your imports, all after the bootstrap.
 import cowsay  # type: ignore[import-not-found]  # For mypy.
+import tabulate
 
 # Part 5: The program itself.
 cowsay.cow("EZPkg works!")

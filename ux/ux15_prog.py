@@ -2,7 +2,17 @@
 # Part 1: The packages this program needs.
 # /// script
 # requires-python = ">=3.11"
-# dependencies = ["ezpkg>=0.0.1.dev0,<0.1", "cowsay"]
+# dependencies = ["ezpkg>=0.0.1.dev0,<0.1", "cowsay", "tabulate>=0.10.0,<0.11"]
+#
+# [tool.ezpkg]
+# approved = [
+#   "cowsay==6.1  id:274b1e6fc1b966d5",
+#   "ezpkg==0.0.1  id:481ad6d4bb9df1c4",
+#   "tabulate==0.10.0  id:f0b0622e567335c8",
+# ]
+#
+# [tool.uv]
+# exclude-newer = "2026-10-19T23:19:49Z"
 # ///
 """Try `EZPkg`: fetch the `cowsay` package on first use, then run."""
 

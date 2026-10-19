@@ -44,32 +44,68 @@ Earlier entries (the `ux01`-`ux27` review and the designs the
   `release_as_developer`; quick suite needs a scratch `HOME` with a
   current `pip.whl` (305 OK, 17 skipped at last count).
 
-## Agreed, NOT built (next batch)
+## 2026-10-19: Batch built (Wayne: "let's build it")
 
-* S2.4d: platform tag beside `id:`; check the checksum only for a
-  wheel of that platform.
-* S5.1b: drop `ranges`; a release in `update` mode gives bare entries
-  ranges; an author locks an entry by writing a range or `==`.
-* S1.5f: a developer's failed first download: one line with `pip`'s
-  `ERROR:` reason at `low`/`medium`, full output at `high`.
-* S1.5e/S1.5h: the template explains itself, so a developer never
-  needs README to start (draft in chat: auto-dependencies, verbosity,
-  release, exports, bootstrap, how to upgrade).
-* S3.1e: remove a mark once an import explains the entry, only if it
-  is exactly one `ezpkg` writes.
-* S2.4e: `quick_start.py` ships without approvals.
+* S5.1b: `ranges` setting gone; every release gives bare entries
+  ranges (`give_ranges`).  `bootstrap` governs only the bootstrap; the
+  `ezpkg` entry is ranged at every release (S1.5h, my proposal, not
+  objected to).
+* S5.1c (Wayne: reasonable): `range_ezpkg` leaves the entry alone
+  unless `from_wheel()`.
+* S1.5f: a developer's failed fetch is `` `prog.py` did not run: ERROR:
+  ... `` plus a hint; all of `pip`'s output at `high`
+  (`install_declared`).  End users unchanged (`I.ffspo`).
+* S1.5h: `SETTINGS_TEMPLATE` explains itself (what the file means,
+  each setting, how to upgrade).  Wayne has not read it yet.
+* S3.1e: `MARK` matches exactly `needed_by`'s marks;
+  `Discrepancy.unmark`; reconcile says "Unmarked ..." at `medium`.
+* S2.4d: `wheel_tag`, `approval_fields`, `approval_tags`; compiled
+  wheels get `  tag:<py-abi-plat>` after `id:`; `verify` checks the id
+  only for a wheel of that tag (version still pinned).
+* S2.4e: already so; guarded by a test.
+* Quick suite: 311 run, 1 failure fixed afterwards (the newer-bootstrap
+  test now runs a wheel-like copy of `ezpkg`), 17 skipped.
+
+## Wayne's answers, 2026-10-19
+
+* S2.2a: settle the wording in `ux/` (the first-run question when
+  every package is already cached).
+* S1.4a: the end user's steps come first in `ux/`.
+* Later the same day: the paragraph says "they are retained in"
+  (Wayne's edit).  A bare Enter asks again silently, uncounted (Wayne).
+  `EZPKG_ANSWER_SECONDS` shortens the 5-minute wait, for tests and
+  `ux/drive.py` only.  Version 2 of `prog.py` (a `ux` step) needs
+  `tabulate` and its cow says so.
+* `ux/drive.py` rewritten: end-user steps 1.1-1.12 (first run, later
+  runs, a second program, version 2, `remove.py`, `?`, Enter, typo,
+  `n`, Control-C, Control-D, no answer).  Old `ux/ux*` files removed
+  from the working tree (they are in git).  Developer steps next.
+* PowerShell `~` (researched 2026-10-19, for the `remove.py` line):
+  Windows PowerShell 5.1 is the inbox shell on Windows 10 and 11 (24H2,
+  25H2) and passes `~` to a program such as `py` literally.  PowerShell
+  7 (separate install) expands an unquoted `~` for native programs on
+  Windows only from 7.6 (GA 2026-03-18, `PSNativeWindowsTildeExpansion`
+  mainstream; experimental in 7.5).  `$HOME\.ezpkg\remove.py` works in
+  every PowerShell (PowerShell expands `$HOME` itself) but not in
+  `cmd.exe`, which needs `%USERPROFILE%`.  Wayne chose: the docs give
+  both (`$HOME` for PowerShell, `%USERPROFILE%` for `cmd.exe`); `ezpkg`
+  never prints the line, so nothing detects the shell.  README still
+  shows the old design and waits for the README pass.
+* The list after a yes says "retained", as the question does (Wayne).
+* A no on a later program keeps the cache (Wayne agreed to Claude's
+  argument: other programs' agreements live there): `newly_filled`;
+  the paragraph then says "answer `n` and `second.py` will not run."
+* `ux/drive.py` 2.1-2.3 found a double edit (a developer's new import
+  edited `prog.py` twice, "changed again after starting it again"):
+  `fetching` now asks what `providing` asks, keeping the `ezpkg` pin.
+* `I.ffspo` built (see its `Context.md`); Wayne sees the wording next.
+* Unread by Wayne, batched for later: `ux/ux01`-`ux15` (all pass).
 
 ## Open (given to Wayne, not answered)
 
-1. S5.1c: a release from a dev or source `ezpkg` would range the
-   Quick Start's entry `ezpkg>=0.0.1,<0.1`, shutting out `.devN`
-   rehearsals; proposed: leave the entry alone then.
-2. S1.5h: the template draft; `bootstrap` governing only the bootstrap.
-3. S2.2a: wording when nothing new was downloaded.
-4. S1.4a: new `ux/drive.py` steps (end user 1.1-1.6, developer
-   2.1-2.9, `remove.py` 3.1).
-5. Next batch order.
-6. `I.ffspo`: the end user's five failure cases, one plain line each.
+1. S1.4a: the end-user step list (given in chat), then developer
+   steps; rewrite `ux/drive.py`.
+2. `I.ffspo`: the end user's five failure cases, one plain line each.
 
 Lower: S2.2b, S2.4g, S2.4h, S3.3c, S3.3d, S5.1d (see `History.md`'s
 batch entry).  README (H.1) waits for the UX work.  Issue numbering:

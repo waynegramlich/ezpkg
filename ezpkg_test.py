@@ -3375,7 +3375,7 @@ class InstallTest(unittest.TestCase):
         self.assertEqual(done.returncode, 0, done.stderr[-300:])
         self.assertEqual(done.stdout.strip(), "1.2.3")
         self.assertTrue(" ".join(done.stderr.split()).startswith(
-            f"The following 1 package(s) are now installed in "
+            f"The following 1 package(s) are now retained in "
             f"`{program.parent / 'cache'}`: 1. widget 1.2.3"), done.stderr)
         self.assertIsNone(self.approvals_of(program))
 
@@ -3782,13 +3782,13 @@ class InstallTest(unittest.TestCase):
         seen: str = self.answer_on_a_terminal(program, b"Y\n")
         self.assertEqual(seen.count(PROMPT), 1, seen)
         self.assertNotIn("Please answer", seen)
-        self.assertIn("now installed", seen)
+        self.assertIn("now retained", seen)
         cache: Path = program.parent / "cache"
         shutil.rmtree(cache / "versions")
         shutil.rmtree(cache / "requests")
         seen = self.answer_on_a_terminal(program, b"")
         self.assertNotIn(PROMPT, seen)
-        self.assertNotIn("now installed", seen)
+        self.assertNotIn("now retained", seen)
         self.assertIn("1.2.3", seen)
 
         # Long idle and swept: still never asked again (Wayne, S2.1),
@@ -3865,23 +3865,17 @@ class InstallTest(unittest.TestCase):
     def test_an_empty_answer_asks_again(self) -> None:
         """A bare newline is no answer at all, so there is no default.
 
-        A distracted Enter neither installs nor declines; it is a typo
-        like any other, and enough of them in a row decline, as
-        `ATTEMPTS` typos always have.
+        A distracted Enter neither installs nor declines; the question is
+        just put again, without a word and without counting as a typo
+        (Wayne, 2026-10-19).
         """
-        # Enter, then yes: asked twice, and installed.
+        # More Enters than typos are allowed, then yes: installed.
         program: Path = self.program("asked_enter", "widget")
-        seen: str = self.answer_on_a_terminal(program, b"\ny\n")
-        self.assertEqual(seen.count(PROMPT), 2, seen)
-        self.assertIn("Please answer y, n, or ? for more.", seen)
+        seen: str = self.answer_on_a_terminal(
+            program, b"\n" * (ezpkg.ATTEMPTS + 1) + b"y\n")
+        self.assertEqual(seen.count(PROMPT), ezpkg.ATTEMPTS + 2, seen)
+        self.assertNotIn("Please answer", seen)
         self.assertIn("1.2.3", seen)
-
-        # Enter every time: asked until the patience runs out.
-        program = self.program("asked_enter_only", "widget")
-        seen = self.answer_on_a_terminal(
-            program, b"\n" * ezpkg.ATTEMPTS)
-        self.assertEqual(seen.count(PROMPT), ezpkg.ATTEMPTS, seen)
-        self.assertIn("declined", seen)
 
     def test_an_unrecognised_answer_asks_again(self) -> None:
         """Something that is neither yes nor no is taken for a typo."""
@@ -3967,7 +3961,7 @@ class InstallTest(unittest.TestCase):
             "1. pip 26.2.1 (used by `ezpkg`): The tool.",
             "2. ezpkg 0.0.1: Easy.", "3. cowsay 6.1: Moo."])
         self.assertEqual(venv.listing([wheel], 200), "\n".join([
-            f"The following 3 package(s) are now installed in `{root}`:",
+            f"The following 3 package(s) are now retained in `{root}`:",
             "1. pip 26.2.1 (used by `ezpkg`): The tool.",
             "2. ezpkg 0.0.1: Easy.", "3. cowsay 6.1: Moo.",
             f"`ezpkg` ({ezpkg.HOME_PAGE}) manages `{root}`.", ""]))
@@ -4335,10 +4329,21 @@ class InstallTest(unittest.TestCase):
         spoken: _KeptStringIO = _KeptStringIO()
         with open(reading, encoding="utf-8") as reader:
             self.assertEqual(ezpkg.answer_from(reader, spoken, 0.2), "")
-            self.assertIn("No answer in 0.00333333 minutes, so: no.",
+            self.assertIn("No answer in 0.2 seconds, so: no.",
                           spoken.getvalue())
             os.write(writing, b"y\n")
             self.assertEqual(ezpkg.answer_from(reader, spoken, 5.0), "y\n")
+
+            # Tests and `ux/drive.py` shorten the default wait; a value
+            # that is not a number leaves it alone.
+            with unittest.mock.patch.dict(
+                    os.environ, {"EZPKG_ANSWER_SECONDS": "0.1"}):
+                self.assertEqual(ezpkg.answer_from(reader, spoken), "")
+            self.assertIn("No answer in 0.1 seconds", spoken.getvalue())
+            os.write(writing, b"n\n")
+            with unittest.mock.patch.dict(
+                    os.environ, {"EZPKG_ANSWER_SECONDS": "soon"}):
+                self.assertEqual(ezpkg.answer_from(reader, spoken), "n\n")
         os.close(writing)
 
     def test_verify_without_approvals_checks_nothing(self) -> None:
@@ -5584,7 +5589,7 @@ class InstallTest(unittest.TestCase):
     def test_a_release_happens_once_per_value(self) -> None:
         """A new `release` value releases, once, and the program stops.
 
-        `ranges = true` gives bare entries ranges; Part 1 records
+        Every release gives bare entries ranges (S5.1b); Part 1 records
         `released`; the next run with the same value just runs
         (`T.abfd`).
         """
@@ -5592,7 +5597,7 @@ class InstallTest(unittest.TestCase):
         program: Path = self.declaring_program(
             "released", 'dependencies = ["widget", "sprocket>=1"]',
             "import widget\nimport sprocket\nprint('ran')")
-        self.developer_settings(program, 'release = "1.0.0"\nranges = true\n')
+        self.developer_settings(program, 'release = "1.0.0"\n')
         done: subprocess.CompletedProcess[str] = self.run_program(program)
         self.assertEqual(done.returncode, 0, done.stderr[-400:])
         self.assertEqual(done.stdout, "")
@@ -5610,6 +5615,23 @@ class InstallTest(unittest.TestCase):
         done = self.run_program(program)
         self.assertEqual((done.returncode, done.stdout, done.stderr),
                          (0, "ran\n", ""))
+
+    def test_a_source_ezpkg_leaves_the_ezpkg_entry_alone(self) -> None:
+        """A release from a source `ezpkg` does not range its entry.
+
+        Its version is on no index, so its range would shut out the
+        `.devN` rehearsals the Quick Start's entry admits (S5.1c).
+        """
+        # The suite runs this project's own `ezpkg.py`, from source.
+        program: Path = self.declaring_program(
+            "sourced",
+            'dependencies = ["ezpkg>=0.0.1.dev0,<0.1", "widget"]',
+            "import widget\nprint('ran')")
+        self.developer_settings(program, 'release = "1.0.0"\n')
+        done: subprocess.CompletedProcess[str] = self.run_program(program)
+        self.assertEqual(done.returncode, 0, done.stderr[-400:])
+        self.assertEqual(self.declared_now(program),
+                         ["ezpkg>=0.0.1.dev0,<0.1", "widget>=1.2.3,<2"])
 
     def test_an_empty_settings_file_is_filled(self) -> None:
         """An empty `prog.py.toml` is filled with the template, once.
@@ -5726,6 +5748,51 @@ class InstallTest(unittest.TestCase):
                          ["widget", "sprocket", "needy>=1.0.0,<2"])
         self.assertIn('#   "sprocket",  # for the build\n',
                       program.read_text())
+
+    def test_a_mark_goes_once_an_import_explains_it(self) -> None:
+        """A mark `ezpkg` wrote goes when an import comes to explain it.
+
+        Only a comment that is exactly one of `ezpkg`'s marks; the
+        developer's own words stay (Wayne, S3.1e).
+        """
+        # Marked, then imported: the mark goes, the entry stays.
+        program: Path = self.synced_program(
+            "unmarked", '["widget", "sprocket"]', "")
+        done: subprocess.CompletedProcess[str] = self.run_program(program)
+        self.assertEqual((done.returncode, done.stderr), (0, ""))
+        self.assertIn("# not imported: say why it is needed",
+                      program.read_text())
+        program.write_text(program.read_text().replace(
+            "import widget\n", "import widget\nimport sprocket\n"))
+        done = self.run_program(program)
+        self.assertEqual((done.returncode, done.stderr), (0, ""))
+        self.assertNotIn("# not imported", program.read_text())
+        self.assertEqual(self.declared_now(program), ["widget", "sprocket"])
+
+    def test_a_developers_failed_fetch_is_one_line(self) -> None:
+        """A developer's failed fetch says `pip`'s reason in one line.
+
+        All of `pip`'s output only at `verbosity = "high"` (S1.5f).
+        """
+        # Nothing the index has.
+        program: Path = self.declaring_program(
+            "unfetched", 'dependencies = ["nosuchthing"]', "print('ran')")
+        self.developer_settings(program)
+        done: subprocess.CompletedProcess[str] = self.run_program(program)
+        self.assertNotEqual(done.returncode, 0)
+        self.assertEqual(done.stdout, "")
+        self.assertNotIn("Traceback", done.stderr)
+        self.assertRegex(done.stderr, r"^`prog.py` did not run: ERROR: ")
+        self.assertIn('`verbosity = "high"` shows all', done.stderr)
+        self.assertNotIn("failed: RuntimeError", done.stderr)
+
+        # At `high`, everything.
+        self.developer_settings(program, 'verbosity = "high"\n')
+        done = self.run_program(program)
+        self.assertNotEqual(done.returncode, 0)
+        self.assertIn("ezpkg: could not fetch nosuchthing", done.stderr)
+        self.assertIn("`prog.py` did not run: ERROR: ", done.stderr)
+        self.assertNotIn("shows all", done.stderr)
 
     def test_dependencies_follow_the_order_of_the_imports(self) -> None:
         """Out of order is a discrepancy, and is put in order."""
@@ -6448,11 +6515,20 @@ class BootstrapCheckTest(unittest.TestCase):
         With `bootstrap = "update"`, the default, the release puts in the
         current one and gives the `ezpkg` entry this `ezpkg`'s range; a
         named bootstrap is kept, and any other stops the run (Wayne,
-        S5.1).
+        S5.1).  The `ezpkg` is a copy laid out as a wheel leaves it,
+        since one run from source leaves the entry alone (S5.1c).
         """
         # A real program carrying `nopip6`, which must not run it.  Its
         # `ezpkg` entry is the one the paste implies (`T.eui`).
         older: str = ezpkg.OLD_BOOTSTRAP_TEXTS["nopip6 of 2026-10-16"]
+        installed: Path = self.root / "installed"
+        installed.mkdir()
+        shutil.copy2(Path(ezpkg.__file__), installed / "ezpkg.py")
+        info: Path = installed / f"ezpkg-{ezpkg.__version__}.dist-info"
+        info.mkdir()
+        (info / "METADATA").write_text(
+            f"Metadata-Version: 2.1\nName: ezpkg\n"
+            f"Version: {ezpkg.__version__}\n")
         program: Path = self.root / "prog.py"
         program.write_text(
             "# /// script\n"
@@ -6461,7 +6537,7 @@ class BootstrapCheckTest(unittest.TestCase):
             "import sys\n"
             "if False:\n"
             f"{textwrap.indent(older, '    ')}\n"
-            f"sys.path.insert(0, {str(Path(__file__).resolve().parent)!r})\n"
+            f"sys.path.insert(0, {str(installed)!r})\n"
             "import ezpkg\n"
             "from pathlib import Path\n"
             f"cache = Path({str(self.root / 'cache')!r})\n"
@@ -7713,10 +7789,8 @@ class MetadataTest(unittest.TestCase):
             cases: list[tuple[str, str | ezpkg.Settings]] = [
                 ("", ezpkg.Settings()),
                 (('verbosity = "high"\nrelease = "1.2.0"\nexports = ["uv"]\n'
-                 'ranges = true\nauto-dependencies = false\n'
-                 'bootstrap = "nopip6"\n'),
-                 ezpkg.Settings(False, "high", "1.2.0", ("uv",), True,
-                                "nopip6")),
+                 'auto-dependencies = false\nbootstrap = "nopip6"\n'),
+                 ezpkg.Settings(False, "high", "1.2.0", ("uv",), "nopip6")),
                 ('bootstrap = "nopip9"\n',
                  ('prog.py.toml line 1: `bootstrap` must be "update" or a '
                   'published bootstrap, "nopip3", "nopip4", "nopip5", '
@@ -7727,9 +7801,10 @@ class MetadataTest(unittest.TestCase):
                 ("\n\n[colour]\nx = 1\n",
                  ("prog.py.toml line 3: unknown setting `colour` (the "
                  "settings are `auto-dependencies`, `verbosity`, `release`, "
-                 "`exports`, `ranges` and `bootstrap`)")),
-                ('ranges = "yes"\n',
-                 "prog.py.toml line 1: `ranges` must be `true` or `false`"),
+                 "`exports` and `bootstrap`)")),
+                ('auto-dependencies = "yes"\n',
+                 ("prog.py.toml line 1: `auto-dependencies` must be `true` "
+                  "or `false`")),
                 ('verbosity = "loud"\n',
                  ('prog.py.toml line 1: `verbosity` must be one of "none", '
                  '"low", "medium" or "high"')),
@@ -7742,8 +7817,8 @@ class MetadataTest(unittest.TestCase):
                 ('exports = ["uv", "uv"]\n',
                  ('prog.py.toml line 1: `exports` must be a list of '
                  '"zipapp" or "uv", each at most once')),
-                ("ranges = \n", ("prog.py.toml: Invalid value (at line 1, "
-                 "column 10)")),
+                ("verbosity = \n", ("prog.py.toml: Invalid value (at line 1, "
+                 "column 13)")),
             ]
             text: str
             expected: str | ezpkg.Settings
@@ -7755,6 +7830,99 @@ class MetadataTest(unittest.TestCase):
                 with self.assertRaises(ValueError) as caught:
                     ezpkg.read_settings(path)
                 self.assertEqual(str(caught.exception), expected, text)
+
+    def test_wheel_tags_and_the_approved_array(self) -> None:
+        """Only a compiled wheel records its platform beside its `id:`."""
+        # Pure wheels run anywhere; a build tag is skipped.
+        self.assertEqual(ezpkg.wheel_tag("cowsay-6.1-py3-none-any.whl"), "")
+        self.assertEqual(
+            ezpkg.wheel_tag("numpy-2.1.0-1-cp312-cp312-win_amd64.whl"),
+            "cp312-cp312-win_amd64")
+        array: str = ezpkg.approvals_array(
+            {"numpy==2.1.0": "0123456789abcdef",
+             "cowsay==6.1": "fedcba9876543210"},
+            {"numpy==2.1.0": "cp312-cp312-win_amd64"})
+        self.assertEqual(array, (
+            '[\n  "cowsay==6.1  id:fedcba9876543210",\n'
+            '  "numpy==2.1.0  id:0123456789abcdef  tag:cp312-cp312-win_amd64'
+            '",\n]'))
+
+        # Read back, each part where it belongs.
+        text: str = ("# /// script\n# dependencies = []\n# [tool.ezpkg]\n"
+                     + "".join(f"# approved = {line}\n" if number == 0
+                               else f"# {line}\n" for number, line
+                               in enumerate(array.splitlines()))
+                     + "# ///\n")
+        self.assertEqual(ezpkg.approvals_in(text),
+                         {"numpy==2.1.0": "0123456789abcdef",
+                          "cowsay==6.1": "fedcba9876543210"})
+        self.assertEqual(ezpkg.approval_tags(text),
+                         {"numpy==2.1.0": "cp312-cp312-win_amd64"})
+
+    def test_an_end_users_failed_fetch_is_one_plain_line(self) -> None:
+        """No network, a vanished version, no wheel here, or anything else.
+
+        Each is one line without `pip`'s text, which is kept in the
+        cache's `last_failure.txt` for the author (`I.ffspo`).
+        """
+        # Errors as `pip` words them, with a warning ahead, as an old
+        # `.egg` somewhere in the system's Python makes (case 4).
+        noise: str = ("DEPRECATION: Loading egg at /usr/lib/x.egg is "
+                      "deprecated.\n")
+        missing: str = (noise + "ERROR: Could not find a version that "
+                        "satisfies the requirement cowsay==6.1 (from "
+                        "versions: 6.0, 6.2)\nERROR: No matching "
+                        "distribution found for cowsay==6.1")
+        cases: list[tuple[str, list[str] | None, str]] = [
+            (noise + "WARNING: Retrying ... NewConnectionError(...: "
+             "Failed to establish a new connection)\nERROR: No matching "
+             "distribution found for cowsay", None,
+             ("needs software packages from the internet, but the internet "
+             "could not be reached")),
+            (missing, ["cowsay-6.0-py3-none-any.whl",
+                       "cowsay-6.2-py3-none-any.whl"],
+             "needs cowsay 6.1, which PyPI no longer offers"),
+            (missing, ["cowsay-6.1-cp312-cp312-win_amd64.whl",
+                       "cowsay-6.1.tar.gz"],
+             "needs cowsay 6.1, which has no version for this computer"),
+            (noise + "ERROR: pip is broken today", [],
+             ("could not get its software packages, so it did not run: "
+             "ERROR: pip is broken today")),
+        ]
+        with tempfile.TemporaryDirectory() as scratch:
+            venv: ezpkg.EZPkg = ezpkg.EZPkg(Path(scratch))
+            text: str
+            files: list[str] | None
+            said: str
+            for text, files, said in cases:
+                with (self.subTest(said=said),
+                      unittest.mock.patch.object(ezpkg, "index_files",
+                                                 return_value=files)):
+                    line: str = venv.end_user_failure(RuntimeError(text))
+                    self.assertIn(said, line)
+                    self.assertNotIn("DEPRECATION", line)
+                    self.assertEqual(
+                        (Path(scratch) / "last_failure.txt").read_text(
+                            encoding="utf-8").split("\n", 2)[2].strip(),
+                        text)
+
+    def test_only_the_real_cache_fetches_its_own_pip(self) -> None:
+        """A cache a caller names keeps the interpreter's `pip` (`I.ffspo`)."""
+        # Nothing is fetched, and nothing is written.
+        with (tempfile.TemporaryDirectory() as scratch,
+              unittest.mock.patch.object(ezpkg, "fetch_url",
+                                         side_effect=AssertionError)):
+            venv: ezpkg.EZPkg = ezpkg.EZPkg(Path(scratch) / "named")
+            venv.own_pip()
+            self.assertFalse((Path(scratch) / "named" / "pip.whl").exists())
+
+    def test_the_quick_start_ships_without_approvals(self) -> None:
+        """`quick_start.py` carries no approvals: shorter is better (S2.4e)."""
+        # Its Part 1 has no `[tool.ezpkg]` at all.
+        text: str = (Path(__file__).resolve().parent
+                     / "quick_start.py").read_text(encoding="utf-8")
+        self.assertIsNone(ezpkg.approvals_in(text))
+        self.assertNotIn("[tool.ezpkg]", text)
 
     def test_version_range_is_conservative(self) -> None:
         """A floor always; a cap only where a version number means it.
@@ -8255,6 +8423,35 @@ class LocatorTest(unittest.TestCase):
         output: str = self.run_program(str(program))
         self.assertIn("approvals= {'widget==1.2.3': '0123456789abcdef'}",
                       output)
+
+    def test_a_compiled_approval_is_checked_on_its_platform(self) -> None:
+        """A `tag:` approval checks the id only for a wheel of that tag.
+
+        On another platform the wheel is another file, which nobody
+        approved, so only its version is held to the approval (S2.4d).
+        """
+        # The same version, built for two platforms.
+        program: Path = self.program(
+            "tagged",
+            "import pathlib\n"
+            "venv = ezpkg.EZPkg(pathlib.Path('cache'))\n"
+            "for tag in ('cp312-cp312-linux_x86_64',\n"
+            "            'cp312-cp312-win_amd64'):\n"
+            "    wheel = pathlib.Path(f'widget-1.2.3-{tag}.whl')\n"
+            "    wheel.write_bytes(b'not the approved file')\n"
+            "    try:\n"
+            "        venv.verify([wheel])\n"
+            "        print(tag, 'passed')\n"
+            "    except RuntimeError as error:\n"
+            "        print(tag, 'refused', error)\n")
+        program.write_text(
+            "# /// script\n# dependencies = []\n# [tool.ezpkg]\n"
+            '# approved = [\n#   "widget==1.2.3  id:0123456789abcdef'
+            '  tag:cp312-cp312-linux_x86_64",\n'
+            "# ]\n# ///\n" + program.read_text())
+        output: str = self.run_program(str(program))
+        self.assertIn("cp312-cp312-linux_x86_64 refused", output)
+        self.assertIn("cp312-cp312-win_amd64 passed", output)
 
     def test_approvals_need_a_program(self) -> None:
         """`python3 -c` gets no approvals, and so no verification."""

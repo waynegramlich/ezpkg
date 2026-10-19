@@ -2,16 +2,7 @@
 # Part 1: The packages this program needs.
 # /// script
 # requires-python = ">=3.11"
-# dependencies = [
-#   "ezpkg>=0.0.1.dev0,<0.1",
-#   "cowsay",
-#   "requests>=2.34.2,<3",
-# ]
-#
-# [tool.ezpkg]
-# unimported = [
-#   "requests",  # Needed by the sync script.
-# ]
+# dependencies = ["ezpkg>=0.0.1.dev0,<0.1", "cowsay"]
 # ///
 """Try `EZPkg`: fetch the `cowsay` package on first use, then run."""
 
@@ -64,9 +55,6 @@ except Exception as x:
 
 # Part 4: Your imports, all after the bootstrap.
 import cowsay  # type: ignore[import-not-found]  # For mypy.
-import yaml
-import rich
-import bogus_pkg_xyzzy
 
 # Part 5: The program itself.
 cowsay.cow("EZPkg works!")

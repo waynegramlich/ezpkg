@@ -1,0 +1,21 @@
+1.3 A second program
+second.py, whose packages are already stored: still asked once, y.
+prog.py: `ux03_prog.py`, left unchanged by `ezpkg`.
+-------------------------------------------------------------------------------
+The author of `second.py` has selected some software packages from the
+internet.  If you agree, they are retained in `~/.ezpkg`.  If you do not trust
+the author, answer `n` and `second.py` will not run.
+
+Retain `~/.ezpkg` and run `second.py`?
+[y=>Yes|n=>No|?=>Explain]: y
+  ____________
+| EZPkg works! |
+  ============
+            \
+             \
+               ^__^
+               (oo)\_______
+               (__)\       )\/\
+                   ||----w |
+                   ||     ||
+The cow above was drawn by cowsay 6.1.

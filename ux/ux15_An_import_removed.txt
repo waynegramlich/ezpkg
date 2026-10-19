@@ -1,0 +1,15 @@
+2.3 An import removed
+import tabulate taken out again: its entry goes, silently.
+prog.py: `ux15_prog.py`, changed by `ezpkg` into `ux15_prog_after.py`.
+-------------------------------------------------------------------------------
+  ____________
+| EZPkg works! |
+  ============
+            \
+             \
+               ^__^
+               (oo)\_______
+               (__)\       )\/\
+                   ||----w |
+                   ||     ||
+The cow above was drawn by cowsay 6.1.

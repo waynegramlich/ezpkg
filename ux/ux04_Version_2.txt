@@ -1,0 +1,15 @@
+1.4 Version 2
+The author sends a newer prog.py needing tabulate: fetched silently, and it runs.
+prog.py: `ux04_prog.py`, left unchanged by `ezpkg`.
+-------------------------------------------------------------------------------
+  ____________________________________
+| Version 2 of prog.py, with tabulate! |
+  ====================================
+                                    \
+                                     \
+                                       ^__^
+                                       (oo)\_______
+                                       (__)\       )\/\
+                                           ||----w |
+                                           ||     ||
+The cow above was drawn by cowsay 6.1.

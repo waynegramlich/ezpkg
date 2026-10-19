@@ -32,8 +32,8 @@ needs live here instead.
   target=testpypi -f version=V` (25 jobs, about 3 minutes; Claude
   starts it).  Started by hand, not yet by `release.yml` (`T.gar`).
 * `ux/drive.py [--keep] [--until STEP | --only STEP...] [--ux-dir
-  DIR]`: Runs the scripted UX steps
-  (1.1-1.23) on a pseudoterminal in a temporary copy of the Quick
+  DIR]`: Runs the scripted UX steps (end user 1.1-1.12; developer
+  steps to come) on a pseudoterminal in a temporary copy of the Quick
   Start, as a stranger's real first run: a fresh home, the bootstrap
   fetching `pip` from pypi.org and installing a wheel of the project's
   `ezpkg.py` (`PIP_FIND_LINKS`), everything else from real pypi.org.
@@ -52,9 +52,8 @@ needs live here instead.
   `--only 1.4` runs one step from the snapshot the step before left
   in `ux/.snapshots/` (ignored; dropped when the code changes), or
   after running the earlier steps as unrecorded setup.
-  Its steps still describe the design before 2026-10-19 (end-user and
-  developer questions); rewriting them is `T.abfd`'s S1.4a.  The
-  `ux/uxNN_prog*.py` snapshots are excluded from `ruff` and `mypy`.
+  A step can set more environment, such as `EZPKG_ANSWER_SECONDS=3`
+  for the no-answer step.  The `ux/uxNN_prog*.py` snapshots are excluded from `ruff` and `mypy`.
 * `git_hooks/`: `prepare-commit-msg` adds `Assisted-by: Claude
   Code:claude-opus-5-5` to Wayne's commit messages (deletable in the
   editor), and `commit-msg` refuses a message that is only that

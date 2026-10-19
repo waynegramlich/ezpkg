@@ -1,0 +1,5 @@
+1.5 remove.py
+python3 ~/.ezpkg/remove.py: everything is gone.
+prog.py: `ux05_prog.py`, left unchanged by `ezpkg`.
+-------------------------------------------------------------------------------
+Removed `~/.ezpkg`.

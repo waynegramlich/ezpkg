@@ -55,7 +55,6 @@ except Exception as x:
 
 # Part 4: Your imports, all after the bootstrap.
 import cowsay  # type: ignore[import-not-found]  # For mypy.
-import tabulate
 
 # Part 5: The program itself.
 cowsay.cow("EZPkg works!")

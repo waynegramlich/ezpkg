@@ -1,0 +1,15 @@
+2.2 A new import
+import tabulate added: an entry with a range, silently, then the cow.
+prog.py: `ux14_prog.py`, changed by `ezpkg` into `ux14_prog_after.py`.
+-------------------------------------------------------------------------------
+  ____________
+| EZPkg works! |
+  ============
+            \
+             \
+               ^__^
+               (oo)\_______
+               (__)\       )\/\
+                   ||----w |
+                   ||     ||
+The cow above was drawn by cowsay 6.1.

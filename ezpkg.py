@@ -49,6 +49,7 @@ import io
 import itertools
 import json
 import os
+import platform
 import re
 import select
 import shutil
@@ -90,7 +91,8 @@ HOME_PAGE: str = "https://pypi.org/project/ezpkg/"
 # How long a question waits for its answer before taking it as no.  On
 # Windows a program started by Task Scheduler, a CI system or a service
 # often has a console with nobody at it, and would otherwise wait for
-# ever (`I.owenabd`).
+# ever (`I.owenabd`).  `EZPKG_ANSWER_SECONDS` shortens it, for tests and
+# `ux/drive.py` only (Wayne, 2026-10-19).
 ANSWER_SECONDS: float = 300.0
 
 # How long something has to have been lying about before it is taken for
@@ -821,29 +823,50 @@ def main_source() -> tuple[Path, str] | None:
 # What an empty `prog.py.toml` is filled with: every setting, commented
 # out at its default (`T.abfd`).  `{name}` is the program's file name.
 SETTINGS_TEMPLATE: str = """\
-# {name}.toml: EZPkg settings for {name}.  Having this file means
-# {name} is being developed.  Remove a `#` to change a setting.
-# https://pypi.org/project/ezpkg/
+# {name}.toml: EZPkg settings for {name}.
+#
+# This file makes you {name}'s developer.  ezpkg asks you nothing,
+# keeps the `dependencies` in {name}'s Part 1 matching its imports, and
+# records there the versions you ran, so that whoever you send {name}
+# to gets exactly those.  Without this file, {name} is an end user's:
+# they are asked once, on its first run, and {name} is never edited.
+#
+# Each setting is shown at its default.  Remove a `#` to change one.
+# More: https://pypi.org/project/ezpkg/
 
-# Keep `dependencies` matching the imports.
+# Keep `dependencies` matching the imports: a new import gets an entry
+# with a version range, and an entry whose import is gone is removed.
+# An entry with a comment after it is always kept.
 # auto-dependencies = true
 
 # How much ezpkg says: "none", "low", "medium" or "high".
 # verbosity = "low"
 
-# Make a release: runs once each time this value changes.
+# Make a release: set a version and run {name} once.  ezpkg checks
+# the imports and the bootstrap, gives each entry without a version a
+# range (write a range or `==` yourself to choose one), builds what
+# `exports` lists, and stops without running {name}.  A new version
+# makes the next release.
 # release = "1.0.0"
 
-# What a release builds: "zipapp" (prog-X.Y.Z.pyz), "uv" (prog-X.Y.Z-uv.py).
+# What a release builds beside {name}: "zipapp" (a `.pyz` that needs
+# no network) and "uv" (a `-uv.py` for `uv run`), named by version.
 # exports = ["zipapp", "uv"]
-
-# At a release, give each bare entry in `dependencies` a version range.
-# ranges = false
 
 # The bootstrap {name} carries: "update" replaces an older one at the
 # next release; a name, such as "nopip7", keeps exactly that one.
 # bootstrap = "update"
+
+# Upgrading: {name}'s versions are frozen at the date on the
+# `exclude-newer` line in its Part 1.  Delete that line and run {name}
+# to move everything to today's versions.
 """
+
+# Exactly the marks `EZPkg.needed_by` writes, and so the only comments
+# on `dependencies` entries that `ezpkg` ever takes off (S3.1e).
+MARK: re.Pattern[str] = re.compile(
+    r"# [A-Za-z0-9._-]+ needs this(?: for [A-Za-z0-9._-]+)?"
+    r"|# not imported: say why it is needed")
 
 # What a release can build, in the order `exports` documents them.
 EXPORT_FORMS: tuple[str, ...] = ("zipapp", "uv")
@@ -870,8 +893,6 @@ class Settings:
       The version to release, such as `"1.0.0"`, or `None`.
     * `exports` (`tuple[str, ...]`):
       What a release builds, from `EXPORT_FORMS`.
-    * `ranges` (`bool`):
-      At a release, give bare entries in `dependencies` ranges.
     * `bootstrap` (`str`):
       `update`, or the short name of the published bootstrap the
       program must carry, such as `nopip7` (Wayne, S5.1).
@@ -881,7 +902,6 @@ class Settings:
     verbosity: str = "low"
     release: str | None = None
     exports: tuple[str, ...] = ()
-    ranges: bool = False
     bootstrap: str = "update"
 
 
@@ -1174,20 +1194,37 @@ def normal_pin(pin: str) -> str:
     return f"{normal_name(name)}=={version}"
 
 
-def approvals_in(text: str) -> dict[str, str] | None:
-    """Return the approvals Part 1 records, pin to `id:`.
+def wheel_tag(wheel: str) -> str:
+    """Return the platform a wheel was built for, or empty for any.
 
-    They are `[tool.ezpkg] approved`, one string per package, such as
-    `"cowsay==6.1  id:3f4e9a0c71d2b8e5"`, which a developer's runs
-    write (`EZPkg.record_approvals`, `T.abfd`).
+    A compiled package has a different wheel, and so a different `id:`,
+    for each platform and Python; a pure-Python one has one wheel for
+    every machine (S2.4d).
+
+    Arguments:
+    * `wheel` (`str`):
+      A wheel's file name, such as
+      `numpy-2.1.0-cp312-cp312-manylinux_2_17_x86_64.whl`.
+
+    Returns:
+    * (`str`): Its tags, such as `cp312-cp312-manylinux_2_17_x86_64`,
+      or empty for a wheel that runs anywhere (`none-any`).
+    """
+    # The last three fields, after any build tag.
+    tags: list[str] = wheel.removesuffix(".whl").split("-")[-3:]
+    return "" if tags[1:] == ["none", "any"] else "-".join(tags)
+
+
+def approval_fields(text: str) -> list[list[str]] | None:
+    """Return each approval Part 1 records, split into its fields.
 
     Arguments:
     * `text` (`str`):
       The program's source.
 
     Returns:
-    * (`dict[str, str] | None`): Each pin's id, or `None` when Part 1
-      records no approvals, which means nothing is verified.
+    * (`list[list[str]] | None`): Such as `["cowsay==6.1",
+      "id:3f4e9a0c71d2b8e5"]`, or `None` when Part 1 records none.
     """
     # Anything malformed is no approvals, as a missing file was.
     try:
@@ -1200,29 +1237,71 @@ def approvals_in(text: str) -> dict[str, str] | None:
                       if isinstance(table, dict) else None)
     if not isinstance(listed, list):
         return None
-    found: dict[str, str] = {}
-    entry: object
-    for entry in listed:
-        fields: list[str] = str(entry).split()
-        found[fields[0] if fields else ""] = next(
-            (one[3:] for one in fields[1:] if one.startswith("id:")), "")
-    return found
+    return [str(entry).split() or [""] for entry in listed]
 
 
-def approvals_array(approved: Mapping[str, str]) -> str:
+def approval_tags(text: str) -> dict[str, str]:
+    """Return the platform each compiled approval was recorded on.
+
+    Arguments:
+    * `text` (`str`):
+      The program's source.
+
+    Returns:
+    * (`dict[str, str]`): Each pin's `tag:`, for the pins that have one
+      (`wheel_tag`); a pure-Python pin has none.
+    """
+    # Only the pins that carry one.
+    return {fields[0]: one[4:] for fields in approval_fields(text) or []
+            for one in fields[1:] if one.startswith("tag:")}
+
+
+def approvals_in(text: str) -> dict[str, str] | None:
+    """Return the approvals Part 1 records, pin to `id:`.
+
+    They are `[tool.ezpkg] approved`, one string per package, such as
+    `"cowsay==6.1  id:3f4e9a0c71d2b8e5"`, which a developer's runs
+    write (`EZPkg.record_approvals`, `T.abfd`).
+
+    Arguments:
+    * `text` (`str`):
+      The program's source.
+
+    A compiled package's also carries the platform its wheel was built
+    for, `"numpy==2.1.0  id:...  tag:cp312-cp312-manylinux_2_17_x86_64"`
+    (`approval_tags`, S2.4d).
+
+    Returns:
+    * (`dict[str, str] | None`): Each pin's id, or `None` when Part 1
+      records no approvals, which means nothing is verified.
+    """
+    # The pin, then its `id:`.
+    listed: list[list[str]] | None = approval_fields(text)
+    if listed is None:
+        return None
+    return {fields[0]: next((one[3:] for one in fields[1:]
+                             if one.startswith("id:")), "")
+            for fields in listed}
+
+
+def approvals_array(approved: Mapping[str, str],
+                    tags: Mapping[str, str] | None = None) -> str:
     """Return the `approved` array as Part 1 writes it.
 
     Arguments:
     * `approved` (`Mapping[str, str]`):
       Each pin's id.
+    * `tags` (`Mapping[str, str] | None`):
+      The platform of each compiled pin's wheel (`wheel_tag`).
 
     Returns:
     * (`str`): `[`, one line per package, sorted, then `]`.
     """
-    # Two spaces before `id:`, so the pins read as a column.
-    return ("[\n" + "".join(f'  "{pin}  id:{identity}",\n'
-                            for pin, identity in sorted(approved.items()))
-            + "]")
+    # Two spaces before `id:` and `tag:`, so the pins read as a column.
+    return ("[\n" + "".join(
+        f'  "{pin}  id:{identity}'
+        + (f"  tag:{(tags or {})[pin]}" if (tags or {}).get(pin) else "")
+        + '",\n' for pin, identity in sorted(approved.items())) + "]")
 
 
 def for_export(names: Collection[str], program: str) -> list[str]:
@@ -1281,14 +1360,20 @@ def answer_from(reader: IO[str], writer: IO[str],
     * `writer` (`IO[str]`):
       The terminal, open for writing, for the message.
     * `seconds` (`float | None`):
-      How long to wait; `ANSWER_SECONDS` if not given.
+      How long to wait; `EZPKG_ANSWER_SECONDS` if set to a number, else
+      `ANSWER_SECONDS`, if not given.
 
     Returns:
     * (`str`): The line, with its newline, or empty.
     """
     # Something that is not a terminal, such as a test's string, is read
-    # at once.
+    # at once.  A testing setting that is not a number is ignored.
     limit: float = ANSWER_SECONDS if seconds is None else seconds
+    if seconds is None:
+        try:
+            limit = float(os.environ["EZPKG_ANSWER_SECONDS"])
+        except (KeyError, ValueError):
+            pass
     try:
         handle: int = reader.fileno()
     except (OSError, ValueError):
@@ -1308,7 +1393,9 @@ def answer_from(reader: IO[str], writer: IO[str],
         arrived = bool(select.select([handle], [], [], limit)[0])
     if arrived:
         return reader.readline()
-    writer.write(f"\nNo answer in {limit / 60:g} minutes, so: no.\n")
+    writer.write(f"\nNo answer in {limit / 60:g} minutes, so: no.\n"
+                 if limit >= 60 else
+                 f"\nNo answer in {limit:g} seconds, so: no.\n")
     writer.flush()
     return ""
 
@@ -2196,6 +2283,96 @@ def index_files(name: str) -> list[str] | None:
     return answer
 
 
+# What `pip` says, somewhere in its output, when the index could not be
+# reached at all, rather than reached and refusing (`I.ffspo`, case 1).
+NO_NETWORK: re.Pattern[str] = re.compile(
+    r"NewConnectionError|Failed to establish a new connection"
+    r"|Temporary failure in name resolution|Name or service not known"
+    r"|nodename nor servname|getaddrinfo failed|Network is unreachable"
+    r"|No route to host|ConnectTimeoutError|Read timed out|ProxyError")
+
+
+def unavailable(text: str, pinned: Mapping[str, str]) -> tuple[str, str]:
+    """Work out which package a failed fetch could not get, and why.
+
+    For the end user's one line (`I.ffspo`, cases 2 and 3).  `pip`'s
+    `--only-binary` lists only the versions with a wheel for this
+    machine, so a version it does not list either was taken off the
+    index, or never had a wheel for this machine; the index's own list
+    of files tells the two apart (`index_files`).
+
+    Arguments:
+    * `text` (`str`):
+      What `pip` printed.
+    * `pinned` (`Mapping[str, str]`):
+      The version each package must be, by `normal_name`, from the
+      approvals and from `==` requirements.
+
+    Returns:
+    * (`tuple[str, str]`): The package (with its version, if pinned)
+      and `"gone"` or `"no wheel"`; or two empty strings when it is
+      neither, or cannot be told.
+    """
+    # `pip`'s own line names the requirement and what it found.
+    found: re.Match[str] | None = re.search(
+        r"Could not find a version that satisfies the requirement "
+        r"(\S+) \(from versions: ([^)]*)\)", text)
+    if found is None:
+        return "", ""
+    name: str = requirement_name(found.group(1))
+    listed: list[str] = [one.strip() for one in found.group(2).split(",")
+                         if one.strip() and one.strip() != "none"]
+    version: str = (found.group(1).partition("==")[2]
+                    or pinned.get(normal_name(name), ""))
+    files: list[str] | None = index_files(name)
+    if files is None:
+        return "", ""
+    project: str = normal_name(name).replace("-", "_")
+    offered: bool = any(
+        normal_name(one.split("-")[0]).replace("-", "_") == project
+        and (not version or one.split("-")[1:2] == [version]
+             or one.startswith(f"{one.split('-')[0]}-{version}."))
+        for one in files)
+    label: str = f"{name} {version}" if version else name
+    if version and not offered:
+        return label, "gone"
+    if offered and (not listed or version):
+        return label, "no wheel"
+    return "", ""
+
+
+def fetch_url(url: str) -> bytes:
+    """Fetch a URL as the bootstrap's `g` does, with `curl` as a fallback.
+
+    python.org's macOS Python has no certificates until its `Install
+    Certificates.command` is run, and every Mac has `/usr/bin/curl`,
+    which uses the Keychain (`I.btosc`).
+
+    Arguments:
+    * `url` (`str`):
+      What to fetch.
+
+    Returns:
+    * (`bytes`): The body.
+
+    Raises:
+    * `urllib.error.URLError`:
+      `urllib`'s own error, when `curl` cannot do better.
+    """
+    # `urllib` first, then `curl`, then `urllib`'s reason.
+    try:
+        with urllib.request.urlopen(url, None, 60) as response:
+            body: bytes = response.read()
+            return body
+    except urllib.error.URLError as error:
+        first: urllib.error.URLError = error
+    try:
+        return subprocess.run(["curl", "-fsSL", url], capture_output=True,
+                              check=True).stdout
+    except (OSError, subprocess.CalledProcessError):
+        raise first from None
+
+
 def failure_reason(error: BaseException) -> str:
     """Return the line of a failure that says why, for a message.
 
@@ -2780,6 +2957,9 @@ class Discrepancy:
       comment the author's other imports carry, or `None`.  `mypy`
       cannot see `~/.ezpkg`, where the bootstrap puts `ezpkg`, any more
       than it can see the packages (Wayne's dogfood, 2026-10-15).
+    * `unmark` (`set[str]`):
+      The `normal_name` of each entry an import now explains whose
+      comment is exactly a mark `needed_by` writes, which goes (S3.1e).
     """
 
     program: Path
@@ -2792,16 +2972,19 @@ class Discrepancy:
     used: set[str]
     guessed: set[str] = dataclasses.field(default_factory=set)
     uncommented: int | None = None
+    unmark: set[str] = dataclasses.field(default_factory=set)
 
     def pending(self) -> bool:
         """Say whether there is anything to raise at all.
 
         Returns:
-        * (`bool`): True when `dependencies` is not the target, or an
-          import of `ezpkg` lacks the author's `mypy` comment.
+        * (`bool`): True when `dependencies` is not the target, an
+          import of `ezpkg` lacks the author's `mypy` comment, or a mark
+          has outlived its reason.
         """
-        # Either kind of difference.
-        return self.target() != self.entries or self.uncommented is not None
+        # Any kind of difference.
+        return (self.target() != self.entries
+                or self.uncommented is not None or bool(self.unmark))
 
     def arrange(self, added: Collection[str],
                 removed: Collection[int]) -> list[str]:
@@ -3014,11 +3197,12 @@ class EZPkg:
         needs one of these packages will fetch it again.  To delete it:
 
         * Linux and macOS: `python3 ~/.ezpkg/remove.py`
-        * Windows: `py %USERPROFILE%\\.ezpkg\\remove.py`
+        * Windows PowerShell: `py $HOME\\.ezpkg\\remove.py`
+        * Windows `cmd.exe`: `py %USERPROFILE%\\.ezpkg\\remove.py`
 
         A program can say which packages it needs in a PEP 723 block at
-        its top, and can carry a `.ezpkg` file beside it recording
-        which exact wheels its author approved.
+        its top, where its author's runs also record which exact wheels
+        were approved.
 
         Arguments:
         * `root` (`Path | None`):
@@ -3403,8 +3587,8 @@ class EZPkg:
     def give_ranges(self, asking: Sequence[str]) -> list[str]:
         """Give each bare entry in Part 1 a range from its approved version.
 
-        At a release with `ranges = true`: each entry that is a name
-        alone gets the range `version_range` makes from the version the
+        At every release (S5.1b): each entry that is a name alone
+        gets the range `version_range` makes from the version the
         approvals record, so that a `.py` sent without its approvals
         cannot be handed a much newer package than the one it was tested
         with ("I used EZPkg and it put the wrong packages in!", Wayne,
@@ -3570,8 +3754,10 @@ class EZPkg:
     def fetching(self, final: Sequence[str]) -> list[str]:
         """Return what fetching a `dependencies` asks of the index.
 
-        The `ezpkg` entry this `ezpkg` meets is left out, as in
-        `install`: the index may not have this very version.
+        The same as an ordinary run asks (`providing`), so that the
+        approvals `reconcile`'s fetch records are the ones the restarted
+        run finds, with this `ezpkg`'s pin kept on a developer's run, and
+        nothing is edited twice (`ux` step 2.2, 2026-10-19).
 
         Arguments:
         * `final` (`Sequence[str]`):
@@ -3580,10 +3766,10 @@ class EZPkg:
         Returns:
         * (`list[str]`): The requirements to fetch.
         """
-        # Only an entry this one meets.
+        # As `provide_declared` would ask.
         own: str | None = own_entry(final)
-        return ([one for one in final if one != own]
-                if own is not None and self.chosen(own) else list(final))
+        return self.providing(final, own,
+                              own is not None and not self.chosen(own))
 
     def edit_for(self, found: Discrepancy, final: Sequence[str],
                  marks: Mapping[str, str], modules: Collection[str],
@@ -3742,7 +3928,7 @@ class EZPkg:
         before: object = kept.get("imported")
         previous: set[str] = set(before) if isinstance(before, list) else set()
         removed: set[int] = set()
-        marks: dict[str, str] = {}
+        marks: dict[str, str] = dict.fromkeys(found.unmark, "")
         index: int
         for index in found.removals:
             name: str = normal_name(requirement_name(found.entries[index]))
@@ -3809,7 +3995,7 @@ class EZPkg:
                      f"{error}")
             return asking
         if fetched is not None:
-            self.remember(self.request_for(final), *fetched)
+            self.remember(self.request_for(self.fetching(final)), *fetched)
 
         # A line per change from `medium` up (S1.5).
         if self.verbosity() >= 2:
@@ -3819,9 +4005,13 @@ class EZPkg:
                     final, listed, edited,
                     {ranged.get(package, package): module
                      for package, module in modules.items()}) + [
-                    f'Marked "{entry}" in `{program.name}`\'s '
-                    f"`dependencies`{f' (line {at})' if at else ''} "
-                    f"`{marks[normal_name(requirement_name(entry))]}`."
+                    (f'Marked "{entry}" in `{program.name}`\'s '
+                     f"`dependencies`{f' (line {at})' if at else ''} "
+                     f"`{marks[normal_name(requirement_name(entry))]}`."
+                     if marks[normal_name(requirement_name(entry))] else
+                     f'Unmarked "{entry}" in `{program.name}`\'s '
+                     f"`dependencies`{f' (line {at})' if at else ''}, "
+                     f"since an import now explains it.")
                     for entry, at in itertools.zip_longest(final, lines)
                     if entry is not None
                     and normal_name(requirement_name(entry)) in marks]:
@@ -3897,6 +4087,9 @@ class EZPkg:
 
     def needed_by(self, name: str, entries: Sequence[str]) -> str:
         """Return the mark for an entry no import explains.
+
+        Every mark it writes matches `MARK`, so that one can be taken
+        off again when an import comes to explain the entry (S3.1e).
 
         `# pandas needs this for excel` when it is an optional extra of
         another entry, `# pandas needs this` when another entry always
@@ -4051,8 +4244,14 @@ class EZPkg:
             if commented:
                 uncommented = next(line for module, line, _ in imports
                                    if module == "ezpkg")
+        # A mark `ezpkg` wrote goes once an import explains its entry;
+        # any other comment is the developer's (Wayne, S3.1e).
+        noted: dict[str, str] = dependency_comments(text)
+        unmark: set[str] = {names[index] for index in placed_by
+                            if MARK.fullmatch(noted.get(names[index], ""))}
         return Discrepancy(program, entries, lines, order, placed_by,
-                           additions, removals, used, guessed, uncommented)
+                           additions, removals, used, guessed, uncommented,
+                           unmark)
 
     def settings(self) -> Settings | None:
         """Return the running program's developer settings, if it has any.
@@ -4884,7 +5083,9 @@ class EZPkg:
         return f"`{shown(self.root)}`"
 
     def listing(self, wheels: Sequence[Path], width: int) -> str:
-        """Say what is now installed, after it has been unpacked.
+        """Say what is now retained, after it has been unpacked.
+
+        "Retained", as the question says it (Wayne, 2026-10-19).
 
         Every package this run put into the cache, the bootstrap's
         included, one numbered line each, then where to read about
@@ -4907,7 +5108,7 @@ class EZPkg:
         place: str = self.place()
         lines: list[str] = [wrapped(
             f"The following {len(packages)} package(s) are now "
-            f"installed in {place}:", width)]
+            f"retained in {place}:", width)]
         lines += [cut(f"{number}. {title}" + (f": {told}" if told else ""),
                       width)
                   for number, (title, told) in enumerate(packages, 1)]
@@ -4982,11 +5183,12 @@ class EZPkg:
         describes each wheel and asks again (`T.abfd`).
 
         Anything else is taken for a typo and the question is put again,
-        up to `ATTEMPTS` typos.  A bare newline is one of them: there is
-        no default, because a distracted Enter should neither install
-        nor quietly decline, so it is asked again like any other
-        non-answer.  Asking for the detail is not a typo and
-        does not count, so curiosity is never punished.  A terminal that
+        up to `ATTEMPTS` typos.  A bare newline just asks again, without
+        a word and without counting (Wayne, 2026-10-19): there is no
+        default, because a distracted Enter should neither install nor
+        quietly decline, and `ANSWER_SECONDS` already ends a wait that
+        nobody answers.  Asking for the detail is not a typo and does
+        not count either, so curiosity is never punished.  A terminal that
         has gone away reads as empty, which
         declines at once rather than being asked again forever.
 
@@ -5010,8 +5212,8 @@ class EZPkg:
         if opened is None:
             return True
 
-        # `y` goes ahead, `n` declines, `?` says more and asks again,
-        # and anything else, an empty line included, is a typo worth
+        # `y` goes ahead, `n` declines, `?` says more and asks again, an
+        # empty line just asks again, and anything else is a typo worth
         # asking about again.  Only typos are counted, so that reading
         # the detail can never use up the patience meant for mistakes.
         answer: str
@@ -5027,11 +5229,15 @@ class EZPkg:
         name: str = name_of(program_name())
         place: str = self.place()
         width: int = columns(writer)
+        # A no takes the whole cache only on a first run (`removed`).
+        refused: str = (f"{place} will simply go away without running "
+                        f"{name}" if self.newly_filled() else
+                        f"{name} will not run")
         paragraph: str = wrapped(
             f"The author of {name} has selected some software packages "
-            f"from the internet.  If you agree, they will be retained in "
+            f"from the internet.  If you agree, they are retained in "
             f"{place}.  If you do not trust the author, answer `n` and "
-            f"{place} will simply go away without running {name}.", width)
+            f"{refused}.", width)
         question: str = wrapped(f"Retain {place} and run {name}?", width)
         question += "\n[y=>Yes|n=>No|?=>Explain]: "
         told: bool = False
@@ -5056,6 +5262,8 @@ class EZPkg:
                     writer.write("\n")
                     return False
                 answer = answer.strip().lower()
+                if not answer:
+                    continue
                 if answer in ("y", "yes"):
                     return True
                 if answer in ("n", "no"):
@@ -5220,9 +5428,14 @@ class EZPkg:
         rows: dict[str, str] = {
             wheel_pin(wheel.name): self.digest(wheel)[:ID_DIGITS]
             for wheel in wheels}
+        tags: dict[str, str] = {wheel_pin(wheel.name): wheel_tag(wheel.name)
+                                for wheel in wheels if wheel_tag(wheel.name)}
+        found: tuple[Path, str] | None = main_source()
         changes: list[tuple[str, str, str | None]] = []
-        if self.approved() != rows:
-            changes.append(("ezpkg", "approved", approvals_array(rows)))
+        if self.approved() != rows or (
+                found is not None and approval_tags(found[1]) != tags):
+            changes.append(("ezpkg", "approved",
+                            approvals_array(rows, tags)))
         if not dated:
             changes.append(("uv", "exclude-newer", f'"{resolved}"'))
         if not changes:
@@ -5248,11 +5461,25 @@ class EZPkg:
         * (`str`): Such as "`~/.ezpkg` has been removed".
         """
         # Only a cache this run's bootstrap filled, never a home.
-        if (self.pip_run is not None and self.root != Path.home()
-                and (self.root / "pip.whl").is_file()):
+        if self.newly_filled():
             shutil.rmtree(self.root, ignore_errors=True)
             return f"{self.place()} has been removed"
         return "the new software package(s) have been removed"
+
+    def newly_filled(self) -> bool:
+        """Say whether this run's bootstrap filled the cache, a first run.
+
+        Only then does a no take the whole cache away; a cache that was
+        already there holds what other programs' end users agreed to,
+        which a no to this program must not take from them (Wayne,
+        2026-10-19).
+
+        Returns:
+        * (`bool`): True on the run whose bootstrap made the cache.
+        """
+        # The bootstrap hands over `pip`'s output only when it ran it.
+        return (self.pip_run is not None and self.root != Path.home()
+                and (self.root / "pip.whl").is_file())
 
     def verify(self, wheels: Sequence[Path]) -> None:
         """Refuse anything the author did not approve.
@@ -5266,6 +5493,10 @@ class EZPkg:
         * `wheels` (`Sequence[Path]`):
           The wheels that arrived.
 
+        A compiled package's `id:` is its author's platform's wheel's
+        (its `tag:`), so on another platform only its version is held to
+        the approval, since nothing here approved that wheel (S2.4d).
+
         Raises:
         * `RuntimeError`:
           If a wheel is absent from the approvals, or present with a
@@ -5277,6 +5508,10 @@ class EZPkg:
             return
         named: dict[str, str] = {normal_pin(pin): identity
                                  for pin, identity in expected.items()}
+        found: tuple[Path, str] | None = main_source()
+        built: dict[str, str] = {
+            normal_pin(pin): tag for pin, tag
+            in (approval_tags(found[1]) if found else {}).items()}
         where: str = f"Part 1 of {program_name()}"
         wheel: Path
         for wheel in wheels:
@@ -5287,6 +5522,11 @@ class EZPkg:
                     f"{wheel.name} is not approved in {where}; running the "
                     f"program as its developer brings the approvals up to "
                     f"date")
+            if pin in built and built[pin] != wheel_tag(wheel.name):
+                self.say(3, f"ezpkg: {wheel.name}: approved for "
+                         f"{built[pin]} only, so its version is checked "
+                         f"but not its id")
+                continue
             if named[pin] != actual:
                 raise RuntimeError(
                     f"{wheel.name} does not match its approval in {where}: "
@@ -5503,6 +5743,9 @@ class EZPkg:
           If `pip` fails for any other reason, with its standard error
           included.
         """
+        # A private `pip` first, if the bootstrap fetched none (`I.ffspo`).
+        self.own_pip()
+
         # A directory per call, so concurrent downloads stay apart.
         pending: Path = self.paths()[0]
         holding: Path = Path(tempfile.mkdtemp(dir=pending))
@@ -5949,9 +6192,9 @@ class EZPkg:
 
         Once per new value (`released`): `dependencies` has been
         reconciled already; then, with `bootstrap = "update"`, an older
-        bootstrap is replaced and the program's `ezpkg` entry gets the
-        range of this `ezpkg` (S5.1); the imports are checked; bare
-        entries get ranges with `ranges`; the approvals (kept up to date
+        bootstrap is replaced; the program's `ezpkg` entry gets the
+        range of this `ezpkg` (S5.1, S5.1c); the imports are checked; bare
+        entries get ranges (S5.1b); the approvals (kept up to date
         by every developer run) are frozen as they are; each of
         `exports` is built beside the program, named by version
         (`prog-1.0.0.pyz`, `prog-1.0.0-uv.py`); and `released =
@@ -5979,13 +6222,12 @@ class EZPkg:
             replaced: str = self.replace_bootstrap()
             if replaced:
                 self.say(1, replaced)
-            asking = self.range_ezpkg(asking)
+        asking = self.range_ezpkg(asking)
         try:
             self.check_imports(asking)
 
             # Ranges, then what `exports` lists, named by version.
-            if settings.ranges:
-                asking = self.give_ranges(asking)
+            asking = self.give_ranges(asking)
             built: list[Path] = []
             form: str
             for form in settings.exports:
@@ -6011,9 +6253,11 @@ class EZPkg:
     def range_ezpkg(self, asking: list[str]) -> list[str]:
         """Give the program's `ezpkg` entry the range of this `ezpkg`.
 
-        At a release with `bootstrap = "update"` (Wayne, S5.1), so that
-        the entry always admits the `ezpkg` the release was made with,
-        and nothing much newer (`version_range`).
+        At every release (Wayne, S5.1), so that the entry always admits
+        the `ezpkg` the release was made with, and nothing much newer
+        (`version_range`).  An `ezpkg` run from a source tree is left
+        alone (S5.1c): its version is on no index, and its range would
+        shut out the `.devN` rehearsals the entry admits.
 
         Arguments:
         * `asking` (`list[str]`):
@@ -6026,7 +6270,8 @@ class EZPkg:
         own: str | None = own_entry(asking)
         where: Path | None = main_path()
         ranged: str = version_range("ezpkg", __version__)
-        if own is None or own == ranged or where is None:
+        if (own is None or own == ranged or where is None
+                or not from_wheel()):
             return asking
         entries: list[str] = [ranged if one == own else one
                               for one in asking]
@@ -6094,6 +6339,116 @@ class EZPkg:
             # a `dependencies` update's (`ux16`).
             raise SystemExit(wrapped(declined.said, columns(sys.stderr))
                              ) from None
+        except RuntimeError as error:
+            # A developer's failed fetch is one line with `pip`'s reason,
+            # and its whole output only at `high` (S1.5f).  An end user's
+            # is one plain line, `pip`'s text kept for the author
+            # (`I.ffspo`).
+            if not self.developing():
+                raise SystemExit(wrapped(self.end_user_failure(error),
+                                         columns(sys.stderr))) from None
+            self.say(3, f"ezpkg: {error}", wrap=False)
+            raise SystemExit(wrapped(
+                f"{name_of(program_name())} did not run: "
+                f"{failure_reason(error)}"
+                + ("" if self.verbosity() >= 3 else
+                   '  (`verbosity = "high"` shows all of pip\'s output.)'),
+                columns(sys.stderr))) from None
+
+    def end_user_failure(self, error: BaseException) -> str:
+        """Return the one line an end user sees when a fetch fails.
+
+        Never `pip`'s text, which is the author's business: it goes
+        into `last_failure.txt` in the cache, which the line names, so
+        the end user can send it on (Wayne, 2026-10-17: never put the
+        problem on the end user's plate).  The cases are `I.ffspo`'s:
+        no network; a pinned version the index no longer has; nothing
+        that runs on this machine; and anything else, with `pip`'s
+        `ERROR:` reason, never its warnings.
+
+        Arguments:
+        * `error` (`BaseException`):
+          What the fetch raised, with `pip`'s output in it.
+
+        Returns:
+        * (`str`): The line, unwrapped.
+        """
+        # Kept for the author, if it can be.
+        text: str = str(error)
+        name: str = name_of(program_name())
+        details: Path = self.root / "last_failure.txt"
+        try:
+            details.write_text(
+                f"{time.strftime('%Y-%m-%d %H:%M:%S')} {program_name()}, "
+                f"ezpkg {__version__}, Python {sys.version.split()[0]} "
+                f"on {sys.platform}\n\n{text}\n", encoding="utf-8")
+            kept: str = (f"  (For its author: `{shown(details)}` says "
+                         f"what went wrong.)")
+        except OSError:
+            kept = ""
+
+        # The cases, most likely first.
+        if NO_NETWORK.search(text):
+            return (f"{name} needs software packages from the internet, "
+                    f"but the internet could not be reached, so {name} "
+                    f"did not run.  Connect, then run it again.")
+        pinned: dict[str, str] = {
+            normal_name(pin.partition("==")[0]): pin.partition("==")[2]
+            for pin in self.approved() or {}}
+        package: str
+        why: str
+        package, why = unavailable(text, pinned)
+        if why == "gone":
+            return (f"{name} needs {package}, which PyPI no longer offers, "
+                    f"so {name} did not run.  Its author can send a newer "
+                    f"{name}.{kept}")
+        if why == "no wheel":
+            here: str = (f"Python {sys.version_info[0]}."
+                         f"{sys.version_info[1]} on {platform.system()} "
+                         f"{platform.machine()}")
+            return (f"{name} needs {package}, which has no version for "
+                    f"this computer ({here}), so {name} did not run.{kept}")
+        return (f"{name} could not get its software packages, so it did "
+                f"not run: {failure_reason(error)}{kept}")
+
+    def own_pip(self) -> None:
+        """Fetch a private `pip`, as the bootstrap does, if there is none.
+
+        When `ezpkg` was already importable (`pip install ezpkg`), the
+        bootstrap fetched no `pip.whl`, and the interpreter's own `pip`
+        may be old or missing (`I.ffspo`, case 5).  Only for the real
+        `~/.ezpkg`: a cache a caller names keeps the interpreter's
+        `pip`, as it always has.  Nothing here fails the program; with
+        no network, the interpreter's `pip` is tried, and its failure is
+        the one reported.
+        """
+        # Only the cache the bootstrap would have filled, and only once.
+        if (self.root != Path.home() / ".ezpkg"
+                or (self.root / "pip.whl").is_file()
+                or any(self.root.glob("pip-*.whl"))):
+            return
+        try:
+            index: Any = json.loads(fetch_url("https://pypi.org/pypi/pip/json"))
+            floor: int = sys.version_info[1]
+            newest: dict[str, Any] = max(
+                (one for files in index["releases"].values() for one in files
+                 if one["url"].endswith(".whl") and not one["yanked"]
+                 and (needs := one["requires_python"] or "")[:4] == ">=3."
+                 and "," not in needs
+                 and int(needs.split(".")[1]) <= floor),
+                key=lambda one: one["upload_time"])
+            body: bytes = fetch_url(newest["url"])
+            if hashlib.sha256(body).hexdigest() != newest["digests"]["sha256"]:
+                raise ValueError(f"{newest['filename']} fails its SHA-256 "
+                                 f"check")
+            self.root.mkdir(parents=True, exist_ok=True)
+            part: Path = self.root / "pip.part"
+            part.write_bytes(body)
+            part.replace(self.root / "pip.whl")  # Atomic, as the bootstrap's.
+            self.say(3, f"ezpkg: fetched a private pip, {newest['filename']}")
+        except (OSError, ValueError, KeyError, TypeError) as error:
+            self.say(3, f"ezpkg: no private pip ({error!r}); using "
+                     f"{sys.executable}'s own")
 
     def provide_declared(self, argv: Sequence[str], bootstrap: str) -> None:
         """Do `install_declared`'s work, once its environment is set.

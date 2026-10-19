@@ -1,5 +1,0 @@
-1.22 remove.py
-python3 ~/.ezpkg/remove.py: the cache is gone.
-prog.py: `ux26_prog.py`, left unchanged by `ezpkg`.
--------------------------------------------------------------------------------
-Removed `~/.ezpkg`.

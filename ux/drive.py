@@ -45,7 +45,6 @@ A rerun overwrites them; commit first.
 
 import dataclasses
 import hashlib
-import json
 import os
 import pty
 import re
@@ -74,6 +73,8 @@ QUESTION: re.Pattern[str] = re.compile(
 DOWNLOAD: str = "and run `prog.py`?"
 CONTROL_C: str = "\x03"
 CONTROL_D: str = "\x04"
+# An answer that is never typed, for a question nobody is there to answer.
+WAIT: str = "\x00wait"
 
 
 @dataclasses.dataclass
@@ -99,10 +100,12 @@ class Step:
     * `command` (`list[str] | None`):
       What to run with Python instead of `prog.py`, such as the
       cache's `remove.py`, relative to the copy.
+    * `environment` (`dict[str, str]`):
+      More environment for the run, such as `EZPKG_ANSWER_SECONDS`.
     * `mode` (`str`):
-      The program's mode afterwards, `end-user` until it has changed
-      and `developer` from then on (`EZPkg.developing`), or `gone`
-      when `~/.ezpkg` must have been removed.
+      `end-user` (no `prog.py.toml`, and `ezpkg` must not edit
+      `prog.py`), `developer` (a `prog.py.toml`), or `gone` when
+      `~/.ezpkg` must have been removed.
     """
 
     name: str
@@ -115,7 +118,8 @@ class Step:
     kept: list[str] | None = None
     before: Callable[[Path], None] | None = None
     command: list[str] | None = None
-    mode: str = "developer"
+    environment: dict[str, str] = dataclasses.field(default_factory=dict)
+    mode: str = "end-user"
 
 
 def first_run_again(work: Path) -> None:
@@ -124,171 +128,125 @@ def first_run_again(work: Path) -> None:
     shutil.rmtree(work / "home" / ".ezpkg", ignore_errors=True)
 
 
+def developer_first_run(work: Path) -> None:
+    """Make the next run a developer's first: an empty `prog.py.toml`."""
+    first_run_again(work)
+    (work / "prog.py.toml").write_text("", encoding="utf-8")
+
+
+def second_program(work: Path) -> None:
+    """Put a second program beside `prog.py`, using the same packages."""
+    shutil.copy2(PROJECT / "quick_start.py", work / "second.py")
+
+
+def version_two(work: Path) -> None:
+    """Replace `prog.py` with the author's version 2, as if emailed.
+
+    It needs one more package, `tabulate`, which its author declared,
+    since an end user's program is never edited.
+    """
+    text: str = (PROJECT / "quick_start.py").read_text(encoding="utf-8")
+    text = text.replace('"cowsay"]', '"cowsay", "tabulate"]', 1)
+    text = text.replace(
+        "import cowsay  # type: ignore[import-not-found]  # For mypy.\n",
+        "import cowsay  # type: ignore[import-not-found]  # For mypy.\n"
+        "import tabulate  # type: ignore[import-not-found]  # For mypy.\n",
+        1)
+    text = text.replace('cowsay.cow("EZPkg works!")',
+                        'cowsay.cow("Version 2 of prog.py, with tabulate!")',
+                        1)
+    (work / "prog.py").write_text(text, encoding="utf-8")
+
+
 BASE: list[str] = ["ezpkg", "cowsay"]
+WORKS: str = "EZPkg works!"
+# The end user's steps (Wayne's list, 2026-10-19), then the developer's
+# (`T.abfd`, S1.4a; 2.1-2.3 first, the rest once Wayne has seen them).
 STEPS: list[Step] = [
-    Step("1.1 Baseline",
-         "The Quick Start as it is: a download question, then the cow.",
-         [], present=["EZPkg works!"],
-         absent=["exclude-newer", "dependencies", "Traceback"],
-         declared=BASE, mode="end-user"),
-    Step("1.1b Not working on it",
-         "An end-user's copy changed, answered n: no edit, only a warning.",
-         ["tabulate"], [("Are you working on", "n")],
-         present=["No module named 'tabulate'", "not in Python or `ezpkg`"],
-         absent=["Update them?", "Add \"tabulate\"?"],
-         declared=BASE, mode="end-user"),
-    Step("1.1c Not working on it, run again",
-         "Still broken, so asked again; n again, and the same explanation.",
-         None, [("Are you working on", "n")],
-         present=["not in Python or `ezpkg`"],
-         absent=["disagree", "Update them?", "not importable here"],
-         declared=BASE, mode="end-user"),
-    Step("1.2 Batch y",
-         "Two new imports: one question, y, and no second approval.",
-         ["requests", "yaml"],
-         [("Are you working on", "y"), ("Update them?", "y")],
-         present=["2 entries in `dependencies`", "mypy   import requests",
-                  "EZPkg works!"],
-         absent=["Make these changes?", "Traceback"],
-         declared=[*BASE, "requests", "pyyaml"]),
-    Step("1.3 Batch i, with keep",
-         "Both imports removed: i, then k for requests, y for PyYAML.",
-         [], [("Update them?", "i"), ('"requests', "k"),
-              ("What needs `requests`?", "the sync script"),
-              ('"PyYAML', "y"), ("Make these changes?", "y")],
-         present=['"requests", # Needed by the sync script.',
-                  'remove "PyYAML'],
-         absent=["Traceback"],
-         declared=[*BASE, "requests"], kept=["requests"]),
-    Step("1.4 Batch n",
-         "Two more imports, answered n: nothing changes.",
-         ["yaml", "rich"], [("Update them?", "n")],
-         declared=[*BASE, "requests"]),
-    Step("1.4b Batch n, run again",
-         "Nothing changed since the n, so nothing is asked.",
-         None, absent=["Update them?", "disagree"],
-         declared=[*BASE, "requests"]),
-    Step("1.5 A misspelt import in a batch",
-         "A third import nobody publishes: named, not counted, not added.",
-         ["yaml", "rich", "bogus_pkg_xyzzy"], [("Update them?", "y")],
-         present=['no package "bogus_pkg_xyzzy"',
-                  "2 entries in `dependencies`"],
-         declared=[*BASE, "requests", "pyyaml", "rich"]),
-    Step("1.6 One change",
-         "One new import: listed and asked like a batch, in the singular.",
-         ["yaml", "rich", "attrs"], [("Update it?", "y")],
-         present=["1 entry in `dependencies`"],
-         absent=["Make these changes?", "disagree", "Traceback"],
-         declared=[*BASE, "requests", "pyyaml", "rich", "attrs"]),
-    Step("1.7 Auto",
-         "a, asked once: updated now, and from then on without asking.",
-         ["yaml", "rich", "attrs", "click", "tabulate"],
-         [("Update them?", "a")],
-         present=["To be asked again, delete"],
-         absent=["Really", "Make these changes?", "Traceback"],
-         declared=[*BASE, "requests", "pyyaml", "rich", "attrs", "click",
-                   "tabulate"]),
-    Step("1.8 Auto removes an import",
-         "import tabulate removed, in Auto mode: no question, one line.",
-         ["yaml", "rich", "attrs", "click"],
-         present=['ezpkg: removed "tabulate'],
-         absent=["Update", "Remove it?", "Make these changes?",
-                 "Traceback"],
-         declared=[*BASE, "requests", "pyyaml", "rich", "attrs", "click"]),
-    Step("1.9 Auto adds an import",
-         "import tabulate back, in Auto mode: one line, then the cow; "
-         "its 0.10.0 is still stored, so no download question.",
-         ["yaml", "rich", "attrs", "click", "tabulate"],
-         present=['ezpkg: added "tabulate', "EZPkg works!"],
-         absent=["Update", "Make these changes?", "Traceback"],
-         declared=[*BASE, "requests", "pyyaml", "rich", "attrs", "click",
-                   "tabulate"]),
-    Step("1.9b Auto adds a new package",
-         "import humanize, never fetched before, in Auto mode: one line, "
-         "the download question, the cow.",
-         ["yaml", "rich", "attrs", "click", "tabulate", "humanize"],
-         present=['ezpkg: added "humanize', DOWNLOAD, "EZPkg works!"],
-         absent=["Update", "Make these changes?", "Traceback"],
-         declared=[*BASE, "requests", "pyyaml", "rich", "attrs", "click",
-                   "tabulate", "humanize"]),
-    Step("1.10 Control-C at the download question",
-         "A first run, interrupted at the question: ~/.ezpkg is removed.",
-         None, [(DOWNLOAD, CONTROL_C)],
-         present=["Interrupted, so `~/.ezpkg` has been removed"],
-         absent=["Traceback", "EZPkg works!"], before=first_run_again,
-         mode="gone"),
-    Step("1.11 After Control-C",
-         "The same first run again: as ux01, pip and ezpkg listed too.",
-         None, present=["3 package(s)", "(used by `ezpkg`)", "EZPkg works!"],
-         absent=["Traceback"], declared=BASE, mode="end-user"),
-    Step("1.12 No on a later run",
-         "A change needing humanize, answered n at the download question: "
-         "only it is removed.",
-         ["humanize"], [("Are you working on", "y"), ("Update it?", "y"),
-                        (DOWNLOAD, "n")],
-         present=["Declined, so the new software package(s) have been"],
-         absent=["Traceback", "EZPkg works!"], declared=BASE),
-    Step("1.13 No on a first run",
+    Step("1.1 First run",
+         "A stranger's first run, answered y: the packages listed, then "
+         "the cow.",
+         None, [(DOWNLOAD, "y")],
+         present=["are retained", "now retained", "manages", WORKS],
+         absent=["Traceback", "exclude-newer"], declared=BASE),
+    Step("1.2 Later runs",
+         "The same program again: nothing asked, nothing said, the cow.",
+         None, present=[WORKS], absent=[DOWNLOAD, "now retained",
+                                        "Traceback"], declared=BASE),
+    Step("1.3 A second program",
+         "second.py, whose packages are already stored: still asked "
+         "once, y.",
+         None, [(DOWNLOAD.replace("prog.py", "second.py"), "y")],
+         present=["answer `n` and `second.py` will not run", WORKS],
+         absent=["will simply go away", "Traceback"], before=second_program,
+         command=["second.py"]),
+    Step("1.4 Version 2",
+         "The author sends a newer prog.py needing tabulate: fetched "
+         "silently, and it runs.",
+         None, present=["Version 2 of prog.py, with tabulate!"],
+         absent=[DOWNLOAD, "Traceback"], before=version_two,
+         declared=[*BASE, "tabulate"]),
+    Step("1.5 remove.py",
+         "python3 ~/.ezpkg/remove.py: everything is gone.",
+         None, command=["home/.ezpkg/remove.py"], present=["Removed"],
+         absent=["Traceback"], mode="gone"),
+    Step("1.6 Explain",
+         "A first run again, answered ?, then y: the packages explained, "
+         "then the question again.",
+         None, [(DOWNLOAD, "?"), (DOWNLOAD, "y")],
+         present=["Software packages are code from PyPI", "Version 2"],
+         absent=["Traceback"], declared=[*BASE, "tabulate"]),
+    Step("1.7 Bare Enter",
+         "A first run answered with Enter twice, then y: just asked again.",
+         None, [(DOWNLOAD, ""), (DOWNLOAD, ""), (DOWNLOAD, "y")],
+         present=[WORKS], absent=["Please answer", "Traceback"],
+         before=first_run_again, declared=BASE),
+    Step("1.8 A typo",
+         "A first run answered x, then y: asked again.",
+         None, [(DOWNLOAD, "x"), (DOWNLOAD, "y")],
+         present=["Please answer", WORKS], absent=["Traceback"],
+         before=first_run_again, declared=BASE),
+    Step("1.9 No",
          "A first run answered n: ~/.ezpkg is removed.",
          None, [(DOWNLOAD, "n")],
          present=["Declined, so `~/.ezpkg` has been removed"],
-         absent=["Traceback", "EZPkg works!"], before=first_run_again,
+         absent=["Traceback", WORKS], before=first_run_again,
          mode="gone"),
-    Step("1.14 Explain",
-         "A first run answered ?, then y: the packages explained, the "
-         "question again.",
-         None, [(DOWNLOAD, "?"), (DOWNLOAD, "y")],
-         present=["Software packages are code from PyPI", "EZPkg works!"],
-         absent=["Traceback"], before=first_run_again, declared=BASE,
-         mode="end-user"),
-    Step("1.15 A typo",
-         "A first run answered x, then y: asked again.",
-         None, [(DOWNLOAD, "x"), (DOWNLOAD, "y")],
-         present=["EZPkg works!"], absent=["Traceback"],
-         before=first_run_again, declared=BASE, mode="end-user"),
-    Step("1.16 Bare Enter",
-         "A first run answered with Enter alone, then y.",
-         None, [(DOWNLOAD, ""), (DOWNLOAD, "y")],
-         present=["EZPkg works!"], absent=["Traceback"],
-         before=first_run_again, declared=BASE, mode="end-user"),
-    Step("1.17 Control-D",
+    Step("1.10 Control-C",
+         "A first run, interrupted at the question: ~/.ezpkg is removed.",
+         None, [(DOWNLOAD, CONTROL_C)],
+         present=["Interrupted, so `~/.ezpkg` has been removed"],
+         absent=["Traceback", WORKS], before=first_run_again,
+         mode="gone"),
+    Step("1.11 Control-D",
          "A first run answered with Control-D (end of input).",
          None, [(DOWNLOAD, CONTROL_D)],
-         absent=["Traceback", "EZPkg works!"], before=first_run_again,
+         absent=["Traceback", WORKS], before=first_run_again,
          mode="gone"),
-    Step("1.18 Always",
-         "A first run answered a: kept, and never asked again.",
-         None, [(DOWNLOAD, "a")],
-         present=["without asking", "remove.py", "EZPkg works!"],
-         absent=["Traceback", "rm -rf"],
-         before=first_run_again, declared=BASE, mode="end-user"),
-    Step("1.19 Always, a later download",
-         "After a, a change needing humanize: no download question.",
-         ["humanize"], [("Are you working on", "y"), ("Update it?", "y")],
-         present=["EZPkg works!"], absent=[DOWNLOAD, "Traceback"],
-         declared=[*BASE, "humanize"]),
-    Step("1.20 Silently",
-         "A first run answered s: a note, then the cow, and no list.",
-         None, [(DOWNLOAD, "s")],
-         present=["silently", "remove.py", "EZPkg works!"],
-         absent=["Traceback", "now installed"], before=first_run_again,
-         declared=BASE, mode="end-user"),
-    Step("1.21 Silently, a later download",
-         "After s, a change needing humanize: no download question, no "
-         "list.",
-         ["humanize"], [("Are you working on", "y"), ("Update it?", "y")],
-         present=["EZPkg works!"],
-         absent=[DOWNLOAD, "now installed", "Traceback"],
-         declared=[*BASE, "humanize"]),
-    Step("1.22 remove.py",
-         "python3 ~/.ezpkg/remove.py: the cache is gone.",
-         None, command=["home/.ezpkg/remove.py"], present=["Removed"],
-         absent=["Traceback"], mode="gone"),
-    Step("1.23 After remove.py",
-         "The program again: a first run, asked as in ux01.",
-         None, present=["(used by `ezpkg`)", "EZPkg works!"],
-         absent=["Traceback"], declared=[*BASE, "humanize"],
-         mode="end-user"),
+    Step("1.12 No answer",
+         "A first run nobody answers (5 minutes, shortened here to 3 "
+         "seconds): no.",
+         None, [(DOWNLOAD, WAIT)],
+         present=["No answer in 3 seconds, so: no."],
+         absent=["Traceback", WORKS], before=first_run_again,
+         environment={"EZPKG_ANSWER_SECONDS": "3"}, mode="gone"),
+    Step("2.1 Becoming the developer",
+         "touch prog.py.toml, then a first run: the file is filled in, "
+         "nothing is asked, and the cow.",
+         None, present=["was empty, so `ezpkg` filled it", WORKS],
+         absent=[DOWNLOAD, "Traceback"], before=developer_first_run,
+         declared=BASE, mode="developer"),
+    Step("2.2 A new import",
+         "import tabulate added: an entry with a range, silently, then "
+         "the cow.",
+         ["tabulate"], present=[WORKS], absent=[DOWNLOAD, "Traceback",
+                                            "changed again"],
+         declared=[*BASE, "tabulate"], mode="developer"),
+    Step("2.3 An import removed",
+         "import tabulate taken out again: its entry goes, silently.",
+         [], present=[WORKS], absent=[DOWNLOAD, "Traceback",
+                                            "changed again"],
+         declared=BASE, mode="developer"),
 ]
 
 
@@ -318,7 +276,8 @@ def with_imports(text: str, names: list[str]) -> str:
 
 
 def run_on_a_terminal(work: Path, script: list[tuple[str, str]],
-                      command: list[str] | None = None
+                      command: list[str] | None = None,
+                      extra: dict[str, str] | None = None
                       ) -> tuple[str, list[str], int]:
     """Run `prog.py` on a pseudoterminal, answering its questions.
 
@@ -331,7 +290,7 @@ def run_on_a_terminal(work: Path, script: list[tuple[str, str]],
         if not key.startswith(("PIP_", "EZPKG_"))
         and key not in ("PYTHONPATH", "VIRTUAL_ENV", "CI")}
     environment.update(HOME=str(work / "home"),
-                       PIP_FIND_LINKS=str(work / "links"))
+                       PIP_FIND_LINKS=str(work / "links"), **(extra or {}))
     python: str = shutil.which("python3") or sys.executable
     pid: int
     master: int
@@ -370,7 +329,7 @@ def run_on_a_terminal(work: Path, script: list[tuple[str, str]],
         asked: str = fresh[-400:]
         seen = len(shown)
         reply: str
-        if DOWNLOAD in asked and not (waiting
+        if "and run `" in asked and not (waiting
                                       and waiting[0][0] in asked):
             reply = "y"
         elif waiting and waiting[0][0] in asked:
@@ -382,6 +341,8 @@ def run_on_a_terminal(work: Path, script: list[tuple[str, str]],
                 + (f", expected one with {waiting[0][0]!r}"
                    if waiting else ""))
             reply = CONTROL_C
+        if reply == WAIT:
+            continue
         os.write(master, reply.encode() if reply in (CONTROL_C, CONTROL_D)
                  else (reply + "\n").encode())
     os.close(master)
@@ -392,7 +353,7 @@ def run_on_a_terminal(work: Path, script: list[tuple[str, str]],
             os.waitstatus_to_exitcode(status))
 
 
-def check(step: Step, shown: str, program: Path) -> list[str]:
+def check(step: Step, shown: str, program: Path, ran: str) -> list[str]:
     """Return what is wrong with a step's output and `prog.py`."""
     flat: str = " ".join(shown.split())
     problems: list[str] = []
@@ -412,16 +373,12 @@ def check(step: Step, shown: str, program: Path) -> list[str]:
         if (program.parent / "home" / ".ezpkg").exists():
             problems.append("~/.ezpkg is still there")
         return problems
-    modes: list[str] = []
-    record: Path
-    for record in (program.parent / "home" / ".ezpkg" / "develop").glob(
-            "*.json"):
-        try:
-            modes.append(json.loads(record.read_text()).get("mode", ""))
-        except (OSError, ValueError):
-            modes.append("unreadable")
-    if modes != [step.mode]:
-        problems.append(f"mode is {modes}, expected [{step.mode!r}]")
+    developing: bool = program.with_name("prog.py.toml").exists()
+    if developing != (step.mode == "developer"):
+        problems.append(f"mode is {'developer' if developing else 'end-user'}"
+                        f", expected {step.mode}")
+    if step.mode == "end-user" and text != ran:
+        problems.append("ezpkg edited an end user's prog.py")
     # Kept entries are now the commented ones (S3.2a, S3.4).
     kept: list[str] = list(ezpkg.dependency_comments(text))
     if step.kept is not None and kept != step.kept:
@@ -488,8 +445,9 @@ def run_step(step: Step, work: Path
     problems: list[str]
     status: int
     shown, problems, status = run_on_a_terminal(work, step.script,
-                                                step.command)
-    problems += check(step, shown, work / "prog.py")
+                                                step.command,
+                                                step.environment)
+    problems += check(step, shown, work / "prog.py", ran)
     return shown, problems, status, ran
 
 

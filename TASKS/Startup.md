@@ -14,6 +14,7 @@
 @7.9_Ask_before_the_first_download/Details.md
 @7.9_Ask_before_the_first_download/Context.md
 @7.10_Upload_to_pypi_and_test/Details.md
+@7.12_Edit_the_prog.py.toml_template/Details.md
 @../ISSUES/2_Windows_and_macOS_are_untried/Details.md
 @../ISSUES/19_How_to_deal_with_compiled_packages/Details.md
 @../ISSUES/22_A_failed_fetch_shows_the_pip_output/Details.md
