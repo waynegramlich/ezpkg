@@ -119,6 +119,11 @@ program, ever, and the program is never edited.  `prog.ezpkg`,
   the file before editing, since Wayne edits it between turns.
 * Wayne does his own end-to-end reads of `README.md`.
 * Wayne prefers discussing in chat to notes in `Details.md` files.
+* Startup context must stay under 150k characters.  Near the end of a
+  major session, move superseded `Context.md` entries into the item's
+  `History.md` (not loaded at startup), leaving `Context.md` as the
+  current state, decisions still in force, open questions and next
+  steps.
 * Claude may push to GitHub, and start and approve `testpypi` release
   runs, but never commits; Wayne commits staged changes.
 * `ezpkg` is on test.pypi.org (`T.uttat`) but not yet on pypi.org
