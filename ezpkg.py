@@ -1147,8 +1147,8 @@ def for_export(names: Collection[str], program: str) -> list[str]:
     if len(others) == len(names):
         raise RuntimeError(
             "the program imports ezpkg, but the approvals do not pin "
-            "it; run once with EZPKG_APPROVE=write, using an ezpkg "
-            "installed from a wheel")
+            "it; run it as its developer, using an ezpkg installed from "
+            "a wheel")
     return list(names)
 
 
@@ -3115,9 +3115,8 @@ class EZPkg:
                 resolved: str = "") -> Path | None:
         """Record the wheels that arrived as approved.
 
-        Called when `EZPKG_APPROVE` is `write`, which is how an
-        author regenerates the file after changing what the program
-        needs.  Sorted by name, so that a change shows up as a small
+        Called on the developer's runs (`gate`), so the file always
+        records what the program needs now (`T.abfd`).  Sorted by name, so that a change shows up as a small
         diff in whatever the program is committed to, and dated, since
         the list is what `pip` chose on that day.
 
@@ -3151,12 +3150,31 @@ class EZPkg:
         # A comment, so `approved` reads the file as it always has.
         resolved = resolved or time.strftime("%Y-%m-%dT%H:%M:%SZ",
                                              time.gmtime())
+        released: str = self.released()
         record.write_text(
-            "# Wheels this program has approved, by SHA-256.  Regenerate\n"
-            "# with EZPKG_APPROVE=write after changing what it needs.\n"
+            "# Wheels this program has approved, by SHA-256, written by\n"
+            "# `ezpkg` on its developer's runs.  Do not edit.\n"
             f"# Resolved: {resolved}\n"
+            + (f"# Released: {released}\n" if released else "")
             + "".join(f"{row}\n" for row in rows))
         return record
+
+    def released(self) -> str:
+        """Return the approvals' `# Released:` version, or an empty string.
+
+        Written by `release`, so that a `release` setting releases once
+        each time it changes (`T.abfd`).
+
+        Returns:
+        * (`str`): Such as `1.0.0`; empty with no file or no release.
+        """
+        # The line `release` writes, after `# Resolved:`.
+        record: Path | None = self.approvals()
+        if record is None or not record.is_file():
+            return ""
+        found: re.Match[str] | None = re.search(
+            r"(?m)^# Released: (\S+)$", record.read_text())
+        return found.group(1) if found else ""
 
     def resolution(self) -> str:
         """Return the approvals' `# Resolved:` date, or an empty string.
@@ -3198,8 +3216,8 @@ class EZPkg:
         approved: dict[str, str] | None = self.approved()
         if not approved:
             raise RuntimeError(
-                "no approvals to pin; run once with "
-                "EZPKG_APPROVE=write first")
+                "no approvals to pin; run the program once as its "
+                "developer (with its `.py.toml`) first")
         versions: dict[str, set[str]] = {}
         wheel: str
         for wheel in approved:
@@ -3208,7 +3226,8 @@ class EZPkg:
             if not wheel.endswith(".whl") or wheel.count("-") < 4:
                 raise RuntimeError(
                     f"{wheel} in {self.approvals()} is not a wheel name; "
-                    f"regenerate it with EZPKG_APPROVE=write")
+                    f"delete the file and run the program as its developer "
+                    f"to write it again")
             name, version = wheel.split("-")[:2]
             versions.setdefault(name, set()).add(version)
         mixed: list[str] = sorted(name for name, found in versions.items()
@@ -3233,10 +3252,10 @@ class EZPkg:
         the program no longer asks for is not fetched just because it
         is recorded.
 
-        `write` and `skip` get no lock, because both are an author
-        choosing again: `write` resolves afresh and records the result,
-        which is how a program's packages are upgraded.  See `T.rafal`
-        in `TASKS/`.
+        A developer's run with no `exclude-newer` date in Part 1 gets no
+        lock: that is the first run, or an upgrade, which resolves
+        afresh and records the result (`gate`).  See `T.rafal` and
+        `T.abfd` in `TASKS/`.
 
         Returns:
         * (`list[str]`): Constraints such as `widget==1.2.3`, sorted, or
@@ -3247,9 +3266,9 @@ class EZPkg:
           Through `pins`, if the approvals name two versions of one
           distribution.
         """
-        # Only an ordinary run, and only with something approved.
-        mode: str = os.environ.get("EZPKG_APPROVE", "").lower()
-        if mode in ("write", "skip") or not self.approved():
+        # Only with something approved, and not when upgrading.
+        if not self.approved() or (self.developing()
+                                   and not self.declared_date()):
             return []
         return self.pins()
 
@@ -3260,22 +3279,29 @@ class EZPkg:
         is where `uv run` reads it too, so one line serves both.  It is
         for a program sent on its own, without its approvals: it gets the
         packages that were newest when its author recorded them, rather
-        than whatever is newest the day it is run.  `write` stamps it;
-        see `stamp`.
+        than whatever is newest the day it is run.  The developer's
+        first run stamps it; see `stamp`.
 
-        With approvals there is no date, because the lock already says
-        exactly which versions.  `write` and `skip` get none either, for
-        the reason `locked` gives.  See `T.srdisb` in `TASKS/`.
+        An end user's run with approvals has no date, because the lock
+        already says exactly which versions.  A developer's run always
+        has it, so that a package added later is one that existed then
+        (`T.abfd`).  See `T.srdisb` in `TASKS/`.
 
         Returns:
         * (`str`): The date as `pip`'s `--uploaded-prior-to` takes it, or
           an empty string for none.
         """
-        # Only an ordinary run without approvals.
-        mode: str = os.environ.get("EZPKG_APPROVE", "").lower()
-        if mode in ("write", "skip") or self.approved():
+        # Not for an end user's run with approvals.
+        if self.approved() and not self.developing():
             return ""
+        return self.declared_date()
 
+    def declared_date(self) -> str:
+        """Return Part 1's `exclude-newer` date, or an empty string.
+
+        Returns:
+        * (`str`): The date as written, such as `2026-10-19T12:00:00Z`.
+        """
         # A block that will not parse is reported elsewhere, by the
         # code that needs it; here it simply has no date.
         try:
@@ -3296,9 +3322,8 @@ class EZPkg:
 
         As `exclude-newer` in the `[tool.uv]` table, so that the date
         travels inside the `.py` even when the approvals do not; see
-        `cutoff`.  The author is asked first, naming the line, because
-        this edits a file they wrote; with no terminal to ask on, the
-        file is left alone.  Nothing else in the program changes.  Its encoding,
+        `cutoff`.  Only on a developer's run, which never asks
+        (`T.abfd`).  Nothing else in the program changes.  Its encoding,
         byte order mark and line endings are kept, since a program is
         not obliged to be UTF-8 with `\\n`.
 
@@ -3307,9 +3332,9 @@ class EZPkg:
           The date, as `approve` wrote it.
 
         Returns:
-        * (`str`): A line for standard error, or an empty string when
-          there is nothing to say, as for a program with no `script`
-          block, which has nowhere to put a date.
+        * (`str`): A line for standard error when the date could not be
+          written, or an empty string, as when it was, or for a program
+          with no `script` block, which has nowhere to put a date.
         """
         # The bytes, so that the encoding can be kept on the way back.
         where: Path | None = main_path()
@@ -3339,31 +3364,26 @@ class EZPkg:
         if dated == toml:
             return ""
 
-        # Ask, naming the line the setting will be on afterwards.
-        edited: str = with_script_toml(text, found, dated)
-        line: int = edited.splitlines().index(f"# {setting}") + 1
-        verb: str = ("change" if "exclude-newer" in (
-            tomllib.loads(toml).get("tool", {}).get("uv", {})) else "add")
-        if not self.ask(f"ezpkg: could I {verb} `{setting}` at line "
-                        f"{line} of {where.name}?"):
-            return f"{where} left as it was; to date it, {by_hand}"
-        write_program(where, edited, encoding, crlf)
+        # Written, then the program starts again (`restart`).
+        try:
+            write_program(where, with_script_toml(text, found, dated),
+                          encoding, crlf)
+        except OSError as error:
+            return f"could not write the resolution date into {where} " \
+                f"({error}); {by_hand}"
         self.edited = True
-        return f"resolution date {resolved} written to {where}"
+        return ""
 
-    def offer_ranges(self, asking: Sequence[str]) -> list[str]:
-        """Offer version ranges for the bare entries in Part 1.
+    def give_ranges(self, asking: Sequence[str]) -> list[str]:
+        """Give each bare entry in Part 1 a range from its approved version.
 
-        Under `EZPKG_APPROVE=write`, once the approvals are written: each
-        entry that is a name alone gets the range `version_range` makes
-        from the version just approved, so that a `.py` sent without its
-        approvals cannot be handed a much newer package than the one it
-        was tested with ("I used EZPkg and it put the wrong packages
-        in!", Wayne, 2026-10-15).  Development is never interrupted for
-        this, nor is the Quick Start's newcomer.  An entry with any
-        specifier, extra or marker is the author's decision and is left
-        alone.  Asked first, as `stamp` asks; no terminal, no edit.
-        See `T.kdaiis`.
+        At a release with `ranges = true`: each entry that is a name
+        alone gets the range `version_range` makes from the version the
+        approvals record, so that a `.py` sent without its approvals
+        cannot be handed a much newer package than the one it was tested
+        with ("I used EZPkg and it put the wrong packages in!", Wayne,
+        2026-10-15).  An entry with any specifier, extra or marker is the
+        author's decision and is left alone.  See `T.kdaiis`, `T.abfd`.
 
         Arguments:
         * `asking` (`Sequence[str]`):
@@ -3381,14 +3401,11 @@ class EZPkg:
             if requirement_name(entry) == entry.strip()
             and normal_name(entry) in versions else entry
             for entry in asking]
-        changed: list[str] = [after for before, after
-                              in zip(asking, ranged, strict=True)
-                              if before != after]
         where: Path | None = main_path()
-        if not changed or where is None:
+        if ranged == list(asking) or where is None:
             return list(asking)
 
-        # Asked, then written, keeping the encoding and line endings.
+        # Written, keeping the encoding and line endings.
         source: str
         encoding: str
         crlf: bool
@@ -3398,21 +3415,9 @@ class EZPkg:
             return list(asking)
         edited: str | None = with_dependency_list(source, ranged)
         if edited is None:
-            return list(asking)
-        entries: str = "entry" if len(changed) == 1 else "entries"
-        listed: str = ", ".join(f'"{entry}"' for entry in changed)
-        if not self.ask(textwrap.fill(
-                f"ezpkg: could I add version ranges to {len(changed)} "
-                f"{entries} of {where.name} ({listed})?", 76)):
-            return list(asking)
-        try:
-            write_program(where, edited, encoding, crlf)
-            self.edited = True
-        except OSError as error:
-            print(f"ezpkg: {where.name}: could not write it ({error})",
-                  file=sys.stderr)
-            return list(asking)
-        print(f"ezpkg: {where.name}: version ranges written", file=sys.stderr)
+            raise SystemExit(f"ezpkg: {where.name}: cannot edit its script "
+                             f"block to give `dependencies` ranges")
+        write_program(where, edited, encoding, crlf)
         return ranged
 
     def request_for(self, asking: Sequence[str]) -> str:
@@ -3442,29 +3447,31 @@ class EZPkg:
             request += " --uploaded-prior-to " + before
         return request
 
-    def export(self, form: str, asking: Sequence[str] = ()) -> None:
+    def export(self, form: str, asking: Sequence[str] = (),
+               target: Path | None = None) -> Path:
         """Write what the approvals record in another tool's form.
 
-        Called when `EZPKG_EXPORT` is set, after the packages have
-        been provided and checked, and the program exits straight after
-        without running its own code.  Every form first checks that Part
-        1 covers what the program imports; see `check_imports`.
-        `zipapp` writes `prog.pyz` beside the program,
-        and `zipapp:PATH` writes it at `PATH`; see `build_zipapp`.
-        `uv` writes `prog-uv.py` and its lock file, and `uv:PATH`
-        names the script; see `build_uv`.
+        Called by `release` for each of `exports`, after the packages
+        have been provided and the imports checked (`check_imports`).
+        `zipapp` writes a `.pyz` (`build_zipapp`); `uv` writes a script
+        and its lock file (`build_uv`).
 
         There was once a `pins` form, printing Part 1 with every package
         pinned, for a `.py` sent on its own.  The `exclude-newer` date
-        that `write` puts in Part 1 does that job now, with no step to
-        remember (Wayne, 2026-10-12).
+        in Part 1 does that job now, with no step to remember (Wayne,
+        2026-10-12).
 
         Arguments:
         * `form` (`str`):
-          What to write: `zipapp`, `zipapp:PATH`, `uv` or `uv:PATH`.  The kind is read in any case; the path is taken as
-          written.
+          What to write: `zipapp` or `uv`, in any case.
         * `asking` (`Sequence[str]`):
           The requirements just provided, which `build_zipapp` bundles.
+        * `target` (`Path | None`):
+          Where to write it; `None` means beside the program, named as
+          `build_zipapp` and `build_uv` name it.
+
+        Returns:
+        * (`Path`): What was written (for `uv`, the script).
 
         Raises:
         * `ValueError`:
@@ -3473,22 +3480,16 @@ class EZPkg:
           If `check_imports`, `build_zipapp` or `build_uv` does;
           see there.
         """
-        # The kind, then for a file an optional place to put it.  A
-        # misspelt form is refused before anything is read.
-        kind: str
-        target: str
-        kind, _, target = form.partition(":")
-        kind = kind.lower()
-        if kind not in ("zipapp", "uv"):
-            raise ValueError(
-                f"EZPKG_EXPORT is {form!r}; use zipapp or uv")
+        # A misspelt form is refused before anything is read.
+        kind: str = form.lower()
+        if kind not in EXPORT_FORMS:
+            raise ValueError(f"cannot export as {form!r}; use zipapp or uv")
 
         # Whatever leaves this machine must not lean on what is on it.
         self.check_imports(asking)
         if kind == "zipapp":
-            self.build_zipapp(asking, Path(target) if target else None)
-        else:
-            self.build_uv(Path(target) if target else None)
+            return self.build_zipapp(asking, target)
+        return self.build_uv(target)
 
     def sync_dependencies(self, asking: Sequence[str],
                           argv: Sequence[str] = ()) -> list[str]:
@@ -3743,10 +3744,9 @@ class EZPkg:
         except Declined:
             raise
         except (RuntimeError, ValueError) as error:
-            hint: str = ("; with an approvals file, run it with "
-                         "EZPKG_APPROVE=write" if self.approved() else "")
+            self.too_new(found, modules, argv)
             print(wrapped(f"ezpkg: {program.name}: `dependencies` is left "
-                          f"as it is: {failure_reason(error)}{hint}",
+                          f"as it is: {failure_reason(error)}",
                           width), file=sys.stderr)
             self.keep(record, kept, asked=fingerprint)
             return asking
@@ -3807,6 +3807,65 @@ class EZPkg:
             settled = fingerprint
         self.keep(record, kept, asked=settled, imported=imported)
         return final
+
+    def too_new(self, found: Discrepancy, modules: Mapping[str, str],
+                argv: Sequence[str]) -> None:
+        """Stop if an addition has no release before the program's date.
+
+        The end user's copy would fail the same way, so the developer is
+        told how to upgrade instead (`T.abfd`).
+
+        Arguments:
+        * `found` (`Discrepancy`):
+          What disagrees.
+        * `modules` (`Mapping[str, str]`):
+          The module of each addition, by package.
+        * `argv` (`Sequence[str]`):
+          Extra arguments for `pip`.
+
+        Raises:
+        * `SystemExit`:
+          Naming the import and the date's line, when one fails under
+          the date alone.
+        """
+        # Each addition alone, under the date: what `prove` fetched
+        # without it.
+        before: str = self.cutoff()
+        if not before:
+            return
+        program: Path = found.program
+        source: list[str] = read_program(program)[0].splitlines()
+        dated: int = next((number for number, line in enumerate(source, 1)
+                           if re.match(r"#\s*exclude-newer\s*=", line)), 0)
+        line: int
+        module: str
+        package: str
+        for line, module, package in found.additions:
+            if package not in modules:
+                continue
+            arrived: list[Path] = []
+            try:
+                # Only a package the index has at all.
+                arrived = self.download([package], argv)
+            except (RuntimeError, ValueError):
+                continue
+            finally:
+                for holding in {one.parent for one in arrived}:
+                    shutil.rmtree(holding, ignore_errors=True)
+            arrived = []
+            try:
+                arrived = self.download([package], argv, (), before)
+            except (RuntimeError, ValueError):
+                raise SystemExit(wrapped(
+                    f"{program.name} line {line} imports `{module}`, but no "
+                    f"release of it existed before the date "
+                    f"{program.name}'s versions are frozen at (line "
+                    f"{dated}, {before[:10]}).  To upgrade everything to "
+                    f"today's versions, delete line {dated} and run "
+                    f"{program.name} again.", columns(sys.stderr))) from None
+            finally:
+                for holding in {one.parent for one in arrived}:
+                    shutil.rmtree(holding, ignore_errors=True)
 
     def needed_by(self, name: str, entries: Sequence[str]) -> str:
         """Return the mark for an entry no import explains.
@@ -4458,8 +4517,8 @@ class EZPkg:
         approved: dict[str, str] | None = self.approved()
         if not approved:
             raise RuntimeError(
-                "no approvals to bundle from; run once with "
-                "EZPKG_APPROVE=write first")
+                "no approvals to bundle from; run the program once as "
+                "its developer (with its `.py.toml`) first")
         remembered: tuple[list[str], list[str]] | None = (
             self.remember(self.request_for(asking)) if asking
             else ([], []))
@@ -4943,61 +5002,16 @@ class EZPkg:
                 writer.write("Please answer y, n, or ? for more.\n")
         return False
 
-    def ask(self, question: str) -> bool:
-        """Ask a yes-or-no question on the terminal, and say which.
-
-        For the author's own decisions, such as letting `stamp` edit the
-        program.  Unlike `consent`, no terminal means no: the question
-        is about changing a file somebody wrote, and nobody present to
-        agree is not agreement.  Anything but `y`, `yes`, `n` or `no` is
-        asked again, up to `ATTEMPTS` times; a terminal that has gone
-        away reads as empty, which is no.
-
-        Arguments:
-        * `question` (`str`):
-          The question, without the answers, which this adds.
-
-        Returns:
-        * (`bool`): True only for a yes.
-        """
-        # No terminal, nobody to say yes.
-        opened: tuple[IO[str], IO[str]] | None = self.terminal()
-        if opened is None:
-            return False
-        writer: IO[str]
-        reader: IO[str]
-        writer, reader = opened
-        answer: str
-        with writer, reader:
-            for _attempt in range(ATTEMPTS):
-                writer.write(f"{question} [y=>Yes|n=>No]: ")
-                writer.flush()
-                answer = answer_from(reader, writer)
-                if not answer:
-                    return False
-                answer = answer.strip().lower()
-                if answer in ("y", "yes"):
-                    return True
-                if answer in ("n", "no"):
-                    return False
-                writer.write("Please answer y or n.\n")
-        return False
-
     def gate(self, wheels: Sequence[Path], asking: Sequence[str] = (),
              new: Sequence[Path] | None = None) -> None:
-        """Write, skip, enforce or ask, as the environment says.
+        """Record, enforce or ask, as the program's mode says.
 
-        `EZPKG_APPROVE` unset enforces the approvals or asks when
-        there are none, `write` records what arrived instead, and `skip`
-        does neither, which is for an author still deciding what the
-        program needs.
-
-        An author running `write` or `skip` is present and deliberate,
-        so neither asks anything.  Otherwise, approvals decide: if the
-        author approved this set, it is verified in silence, and if there
-        are no approvals at all the person who started the program is
-        asked once.  The author's judgement replaces the recipient's
-        prompt rather than being added to it.
+        A developer's run records what arrived (`record_approvals`).
+        Otherwise approvals decide: if the author approved this set, it
+        is verified in silence, and if there are no approvals at all the
+        person who started the program is asked once.  The author's
+        judgement replaces the recipient's prompt rather than being
+        added to it.
 
         The program's developer is never asked, and an end user is asked
         once per program (its path): a yes covers it and its later
@@ -5022,32 +5036,11 @@ class EZPkg:
           Through `verify`, if a wheel is unapproved or altered, or if
           the person asked declines.
         """
-        # One place decides, so the cold and warm paths cannot diverge.
-        mode: str = os.environ.get("EZPKG_APPROVE", "").lower()
-        if mode == "write":
-            # A program with no file has nowhere to keep approvals, and
-            # saying "written to None" would claim otherwise.
-            # The same wheels as already approved keep their date, which
-            # is still true of them, so a second `write` asks nothing.
-            resolved: str = time.strftime("%Y-%m-%dT%H:%M:%SZ",
-                                          time.gmtime())
-            unchanged: bool = self.approved() == {
-                wheel.name: self.digest(wheel) for wheel in wheels}
-            if unchanged:
-                resolved = self.resolution() or resolved
-            written: Path | None = self.approve(wheels, resolved)
-            if written is None:
-                print("nowhere to write approvals: this program has no "
-                      "file of its own", file=sys.stderr)
-            else:
-                print(f"approvals {'unchanged in' if unchanged else 'written to'}"
-                      f" {written}", file=sys.stderr)
-            stamped: str = self.stamp(resolved)
-            if stamped:
-                print(stamped, file=sys.stderr)
+        # The developer's run records what arrived, and dates it.
+        if self.developing():
+            self.record_approvals(wheels)
             return
-        if mode == "skip":
-            return
+
         # The program's record says whether its end user agreed; a
         # program with no file of its own is asked every time.
         program: Path | None = main_path()
@@ -5080,6 +5073,31 @@ class EZPkg:
             self.agreeing = True
             if record is not None:
                 self.keep(record, kept, agreed="yes")
+
+    def record_approvals(self, wheels: Sequence[Path]) -> None:
+        """Keep a developer's approvals and date up to date, silently.
+
+        The approvals change only when what arrived does, and carry the
+        program's `exclude-newer` date; with no date (the first run, or
+        an upgrade, which deleted it), the date is now, and `stamp`
+        writes it into Part 1 (`T.abfd`).
+
+        Arguments:
+        * `wheels` (`Sequence[Path]`):
+          Every wheel the program's `dependencies` brought.
+        """
+        # The date the versions are frozen at.
+        dated: str = self.declared_date()
+        resolved: str = dated or time.strftime("%Y-%m-%dT%H:%M:%SZ",
+                                               time.gmtime())
+        if (self.approved() != {wheel.name: self.digest(wheel)
+                                for wheel in wheels}
+                or self.resolution() != resolved):
+            self.approve(wheels, resolved)
+        if not dated:
+            trouble: str = self.stamp(resolved)
+            if trouble:
+                print(f"ezpkg: {trouble}", file=sys.stderr)
 
     def removed(self) -> str:
         """Take away what a no refuses, and say what that was.
@@ -5129,8 +5147,8 @@ class EZPkg:
             if wheel.name not in expected:
                 raise RuntimeError(
                     f"{wheel.name} is not approved in "
-                    f"{self.approvals()}; regenerate it with "
-                    f"EZPKG_APPROVE=write if it should be")
+                    f"{self.approvals()}; running the program as its "
+                    f"developer brings that file up to date")
             if expected[wheel.name] != actual:
                 raise RuntimeError(
                     f"{wheel.name} does not match its approval in "
@@ -5393,10 +5411,14 @@ class EZPkg:
             "does not provide upload-time metadata" in done.stderr
             or "no such option: --uploaded-prior-to" in done.stderr)
         if undated:
+            # Said only when asked for: the approvals still freeze what
+            # they record (`T.abfd`).
             shutil.rmtree(holding, ignore_errors=True)
-            print(f"ezpkg: fetching without the program's exclude-newer "
-                  f"date {before}, which this index or pip cannot apply",
-                  file=sys.stderr)
+            settings: Settings | None = self.settings()
+            if settings is not None and settings.report:
+                print(f"ezpkg: fetching without the program's "
+                      f"exclude-newer date {before}, which this index or "
+                      f"pip cannot apply", file=sys.stderr)
             return self.download(requirements, argv, constraints)
         if done.returncode == 2:
             raise ValueError(
@@ -5407,8 +5429,9 @@ class EZPkg:
         if done.returncode != 0:
             stale: str = (
                 f"; if `dependencies` changed, the versions locked in "
-                f"{self.approvals()} may be the conflict: regenerate it "
-                f"with EZPKG_APPROVE=write" if constraints else "")
+                f"{self.approvals()} may be the conflict: to upgrade "
+                f"them, delete the `exclude-newer` line in Part 1 and "
+                f"run the program again" if constraints else "")
             raise RuntimeError(
                 f"could not fetch {', '.join(requirements)} into "
                 f"{holding}: "
@@ -5515,32 +5538,6 @@ class EZPkg:
         newest: str = list(BOOTSTRAPS.values())[-1]
         return ("current" if name == newest else "stale"), name
 
-    def report_bootstrap(self) -> str:
-        """Describe the program's pasted bootstrap in one line.
-
-        Silent by default; `install` prints this only when
-        `EZPKG_BOOTSTRAP=check` asks, because the person running a
-        program cannot act on it and its author can ask.  See 6.12.2 of
-        `T.fbanwiis`.
-
-        Returns:
-        * (`str`): The line, for standard error.
-        """
-        # One sentence per state.
-        state: str
-        name: str
-        state, name = self.bootstrap_status()
-        newest: str = list(BOOTSTRAPS.values())[-1]
-        if state == "current":
-            return f"ezpkg: this program's bootstrap is current, {name}"
-        if state == "stale":
-            return (f"ezpkg: this program's bootstrap is stale, {name}; "
-                    f"the current one is {newest}")
-        if state == "edited":
-            return ("ezpkg: this program's bootstrap has been edited, "
-                    "or is not one ezpkg published")
-        return "ezpkg: no bootstrap found in this program"
-
     def chosen(self, entry: str) -> bool:
         """Report whether this `ezpkg` is the one the program asks for.
 
@@ -5570,11 +5567,11 @@ class EZPkg:
         """Return what `provide` fetches for the program's `dependencies`.
 
         Switching, everything, the `ezpkg` entry included.  Otherwise
-        this `ezpkg` runs the program and is not fetched, except under
-        `EZPKG_APPROVE=write`, which fetches exactly this version so that
-        the approvals pin it, and so a later run on another machine
-        switches to it (`T.eui`).  A copy not installed from a wheel is
-        on no index, so it is left out, and the author is told.  An
+        this `ezpkg` runs the program and is not fetched, except on a
+        developer's run, which fetches exactly this version so that the
+        approvals pin it, and so a later run on another machine switches
+        to it (`T.eui`).  A copy not installed from a wheel is on no
+        index, so it is left out.  An
         export fetches the pinned `ezpkg` too, for a program that
         imports it (`for_export`).
 
@@ -5593,19 +5590,9 @@ class EZPkg:
         if switching or own is None:
             return list(asked)
         others: list[str] = [one for one in asked if one != own]
-        if os.environ.get("EZPKG_APPROVE", "").lower() != "write":
-            # An export of a program that imports `ezpkg` itself
-            # carries the pinned one (`for_export`), which `chosen`
-            # has checked is this version.
-            if os.environ.get("EZPKG_EXPORT"):
-                wheels: list[str] = list(self.approved() or {})
-                if len(without_ezpkg(wheels)) < len(wheels):
-                    return [f"ezpkg=={__version__}", *others]
+        if not self.developing():
             return others
         if not from_wheel():
-            print(f"ezpkg: this ezpkg {__version__} was not installed "
-                  f"from a wheel, so the approvals do not pin it",
-                  file=sys.stderr)
             return others
         return [f"ezpkg=={__version__}", *others]
 
@@ -5662,9 +5649,6 @@ class EZPkg:
         anything else above the bootstrap is flagged
         (`statements_above_bootstrap`).  Once only: `EZPKG_RESTARTED`
         marks the second start, and a second edit is only reported.
-        `EZPKG_APPROVE` is held back from `ezpkg` in the second start, so
-        that `write` does not ask its questions again, and given back to
-        the program.
 
         Raises:
         * `SystemExit`:
@@ -5676,12 +5660,8 @@ class EZPkg:
                   f"starting it again, so a traceback's line numbers may "
                   f"be off until it runs again", file=sys.stderr)
             return
-        # The second start is an ordinary run: everything `write` asks
-        # was asked and recorded by the first.
-        environment: dict[str, str] = dict(
-            os.environ, EZPKG_RESTARTED=os.environ.get("EZPKG_APPROVE", ""))
-        environment.pop("EZPKG_APPROVE", None)
-        run_again(environment)
+        # The second start is an ordinary run.
+        run_again(dict(os.environ, EZPKG_RESTARTED="1"))
 
     def switched(self) -> None:
         """Put the environment back after `switch` ran the program again.
@@ -5708,6 +5688,117 @@ class EZPkg:
                 f"ezpkg: switched to ezpkg {version}, but ezpkg "
                 f"{__version__} is running, so it stops here.  Is Python "
                 f"running with -I or -E, which ignore PYTHONPATH?")
+
+    def stale_bootstrap(self) -> str:
+        """Say how to replace an older bootstrap, if the program has one.
+
+        Returns:
+        * (`str`): Such as "`prog.py` carries the bootstrap `nopip6`, but
+          `ezpkg` now has `nopip7`. ...", or empty when it is current,
+          absent or (as `refuse_an_edited_bootstrap` says) edited.
+        """
+        # Only a published bootstrap that is not the newest.
+        state: str
+        name: str
+        state, name = self.bootstrap_status()
+        found: tuple[Path, str] | None = main_source()
+        node: ast.Try | None = bootstrap_node(found[1]) if found else None
+        if state != "stale" or found is None or node is None:
+            return ""
+        newest: str = list(BOOTSTRAPS.values())[-1]
+        lines: str = f"lines {node.lineno}-{node.end_lineno or node.lineno}"
+        return (f"`{found[0].name}` carries the bootstrap "
+                f"`{name.split()[0]}`, but `ezpkg` now has "
+                f"`{newest.split()[0]}`.  To move to it, replace {lines} of "
+                f"`{found[0].name}` with the bootstrap in "
+                f"`{shown(self.quick_start)}` (also at {HOME_PAGE}).")
+
+    def newer_bootstrap(self) -> None:
+        """Tell the developer, once, that a newer bootstrap exists.
+
+        Once per newer bootstrap, per program (its `develop/` record's
+        `newest`).  A program whose developer leaves the old one goes on
+        working (`T.abfd`).
+        """
+        # Said, then remembered.
+        said: str = self.stale_bootstrap()
+        program: Path | None = main_path()
+        if not said or program is None:
+            return
+        record: Path
+        kept: dict[str, Any]
+        record, kept = self.development_record(program)
+        newest: str = list(BOOTSTRAPS.values())[-1]
+        if kept.get("newest") != newest:
+            print(wrapped(said, columns(sys.stderr)), file=sys.stderr)
+            self.keep(record, kept, newest=newest)
+
+    def release(self, settings: Settings, asking: list[str],
+                providing: Sequence[str]) -> None:
+        """Make a release, as `release = "X.Y.Z"` in `prog.py.toml` asks.
+
+        Once per new value (`released`): `dependencies` has been
+        reconciled already; then the bootstrap must be current, the
+        imports are checked, bare entries get ranges with `ranges`, the
+        approvals (kept up to date by every developer run) are frozen
+        as they are, each of `exports` is built beside the program,
+        named by version (`prog-1.0.0.pyz`, `prog-1.0.0-uv.py`), and
+        `# Released: X.Y.Z` is recorded.  The caller then stops without
+        running the program (`T.abfd`).
+
+        Arguments:
+        * `settings` (`Settings`):
+          The developer's settings, with `release` set.
+        * `asking` (`list[str]`):
+          The program's `dependencies`.
+        * `providing` (`Sequence[str]`):
+          What `provide` fetched for them, which `build_zipapp` bundles.
+
+        Raises:
+        * `SystemExit`:
+          With the reason, when the release cannot be made.
+        """
+        # The bootstrap, then the imports.
+        version: str = settings.release or ""
+        program: Path | None = main_path()
+        if program is None:
+            raise SystemExit("ezpkg: a release needs the program's file")
+        stale: str = self.stale_bootstrap()
+        if stale:
+            raise SystemExit(wrapped(
+                f"`{program.name}` {version} was not released.  {stale}",
+                columns(sys.stderr)))
+        try:
+            self.check_imports(asking)
+
+            # Ranges, then what `exports` lists, named by version.
+            if settings.ranges:
+                asking = self.give_ranges(asking)
+            built: list[Path] = []
+            form: str
+            for form in settings.exports:
+                target: Path = program.with_name(
+                    f"{program.stem}-{version}.pyz" if form == "zipapp"
+                    else f"{program.stem}-{version}-uv.py")
+                built.append(self.export(form, providing, target))
+        except (RuntimeError, ValueError) as error:
+            raise SystemExit(f"ezpkg: {program.name} {version} was not "
+                             f"released: {error}") from None
+
+        # Recorded, then said.
+        record: Path = program.with_suffix(".ezpkg")
+        text: str = record.read_text()
+        text = (re.sub(r"(?m)^# Released: \S+$", f"# Released: {version}",
+                       text) if self.released() else
+                re.sub(r"(?m)^(# Resolved: \S+\n)",
+                       rf"\1# Released: {version}\n", text, count=1))
+        record.write_text(text)
+        names: list[str] = [f"`{one.name}`" for one in built]
+        print(wrapped(
+            f"Released `{program.name}` {version}"
+            + (f", building {and_list(names)}" if names else "")
+            + f".  `{program.name}` itself did not run this time.",
+            columns(sys.stderr)), file=sys.stderr)
 
     def refuse_an_edited_bootstrap(self, bootstrap: str) -> None:
         """Stop the program if the bootstrap that called is not published.
@@ -5750,10 +5841,8 @@ class EZPkg:
         * `bootstrap` (`str`):
           The bootstrap's name, or empty when no bootstrap called.
         """
-        # A `restart`'s mark is for this run only, not its children,
-        # which get back the `EZPKG_APPROVE` it held from `ezpkg`.
-        held: str | None = os.environ.pop("EZPKG_RESTARTED", None)
-        self.restarted = held is not None
+        # A `restart`'s mark is for this run only, not its children.
+        self.restarted = os.environ.pop("EZPKG_RESTARTED", None) is not None
         try:
             self.provide_declared(argv, bootstrap)
         except Declined as declined:
@@ -5762,9 +5851,6 @@ class EZPkg:
             # a `dependencies` update's (`ux16`).
             raise SystemExit(wrapped(declined.said, columns(sys.stderr))
                              ) from None
-        finally:
-            if held:
-                os.environ["EZPKG_APPROVE"] = held
 
     def provide_declared(self, argv: Sequence[str], bootstrap: str) -> None:
         """Do `install_declared`'s work, once its environment is set.
@@ -5795,18 +5881,6 @@ class EZPkg:
             # Still here, so no other `ezpkg` came: this one judges.
             self.refuse_an_edited_bootstrap(bootstrap)
 
-        # Recording approvals is a release step, so it is also when
-        # bare entries are offered their ranges.
-        if os.environ.get("EZPKG_APPROVE", "").lower() == "write":
-            asked = self.offer_ranges(asked)
-
-        # An export is a build step, not a run: once written, the
-        # program stops before its own code.  See `export`.
-        form: str = os.environ.get("EZPKG_EXPORT", "")
-        if form:
-            self.export(form, providing)
-            sys.exit(0)
-
         # An ordinary run keeps Part 1 in step with the imports for
         # the program's developer, then warns about every import still
         # uncovered, now that the declared packages can be found.  An
@@ -5815,7 +5889,20 @@ class EZPkg:
         # `auto-dependencies` off hears nothing either (`T.abfd`).
         settings: Settings | None = self.settings()
         if settings is not None and settings.auto_dependencies:
-            self.scan_imports(self.sync_dependencies(asked, argv))
+            asked = self.sync_dependencies(asked, argv)
+            self.scan_imports(asked)
+
+        # A new `release` value is a build, not a run: the program
+        # starts again on the edited file first, then releases and stops
+        # before its own code (`release`).
+        if settings is not None and settings.release not in (
+                None, self.released()):
+            if self.edited:
+                self.restart()
+            self.release(settings, asked, providing)
+            sys.exit(0)
+        if settings is not None:
+            self.newer_bootstrap()
         if self.edited:
             self.restart()
 
@@ -5870,22 +5957,19 @@ class EZPkg:
         leaves its logging handlers on the root logger of whatever
         imports it.
 
-        `EZPKG_APPROVE` decides what happens to what arrives.  Unset,
-        each wheel is checked against the approvals file beside the
-        program and a mismatch is refused.  `write` records what arrived
-        instead of checking it, which is how an author regenerates the
-        file.  `skip` checks nothing, which is for an author still
-        deciding what the program needs.  A program with no approvals
-        file is told what arrived and not asked about it; see `T.sawaw`.
-        Unset, the approvals also lock: the versions they record are
-        the ones fetched, whatever is newer; see `locked`.
+        The program's mode decides what happens to what arrives
+        (`gate`).  On its developer's run (a `prog.py.toml`), it is
+        recorded in the approvals file beside the program.  Otherwise
+        each wheel is checked against that file and a mismatch is
+        refused, and a program with no approvals file asks its end user
+        once.  The approvals also lock: the versions they record are the
+        ones fetched, whatever is newer; see `locked`.
 
-        `EZPKG_EXPORT`, in the no-argument form, writes what the
-        approvals record in another form and then exits instead of
-        returning, so the program's own code never runs: `zipapp` or
-        `uv`, as `export` describes.  Otherwise the program's imports
-        are checked against Part 1, and any it misses are reported once
-        on standard error; see `scan_imports`.
+        In the no-argument form, a developer's new `release` value
+        builds a release and exits instead of returning, so the
+        program's own code never runs; see `release`.  Otherwise the
+        developer's `dependencies` are kept in step with the imports;
+        see `sync_dependencies`.
 
         A requirement is spelled the way `pip` spells it, so a version
         constraint needs no special support:
@@ -5945,11 +6029,6 @@ class EZPkg:
         """
         # Remembered, though nothing reads it yet; see `T.fbanwiis`.
         self.bootstrap = bootstrap
-
-        # Say whether the pasted bootstrap is current, but only when the
-        # author asks; see `T.fbanwiis`.
-        if os.environ.get("EZPKG_BOOTSTRAP", "").lower() == "check":
-            print(self.report_bootstrap(), file=sys.stderr)
 
         # A program run again with the `ezpkg` it asked for puts things
         # back as they were for its own children; see `switch`.
@@ -6209,14 +6288,14 @@ class EZPkg:
         # parser is needed and none can disagree with `pip`.  The lock
         # is part of what was asked; see `request_for`.
         #
-        # Except under `write`, which always fetches: an author recording
-        # approvals is choosing again, and a remembered answer may be
-        # weeks old.  See `T.rafal` in `TASKS/`.
+        # Except on a developer's run with no approvals file, or no date
+        # (an upgrade), which must fetch to record them.  See `T.rafal`
+        # and `T.abfd` in `TASKS/`.
         locked: list[str] = self.locked()
         before: str = self.cutoff()
         request: str = self.request_for(asking)
-        writing: bool = (
-            os.environ.get("EZPKG_APPROVE", "").lower() == "write")
+        writing: bool = self.developing() and not (
+            self.approved() and self.declared_date())
         remembered: tuple[list[str], list[str]] | None = (
             None if writing else self.remember(request))
         trees: list[Path]
@@ -6260,6 +6339,9 @@ class EZPkg:
                     wheel for wheel in arrived
                     if not (versions / self.version_key(wheel)).is_dir()]
                 self.gate(arrived, asking, new)
+                # A developer's first run dates the program, which
+                # changes the key the next run looks for (`T.abfd`).
+                request = self.request_for(asking)
 
                 # Then say what is stored, the bootstrap's own
                 # packages too on a first run, once.  Said from the

@@ -744,3 +744,70 @@ developers section.  5. Iterate.
   `test_dependency_comments_survive_a_rewrite`.  `synced_program`
   makes the program a developer's before its first run.  Quick suite:
   307 OK, 18 skipped.
+
+## 2026-10-19: Slice 4, frozen versions and the upgrade (built)
+
+* `EZPKG_APPROVE` is gone (`write` and `skip`, `offer_ranges`' call,
+  `restart`'s holding of it; `EZPKG_RESTARTED` is now just `1`).
+  `offer_ranges` and `ask` remain, unused, for slice 5's `ranges`.
+* Developer runs: `gate` → `record_approvals` (approvals rewritten
+  only when the wheels or the date differ; `# Resolved:` = Part 1's
+  date; no date → now, and `stamp` writes it into Part 1 without
+  asking, then the program restarts).  `stamp` returns "" on success.
+  `locked()`: none for a developer without a date (first run, or
+  upgrade = delete the `exclude-newer` line).  `cutoff()`: a
+  developer always has the date (`declared_date`); an end user with
+  approvals has none, as before.  `provide` fetches afresh for a
+  developer without approvals or date, and recomputes the request key
+  after `gate` (a stamp changes it).  `providing` pins this `ezpkg`
+  on developer runs when it came from a wheel (silently otherwise).
+* `too_new`: when `reconcile`'s fetch fails under a date, each
+  addition is fetched without it (must exist) and then with it; one
+  that fails only under the date stops the run with Details' message.
+* The "fetching without the program's exclude-newer date" note prints
+  only with `report = true`.
+* Tests: `run_as_developer` (temporary `prog.py.toml` with
+  `auto-dependencies = false`) replaces `EZPKG_APPROVE=write`;
+  `test_deleting_the_date_upgrades_past_the_lock`,
+  `test_the_developer_stamps_the_date_into_the_block`,
+  `test_an_import_newer_than_the_date_stops_the_run` (needs a dating
+  `pip`: this machine has no `~/.ezpkg`, so run with `HOME` set to a
+  scratch home holding a current `pip.whl`); `skip`, ranges-offer,
+  leave-alone and `-c` write tests deleted; `bootstrap.py` and PyPI
+  runs use `CI=1` instead of `skip`.  Import line numbers in messages
+  moved by 3 (the stamped `[tool.uv]` lines).
+* Quick suite (HOME = scratch home with pip 26): 303 OK, 17 skipped.
+
+## 2026-10-19: Slice 5, the release (built)
+
+* `provide_declared`: after the developer's sync, a `release` value
+  different from `released()` (the approvals' `# Released:` line,
+  which `approve` now keeps) restarts first if the file was edited,
+  then `release(settings, asked, providing)` and `sys.exit(0)`.
+  Otherwise a developer run calls `newer_bootstrap()`.
+* `release`: `stale_bootstrap()` refuses ("`prog.py` 1.0.0 was not
+  released.  `prog.py` carries the bootstrap `nopip6`, but `ezpkg` now
+  has `nopip7`.  To move to it, replace lines A-B of `prog.py` with the
+  bootstrap in `~/.ezpkg/quick_start.py` (also at HOME_PAGE)."), then
+  `check_imports`, `give_ranges` (was `offer_ranges`, no question)
+  with `ranges = true`, each of `exports` via `export(form, providing,
+  target)` named `prog-X.Y.Z.pyz` / `prog-X.Y.Z-uv.py`, then
+  `# Released: X.Y.Z` written after `# Resolved:`, and "Released
+  `prog.py` X.Y.Z, building `...`.  `prog.py` itself did not run this
+  time."  Errors: "ezpkg: prog.py X.Y.Z was not released: REASON".
+* `newer_bootstrap`: the same `stale_bootstrap` text, once per newest
+  bootstrap per program (`develop/` record `newest`).
+* Gone: `EZPKG_EXPORT` (and `zipapp:PATH` / `uv:PATH`),
+  `EZPKG_BOOTSTRAP=check`, `report_bootstrap`, `ask`.  Left:
+  `EZPKG_BOOTSTRAP=unchecked`, `EZPKG_SWITCHED`, `EZPKG_RESTARTED`,
+  `EZPKG_PYTHONPATH`, as Details says.
+* Tests: `release_as_developer(program, form)` (temporary toml,
+  `release = "1.0.N"`, `self.built`) replaces `EZPKG_EXPORT`;
+  `test_a_release_happens_once_per_value`,
+  `test_a_newer_bootstrap_is_told_once_and_refused_at_release`;
+  `test_export_needs_approvals`, `test_ask_wants_a_yes_and_a_terminal`,
+  `test_install_reports_only_when_asked` deleted.  Quick suite (scratch
+  `HOME` with pip 26): 302, all OK but one direct-`build_zipapp`
+  assertion, fixed and passing alone.
+* Order of work: slices 1-5 done.  Next (Wayne): the issues list, then
+  `ux/drive.py` (step 3), README (step 4).
