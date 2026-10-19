@@ -974,3 +974,39 @@ developers section.  5. Iterate.
   (`python -c`), S2.4d → S2.4g (Part 1 grows 3 + 1 per package),
   S2.4e → S2.4h (search-and-replace hits the approvals); S3.3c,
   S3.3d, S5.1c, S5.1d keep their numbers.
+
+## 2026-10-19: Rehearsed after the redesign
+
+* Wayne committed and pushed `1d21c14`.  Release run 39329611039
+  (approved by Claude): `ezpkg 0.0.1.dev202610192143` on test.pypi.org.
+  `./release_check.py testpypi` passed; `check.yml` run 39329748088
+  passed (Linux, Windows, both Macs, 3.11-3.15, python.org, console).
+
+## 2026-10-19: Where this stopped (before Wayne's commit and restart)
+
+* Built and rehearsed: slices 1-5, S1.5 `verbosity`, S2.1, and the
+  batch (S2.2, S3.3a/b, S1.5g, S3.2a, S3.4, S2.4a-c, S5.1, S5.2).
+* Agreed, NOT built (next batch): S2.4d platform tags beside `id:`;
+  S5.1b drop `ranges` (a release gives bare entries ranges); S1.5f a
+  plain `pip` `ERROR:` reason on a developer's failed first download
+  (full output at `high`); S1.5e/S1.5h the template explains itself
+  (draft in chat: settings auto-dependencies, verbosity, release,
+  exports, bootstrap, and how to upgrade); S3.1e remove an
+  `ezpkg`-written mark once an import explains the entry; S2.4e
+  `quick_start.py` ships without approvals.
+* Open, the top six given to Wayne (none answered yet):
+  1. S5.1c: a release from a dev or source `ezpkg` gives the
+     Quick Start's entry `ezpkg>=0.0.1,<0.1`, shutting out `.devN`
+     rehearsals; proposed: leave the entry alone then.
+  2. S1.5h: the template draft, and `bootstrap` governing only the
+     bootstrap (ranges and the `ezpkg` range at every release).
+  3. S2.2a: wording when nothing new was downloaded ("`prog.py` uses
+     software packages ... already in `~/.ezpkg` ... Run `prog.py`?").
+  4. S1.4a: new `ux/drive.py` steps (end user 1.1-1.6, developer
+     2.1-2.9, `remove.py` 3.1).
+  5. Next batch order: build the agreed items above with 1-3.
+  6. `I.ffspo`: the end user's five failure cases, one plain line each.
+* Also open, lower: S2.2b, S2.4g, S2.4h, S3.3c, S3.3d, S5.1d (agent's
+  notes, in the batch entry above); README (H.1) waits for the UX work.
+* Issue numbering: `S<slice>.<n>` with letter sub-items; never
+  renumbered; closed or skipped items stay listed, marked so.

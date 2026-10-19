@@ -52,6 +52,9 @@ needs live here instead.
   `--only 1.4` runs one step from the snapshot the step before left
   in `ux/.snapshots/` (ignored; dropped when the code changes), or
   after running the earlier steps as unrecorded setup.
+  Its steps still describe the design before 2026-10-19 (end-user and
+  developer questions); rewriting them is `T.abfd`'s S1.4a.  The
+  `ux/uxNN_prog*.py` snapshots are excluded from `ruff` and `mypy`.
 * `git_hooks/`: `prepare-commit-msg` adds `Assisted-by: Claude
   Code:claude-opus-5-5` to Wayne's commit messages (deletable in the
   editor), and `commit-msg` refuses a message that is only that
@@ -81,6 +84,16 @@ Part 1 of every program with a bootstrap lists `ezpkg` first (the Quick
 Start's is `ezpkg>=0.0.1.dev0,<0.1` until the real release), and that
 entry chooses which `ezpkg` runs it (`T.eui`).
 
+## The Two Modes (`T.abfd`, 2026-10-19)
+
+A `prog.py.toml` beside `prog.py` makes it its developer's: no
+questions, `dependencies` kept in step with the imports silently, the
+versions frozen by `exclude-newer` and the `[tool.ezpkg] approved`
+checksums `ezpkg` writes into Part 1, and `release = "X.Y.Z"` builds a
+release.  Without one, `prog.py` is an end user's: one question per
+program, ever, and the program is never edited.  `prog.ezpkg`,
+`EZPKG_APPROVE`, `EZPKG_EXPORT` and `EZPKG_BOOTSTRAP=check` are gone.
+
 ## Testing and Linting
 
 * Quick tests, during development (about 2 minutes):
@@ -88,6 +101,10 @@ entry chooses which `ezpkg` runs it (`T.eui`).
   named after it.
 * The full suite (`./ezpkg_test.py`, or `EZPKG_TEST=COMPLETE` for every
   `bootstrap.py` case) runs only when Wayne asks.
+* The date tests need a `pip` 26 or newer in `~/.ezpkg`, and skip
+  without one.  This machine has no `~/.ezpkg`, so run the suite with
+  `HOME` set to a scratch home whose `.ezpkg/pip.whl` is a current
+  `pip` (`pip download pip --no-deps`).
 * `ruff check .` and `mypy .`; both check against the Python 3.11 floor.
   `quick_start.py` draws one known `I001` (no blank line after the
   Part 2 imports).
