@@ -46,6 +46,7 @@ import importlib.metadata
 import importlib.util
 import inspect
 import io
+import itertools
 import json
 import os
 import re
@@ -611,21 +612,6 @@ def program_name() -> str:
     return program.name if program is not None else "this program"
 
 
-def removal_command(root: Path) -> str:
-    """Return the command that runs a cache's `remove.py`.
-
-    Arguments:
-    * `root` (`Path`):
-      The cache.
-
-    Returns:
-    * (`str`): Such as `python3 ~/.ezpkg/remove.py`; on Windows, whose
-      Python is started as `py`, the full path.
-    """
-    return (f"py {shown(root / 'remove.py')}" if os.name == "nt"
-            else f"python3 {shown(root / 'remove.py')}")
-
-
 def name_of(name: str) -> str:
     """Return a program's name as the questions show it, in backticks.
 
@@ -830,6 +816,166 @@ def main_source() -> tuple[Path, str] | None:
             return where, source.read()
     except (OSError, UnicodeDecodeError, SyntaxError):
         return None
+
+
+# What an empty `prog.py.toml` is filled with: every setting, commented
+# out at its default (`T.abfd`).  `{name}` is the program's file name.
+SETTINGS_TEMPLATE: str = """\
+# {name}.toml: EZPkg settings for {name}.  Having this file means
+# {name} is being developed.  Remove a `#` to change a setting.
+# https://pypi.org/project/ezpkg/
+
+# Keep `dependencies` matching the imports.
+# auto-dependencies = true
+
+# Print one line for each change made to `dependencies`.
+# report = false
+
+# Make a release: runs once each time this value changes.
+# release = "1.0.0"
+
+# What a release builds: "zipapp" (prog-X.Y.Z.pyz), "uv" (prog-X.Y.Z-uv.py).
+# exports = ["zipapp", "uv"]
+
+# At a release, give each bare entry in `dependencies` a version range.
+# ranges = false
+"""
+
+# What a release can build, in the order `exports` documents them.
+EXPORT_FORMS: tuple[str, ...] = ("zipapp", "uv")
+
+
+@dataclasses.dataclass(frozen=True)
+class Settings:
+    """A developer's settings for a program, from `prog.py.toml`.
+
+    The file's presence is what makes a program its developer's; an
+    empty one means every default (`T.abfd`).  Each key is a field, its
+    `-` spelt `_`.
+
+    Attributes:
+    * `auto_dependencies` (`bool`):
+      Keep `dependencies` matching the imports.
+    * `report` (`bool`):
+      Print one line per change to `dependencies`.
+    * `release` (`str | None`):
+      The version to release, such as `"1.0.0"`, or `None`.
+    * `exports` (`tuple[str, ...]`):
+      What a release builds, from `EXPORT_FORMS`.
+    * `ranges` (`bool`):
+      At a release, give bare entries in `dependencies` ranges.
+    """
+
+    auto_dependencies: bool = True
+    report: bool = False
+    release: str | None = None
+    exports: tuple[str, ...] = ()
+    ranges: bool = False
+
+
+def settings_path(program: Path) -> Path:
+    """Return the settings file of a program: `prog.py.toml` beside it.
+
+    Arguments:
+    * `program` (`Path`):
+      The program, such as `prog.py`.
+
+    Returns:
+    * (`Path`): The settings file, whether or not it exists.
+    """
+    # The whole name, suffix included, so `prog.py` and `prog.pyw`
+    # cannot share one.
+    return program.with_name(f"{program.name}.toml")
+
+
+def setting_line(text: str, key: str) -> int:
+    """Return the line of `prog.py.toml` that sets a top-level key.
+
+    `tomllib` reports no positions, and a message naming the line lets
+    the developer go straight to it.
+
+    Arguments:
+    * `text` (`str`):
+      The file's text.
+    * `key` (`str`):
+      The top-level key, as `tomllib` read it.
+
+    Returns:
+    * (`int`): The first line (from 1) that sets `key` or opens it as a
+      table, or 0 when none is found.
+    """
+    # A bare, quoted or dotted key before `=`, or a `[table]` header.
+    pattern: re.Pattern[str] = re.compile(
+        r"""\s*(?:\[+\s*)?(?:"([^"]*)"|'([^']*)'|([A-Za-z0-9_-]+))"""
+        r"""\s*[.=\]]""")
+    number: int
+    line: str
+    for number, line in enumerate(text.splitlines(), 1):
+        found: re.Match[str] | None = pattern.match(line)
+        if found is not None and key in found.groups():
+            return number
+    return 0
+
+
+def read_settings(path: Path) -> Settings:
+    """Read and check a program's `prog.py.toml`.
+
+    Every key and value is checked, so a typo stops the run rather than
+    being quietly ignored (`T.abfd`).
+
+    Arguments:
+    * `path` (`Path`):
+      The settings file, which exists.
+
+    Returns:
+    * (`Settings`): What it sets, with the defaults for the rest.
+
+    Raises:
+    * `ValueError`:
+      With the message for the developer, such as `prog.py.toml line 3:
+      unknown setting `relase` (did you mean `release`?)`.
+    """
+    # TOML is UTF-8, and `tomllib`'s own messages give the line.
+    try:
+        text: str = path.read_text(encoding="utf-8")
+        table: dict[str, Any] = tomllib.loads(text)
+    except (UnicodeDecodeError, tomllib.TOMLDecodeError) as error:
+        raise ValueError(f"{path.name}: {error}") from None
+
+    # Each key, then the form of its value.
+    known: dict[str, str] = {field.name.replace("_", "-"): field.name
+                             for field in dataclasses.fields(Settings)}
+    values: dict[str, Any] = {}
+    key: str
+    value: Any
+    for key, value in table.items():
+        where: str = f"{path.name} line {setting_line(text, key)}"
+        if key not in known:
+            near: list[str] = difflib.get_close_matches(key, list(known), 1)
+            raise ValueError(
+                f"{where}: unknown setting `{key}` " + (
+                    f"(did you mean `{near[0]}`?)" if near else
+                    "(the settings are "
+                    + and_list([f"`{one}`" for one in known]) + ")"))
+        wrong: str = ""
+        if key == "release":
+            if not (isinstance(value, str) and RELEASE.fullmatch(value)):
+                wrong = 'a version in quotes, such as "1.0.0"'
+        elif key == "exports":
+            if (isinstance(value, list)
+                    and all(one in EXPORT_FORMS for one in value)
+                    and len(set(value)) == len(value)):
+                value = tuple(value)
+            else:
+                wrong = ("a list of " + and_list(
+                    [f'"{one}"' for one in EXPORT_FORMS], "or")
+                    + ", each at most once")
+        elif not isinstance(value, bool):
+            wrong = "`true` or `false`"
+        if wrong:
+            raise ValueError(f"{where}: `{key}` must be {wrong}")
+        values[known[key]] = value
+    return Settings(**values)
 
 
 def bootstrap_fingerprint(text: str) -> str:
@@ -1429,21 +1575,66 @@ def dependencies_span(toml: str) -> tuple[int, int] | None:
     return key.start(), index
 
 
-def with_dependency_list(text: str, entries: Sequence[str]) -> str | None:
+def dependency_comments(text: str) -> dict[str, str]:
+    """Return the comment after each entry of Part 1's `dependencies`.
+
+    Such as `# Needed by pandas (excel)`, which keeps an entry no import
+    explains (`T.abfd`).  Only a comment that ends an entry's line, with
+    no other entry after it on that line, belongs to that entry.
+
+    Arguments:
+    * `text` (`str`):
+      The program's source.
+
+    Returns:
+    * (`dict[str, str]`): Each commented entry's comment, `#` and all,
+      by the `normal_name` of its requirement's name.
+    """
+    # The block's lines, and the entries on each.
+    lines: list[int] | None = dependency_lines(text)
+    block: tuple[re.Match[str], str] | None = script_toml(text)
+    if lines is None or block is None:
+        return {}
+    declared: object = tomllib.loads(block[1]).get("dependencies")
+    if not isinstance(declared, list):
+        return {}
+    source: list[str] = text.splitlines()
+    comments: dict[str, str] = {}
+    entry: str
+    line: int
+    for entry, line in zip(declared, lines):
+        if lines.count(line) != 1 or line > len(source):
+            continue
+        rest: str = script_text(source[line - 1])
+        found: re.Match[str] | None = re.search(
+            r"""^\s*(["'])[^"']*\1\s*,?\s*(#.*?)\s*$""", rest)
+        if found is not None:
+            comments[normal_name(requirement_name(str(entry)))] = (
+                found.group(2))
+    return comments
+
+
+def with_dependency_list(text: str, entries: Sequence[str],
+                         comments: Mapping[str, str] | None = None
+                         ) -> str | None:
     """Return a program's text with Part 1's `dependencies` replaced.
 
     An array written on one line stays on one line while it fits in 79
-    columns; otherwise it is written one entry per line, as
-    `pin_dependencies` writes it.  A block with no `dependencies` gets
-    one above its first table, since a key after a table header would
-    belong to that table.  Everything else in the block, and outside
-    it, stays as written.  See `T.kdaiis`.
+    columns and has no comments; otherwise it is written one entry per
+    line, as `pin_dependencies` writes it, each entry keeping its
+    comment (`dependency_comments`).  A block with no `dependencies`
+    gets one above its first table, since a key after a table header
+    would belong to that table.  Everything else in the block, and
+    outside it, stays as written.  See `T.kdaiis`.
 
     Arguments:
     * `text` (`str`):
       The program's source.
     * `entries` (`Sequence[str]`):
       The requirement strings, in order.
+    * `comments` (`Mapping[str, str] | None`):
+      New comments, `#` and all, by the `normal_name` of an entry's
+      name, as `dependency_comments` returns them.
 
     Returns:
     * (`str | None`): The program with the new block, or `None` when it
@@ -1464,6 +1655,9 @@ def with_dependency_list(text: str, entries: Sequence[str]) -> str | None:
     expected["dependencies"] = list(entries)
     one_line: str = ("dependencies = ["
                      + ", ".join(f'"{entry}"' for entry in entries) + "]")
+    noted: dict[str, str] = {**dependency_comments(text), **(comments or {})}
+    remarks: list[str] = [noted.get(normal_name(requirement_name(entry)), "")
+                          for entry in entries]
 
     # Replaced where it is, or added above the first table.
     span: tuple[int, int] | None = dependencies_span(toml)
@@ -1471,8 +1665,10 @@ def with_dependency_list(text: str, entries: Sequence[str]) -> str | None:
         array: str = (
             one_line
             if "\n" not in toml[span[0]:span[1]] and len(one_line) <= 77
+            and not any(remarks)
             else "dependencies = [\n"
-            + "".join(f'  "{entry}",\n' for entry in entries) + "]")
+            + "".join(f'  "{entry}",{f"  {remark}" if remark else ""}\n'
+                      for entry, remark in zip(entries, remarks)) + "]")
         toml = toml[:span[0]] + array + toml[span[1]:]
     elif had:
         return None
@@ -1671,7 +1867,8 @@ def every_import(text: str) -> list[tuple[str, int, bool]]:
 
     Unlike `program_imports`, imports the program is ready to see fail
     -- in a `try` that catches `ImportError`, or under `if
-    TYPE_CHECKING:` -- are included, marked optional: such an import
+    TYPE_CHECKING:` -- are included, marked optional, as are modules
+    named in a string (`importlib.import_module("yaml")`): such an import
     never demands a package, but a declared package it uses is not
     unused.  Relative imports are left out.  See `T.kdaiis`.
 
@@ -1699,6 +1896,17 @@ def every_import(text: str) -> list[tuple[str, int, bool]]:
             names = [alias.name for alias in node.names]
         elif isinstance(node, ast.ImportFrom) and not node.level:
             names = [node.module or ""]
+        elif (isinstance(node, ast.Call) and node.args
+              and isinstance(node.args[0], ast.Constant)
+              and isinstance(node.args[0].value, str)
+              and (isinstance(node.func, ast.Name)
+                   and node.func.id in ("__import__", "import_module")
+                   or isinstance(node.func, ast.Attribute)
+                   and node.func.attr == "import_module")
+              and not node.args[0].value.startswith(".")):
+            # A module named in a string, as by `importlib.import_module`
+            # (`T.abfd`), never relative.
+            names = [node.args[0].value]
         name: str
         for name in names:
             top: str = name.split(".")[0]
@@ -1923,7 +2131,6 @@ def version_range(name: str, version: str) -> str:
 
 
 # The answers to a yes-or-no question.
-YES_NO: dict[str, str] = {"y": "yes", "yes": "yes", "n": "no", "no": "no"}
 
 
 # Imports whose package on PyPI has a different name, for the ones
@@ -2406,36 +2613,21 @@ def run_again(environment: Mapping[str, str]) -> None:
     os.execve(sys.executable, command, dict(environment))
 
 
-def importable(module: str) -> bool:
-    """Say whether a top-level module can be imported here, without importing it.
-
-    Arguments:
-    * `module` (`str`):
-      A top-level module name.
-
-    Returns:
-    * (`bool`): True when this Python can find it.
-    """
-    # A broken finder counts as not found.
-    try:
-        return importlib.util.find_spec(module) is not None
-    except (ImportError, ValueError):
-        return False
-
-
-def and_list(words: Sequence[str]) -> str:
+def and_list(words: Sequence[str], last: str = "and") -> str:
     """Return words joined the way a sentence lists them.
 
     Arguments:
     * `words` (`Sequence[str]`):
       The words, in order.
+    * `last` (`str`):
+      The word before the last one, such as `or`.
 
     Returns:
     * (`str`): Such as `a`, `a and b` or `a, b and c`.
     """
     # The last two joined by "and".
-    return (", ".join(words[:-1]) + " and " + words[-1] if len(words) > 1
-            else "".join(words))
+    return (", ".join(words[:-1]) + f" {last} " + words[-1]
+            if len(words) > 1 else "".join(words))
 
 
 def script_text(line: str) -> str:
@@ -2452,72 +2644,14 @@ def script_text(line: str) -> str:
     return line[2:] if line.startswith("# ") else line.lstrip("#")
 
 
-def inserted(before: str, after: str, marker: str,
-             script: bool) -> list[tuple[int | None, str, str]]:
-    """Return the lines `after` has that `before` lacks, for a display.
-
-    Arguments:
-    * `before`, `after` (`str`):
-      A program before and after one kind of change.
-    * `marker` (`str`):
-      What to mark each new line with, such as `mypy`.
-    * `script` (`bool`):
-      True for lines of the script block, shown without their `# `,
-      and with any line they replace shown as removed; otherwise a line
-      is shown stripped, and only as it is now.
-
-    Returns:
-    * (`list[tuple[int | None, str, str]]`): Each line's number in
-      `after` (`None` for a removed one), marker and text.
-    """
-    # Line by line, in the order they come.  A script block change is
-    # one block (`with_unimported` writes one table), found between the
-    # lines that are the same at both ends: matched line by line, its
-    # own `]` could pair with the `]` of `dependencies` above it and be
-    # shown as the wrong line (`ux03`, 2026-10-18).
-    old: list[str] = before.splitlines()
-    new: list[str] = after.splitlines()
-    rows: list[tuple[int | None, str, str]] = []
-    opcodes: list[tuple[str, int, int, int, int]]
-    if script:
-        same: int = 0
-        while (same < min(len(old), len(new))
-               and old[same] == new[same]):
-            same += 1
-        tail: int = 0
-        while (tail < min(len(old), len(new)) - same
-               and old[-1 - tail] == new[-1 - tail]):
-            tail += 1
-        opcodes = [("replace", same, len(old) - tail, same,
-                    len(new) - tail)]
-    else:
-        opcodes = difflib.SequenceMatcher(
-            None, old, new, autojunk=False).get_opcodes()
-    operation: str
-    first: int
-    last: int
-    start: int
-    end: int
-    for operation, first, last, start, end in opcodes:
-        if operation == "equal":
-            continue
-        if script:
-            rows += [(None, "remove", script_text(line))
-                     for line in old[first:last]]
-        rows += [(index + 1, marker,
-                  script_text(new[index]) if script else new[index].strip())
-                 for index in range(start, end)]
-    return rows
-
-
 @dataclasses.dataclass
 class Discrepancy:
     """How a program's `dependencies` differ from what its imports imply.
 
     The target is the `dependencies` the imports imply: each imported
     module's package, in the order of each module's first import.  An
-    entry no import explains -- one kept as `unimported`, or one whose
-    modules are unknown here, such as `pywin32` on Linux -- keeps its
+    entry no import explains -- one marked `# Needed ...` (or kept as
+    `unimported`, the older way), or one whose modules are unknown here, such as `pywin32` on Linux -- keeps its
     place after the same neighbour.  Built by `EZPkg.discrepancy`.  See
     `T.kdaiis` in `TASKS/`.
 
@@ -2610,6 +2744,24 @@ class Discrepancy:
         return [self.entries[item[1]] if item[0] == "entry" else item[2]
                 for item in result]
 
+    def imported(self, added: Collection[str]) -> list[str]:
+        """Return the packages the imports imply, for the next run.
+
+        So that `EZPkg.reconcile` can tell an entry whose import was
+        removed from one added by hand (`T.abfd`).
+
+        Arguments:
+        * `added` (`Collection[str]`):
+          The packages of the additions being made.
+
+        Returns:
+        * (`list[str]`): Their `normal_name`s, sorted.
+        """
+        # The entries the imports place, and the additions.
+        return sorted({normal_name(requirement_name(self.entries[index]))
+                       for index in self.placed_by}
+                      | {normal_name(package) for package in added})
+
     def target(self) -> list[str]:
         """Return the `dependencies` with every change made.
 
@@ -2620,218 +2772,13 @@ class Discrepancy:
         return self.arrange({package for _, _, package in self.additions},
                             self.removals)
 
-    def stopping(self, missing: Sequence[tuple[int, str, str]],
-                 asking: bool, width: int = LINE_WIDTH) -> str:
-        """Say where the program will stop, whose mistake it is, and the fix.
-
-        For an end-user, whom a missing package stops on every run
-        (Wayne, 2026-10-18): someone who edited the author's program
-        without knowing `ezpkg` must not be left blaming it.
-
-        Arguments:
-        * `missing` (`Sequence[tuple[int, str, str]]`):
-          The additions whose modules cannot be imported here.
-        * `asking` (`bool`):
-          True on a terminal, where answering `y` next time is a fix.
-        * `width` (`int`):
-          The width to wrap to.
-
-        Returns:
-        * (`str`): The paragraph, ending with a newline.
-        """
-        # One import or several, then the fixes.
-        name: str = f"`{self.program.name}`"
-        lines: list[int] = [line for line, _, _ in missing]
-        modules: list[str] = [f"`{module}`" for _, module, _ in missing]
-        packages: list[str] = [f'"{package}"' for _, _, package in missing]
-        declared: list[int] = [line for line in self.lines if line]
-        where: str = f" ({line_list(declared)})" if declared else ""
-        one: bool = len(lines) == 1
-        text: str = (
-            f"{line_list(lines).capitalize()} of {name} "
-            f"{'imports' if one else 'import'} {and_list(modules)}, but "
-            f"its `dependencies`{where} do not list "
-            f"{'it' if one else 'them'}, so {name} will stop "
-            f"{'there' if one else f'at line {lines[0]}'}.  This is a "
-            f"mistake in {name}, not in Python or `ezpkg`.  To fix it, add "
-            f"{and_list(packages)} to the `dependencies` list near the top "
-            f"of {name}{where}"
-            f"{f', or run {name} again and answer `y`' if asking else ''}.")
-        return wrapped(text, width) + "\n"
-
-    def summary(self) -> str:
-        """Return the line that says where the two disagree.
-
-        Returns:
-        * (`str`): Such as `EZPkg: prog.py: its dependencies (lines
-          5-6) and its imports (lines 14-15) disagree.`, wrapped.
-        """
-        # Moved entries count on both sides, as well as the changes.
-        target: list[str] = self.target()
-        moved: set[int] = set()
-        operation: str
-        first: int
-        last: int
-        for operation, first, last, _, _ in difflib.SequenceMatcher(
-                None, self.entries, target).get_opcodes():
-            if operation in ("replace", "delete"):
-                moved |= {index for index in range(first, last)
-                          if self.entries[index] in target}
-        declared: list[int] = [self.lines[index]
-                               for index in (*self.removals, *moved)]
-        imported: list[int] = [line for line, _, _ in self.additions]
-        if self.uncommented is not None:
-            imported.append(self.uncommented)
-        imported += [self.placed_by[index] for index in moved
-                     if index in self.placed_by]
-        sides: str = (f"its `dependencies`"
-                      f"{f' ({line_list(declared)})' if declared else ''} "
-                      f"and its imports"
-                      f"{f' ({line_list(imported)})' if imported else ''}")
-        return textwrap.fill(f"EZPkg: {self.program.name}: {sides} "
-                             f"disagree.", 76)
-
-    def needing(self, count: int, end: str = ".") -> str:
-        """Return the line that says how many entries need updating.
-
-        For `reconcile`'s one question about several changes (Wayne,
-        2026-10-17).
-
-        Arguments:
-        * `count` (`int`):
-          How many entries would change (`updating`).
-        * `end` (`str`):
-          `:` when the changes are listed after it (`ux/ux04_Batch_y.txt`).
-
-        Returns:
-        * (`str`): Such as `` `prog.py` has 3 entries in `dependencies`
-          (line 5) that need to be updated. ``, wrapped.
-        """
-        # Where `dependencies` is, when its entries say.
-        lines: list[int] = [line for line in self.lines if line]
-        where: str = f" ({line_list(lines)})" if lines else ""
-        also: str = (f", and its import of `ezpkg` (line {self.uncommented}) "
-                     f"needs the mypy comment" if self.uncommented is not None
-                     else "")
-        entries: str = ("1 entry" if count == 1 else f"{count} entries")
-        need: str = "needs" if count == 1 else "need"
-        return wrapped(f"`{self.program.name}` has {entries} in "
-                       f"`dependencies`{where} that {need} to be "
-                       f"updated{also}{end}", LINE_WIDTH)
-
-    def display(self, final: Sequence[str], source: str, listed: str,
-                kept: str, edited: str, made: bool, heading: str = ""
-                ) -> str:
-        """Return every change to the program, line by line.
-
-        Wayne's layout (`ux/ux02_Batch_y.txt`, `ux03`): each line's
-        number in the file afterwards (blank for a removed line), a
-        marker (`add`, `remove`, `move`, `mypy`, or none for an anchor)
-        and the line's text, script block lines without their `# `.
-        The `dependencies` changes come with the nearest unchanged entry
-        or bracket above and below as anchors, unless the array is on
-        one line, which is then shown before and after; the
-        `[tool.ezpkg]` lines of a `k` and the imports given a `mypy`
-        comment come alone.
-
-        Arguments:
-        * `final` (`Sequence[str]`):
-          The `dependencies` afterwards.
-        * `source` (`str`):
-          The program as it is.
-        * `listed` (`str`):
-          The program with only `dependencies` changed.
-        * `kept` (`str`):
-          That, with `[tool.ezpkg] unimported` changed as well.
-        * `edited` (`str`):
-          That, with the `mypy` comments added: the whole edit.
-        * `made` (`bool`):
-          True when the changes are being made without asking, so the
-          heading says "made" rather than "to be made".
-        * `heading` (`str`):
-          Another heading, such as `needing`'s line before `Update
-          them?`.
-
-        Returns:
-        * (`str`): The heading and lines, ending with a newline.
-        """
-        # Each entry's line afterwards, and the brackets' lines around
-        # them.
-        after: list[str] = edited.splitlines()
-        where: list[int] = dependency_lines(edited) or []
-        named: bool = len(where) == len(final)
-
-        def bracket(entry: str) -> int | None:
-            """Return the line of the array's `[` or `]`."""
-            # Out from the entries, or the `dependencies` line itself.
-            if not where:
-                return next((index + 1 for index, line in enumerate(after)
-                             if "dependencies" in line), None)
-            if entry == "[":
-                return next((index + 1 for index in
-                             range(where[0] - 1, -1, -1)
-                             if "[" in after[index]), None)
-            return next((index + 1 for index in
-                         range(where[-1] - 1, len(after))
-                         if "]" in after[index]), None)
-
-        rows: list[tuple[int | None, str, str]] = []
-        label: str
-        entry: str
-        for label, entry in ([] if len(set(where)) < len(where) else
-                             self.rows(final, ())):
-            marker: str = label.split(" ")[0]
-            if marker not in ("add", "remove", "move"):
-                marker = ""
-            number: int | None = None
-            text: str = entry
-            if marker == "remove":
-                pass
-            elif entry in ("[", "]"):
-                number = bracket(entry)
-                if number is not None:
-                    text = script_text(after[number - 1])
-            elif named and entry[1:-2] in final:
-                number = where[list(final).index(entry[1:-2])]
-            rows.append((number, marker, text))
-        if len(set(where)) < len(where):
-            rows += inserted(source, listed, "add", True)
-        rows += inserted(listed, kept, "add", True)
-        rows += inserted(kept, edited, "mypy", False)
-
-        # Colon-aligned numbers, then the marker column.
-        width: int = len(str(max((one for one, _, _ in rows if one),
-                                 default=0)))
-        heading = heading or (f"Changes {'made' if made else 'to be made'} "
-                              f"to `{self.program.name}`:")
-        return "\n".join(
-            [heading]
-            + [f"{'' if number is None else number:>{width}}:    "
-               f"{marker:<7}{text}".rstrip()
-               for number, marker, text in rows]) + "\n"
-
-    def updating(self, final: Sequence[str]) -> int:
-        """Count the entries that `final` adds, removes or moves.
-
-        Arguments:
-        * `final` (`Sequence[str]`):
-          The `dependencies` afterwards.
-
-        Returns:
-        * (`int`): How many rows of `display` are not anchors.
-        """
-        # The labels `rows` gives a change.
-        return sum(1 for label, _ in self.rows(final, ())
-                   if label.split(" ")[0] in ("add", "remove", "move"))
-
     def reported(self, final: Sequence[str], before: str, edited: str,
                  modules: Mapping[str, str]) -> list[str]:
-        """Return a line for each change Auto mode made, in line order.
+        """Return a line for each change `reconcile` made, in line order.
 
-        Nothing was shown before an Auto mode edit, so each entry added,
-        removed or moved is named, with its line afterwards, and the
-        `mypy` comment an added entry's import was given (Wayne,
-        `ux11`).
+        For `report = true` (`T.abfd`): each entry added, removed or
+        moved is named, with its line afterwards, and the `mypy` comment
+        an added entry's import was given (Wayne, `ux11`).
 
         Arguments:
         * `final` (`Sequence[str]`):
@@ -2878,68 +2825,6 @@ class Discrepancy:
                 reports.append(f'ezpkg: moved "{entry}" in {name}'
                                f'{at.get(entry, "")}.')
         return reports
-
-    def rows(self, final: Sequence[str],
-             kept: Sequence[str]) -> list[tuple[str, str]]:
-        """Return the label and entry of each `dependencies` line of `display`.
-
-        Arguments:
-        * `final` (`Sequence[str]`):
-          The `dependencies` afterwards.
-        * `kept` (`Sequence[str]`):
-          Entries to add to `[tool.ezpkg] unimported`.
-
-        Returns:
-        * (`list[tuple[str, str]]`): Such as `("add", '"sprocket",')`.
-        """
-        # The operations, then each with its label.
-        rows: list[tuple[str, str]] = []
-        numbered: bool = (0 not in self.lines
-                          and len(set(self.lines)) == len(self.lines))
-        opcodes: list[tuple[str, int, int, int, int]] = (
-            difflib.SequenceMatcher(None, self.entries,
-                                    list(final)).get_opcodes())
-
-        def row(label: str, entry: str) -> None:
-            """Add one line of the display."""
-            rows.append((label, entry))
-        position: int
-        operation: str
-        first: int
-        last: int
-        start: int
-        end: int
-        index: int
-        for position, (operation, first, last, start, end) in enumerate(
-                opcodes):
-            if operation == "equal":
-                # Only the ends that touch a change, as anchors.
-                shown: list[int] = []
-                if position > 0:
-                    shown.append(first)
-                if position < len(opcodes) - 1:
-                    shown.append(last - 1)
-                for index in sorted(set(shown)):
-                    row(f"line {self.lines[index]}" if numbered else "",
-                        f'"{self.entries[index]}",')
-                continue
-            if position == 0:
-                row("", "[")
-            for index in range(first, last):
-                if self.entries[index] not in final:
-                    row("remove", f'"{self.entries[index]}",')
-            entry: str
-            for entry in final[start:end]:
-                if entry in self.entries:
-                    row(f"move ({self.lines[self.entries.index(entry)]})"
-                        if numbered else "move", f'"{entry}",')
-                else:
-                    row("add", f'"{entry}",')
-            if position == len(opcodes) - 1:
-                row("", "]")
-        for entry in kept:
-            row("keep", f'"{entry}" (added to [tool.ezpkg] unimported)')
-        return rows
 
 
 class EZPkg:
@@ -3004,7 +2889,8 @@ class EZPkg:
         * `scans/` records which programs have had their imports
           checked against what they declare, so that each is checked
           again only when its imports change.
-        * `develop/` remembers, one small file per program, what was
+        * `develop/` remembers, one small file per program, whether
+          the person running it agreed to its packages, and what was
           last said about differences between its imports and the
           packages it declares, so that each is raised once.  Delete
           a file to be asked again.
@@ -3020,10 +2906,6 @@ class EZPkg:
           cache was last swept and when `pip` was last checked.
         * `ezpkg/` and `ezpkg-<version>.dist-info/` are `EZPkg`
           itself, which the bootstrap installed.
-        * `FOREVER_APPROVE`, if present, means somebody answered `a` or
-          `s` to the download prompt, so nobody is asked before packages
-          are installed (and, after `s`, nothing is said about them).
-          Delete it to be asked again.
         * `remove.py` removes this whole directory.
         * `quick_start.py` is a complete program that uses `EZPkg`.
           Copy its parts into a program of your own; the comments in
@@ -3059,9 +2941,10 @@ class EZPkg:
         self.pip_run: subprocess.CompletedProcess[str] | None = pip
         self.told: bool = False  # Have `bootstrapped`'s been listed?
         self.listings: int = 0  # How many lists `provide` has printed.
-        self.developer: bool | None = None  # See `developing`.
-        self.changed: str = ""  # The changed file's SHA-256, if so.
-        self.declined: bool = False  # `n` to `working_on`, this run.
+        self.agreeing: bool = False  # Agreed to for the first time?
+        self.looked: bool = False  # Has `settings` read the file yet?
+        self.chosen_settings: Settings | None = None  # See `settings`.
+        self.declined: bool = False  # `n` to `reconcile`, this run.
         self.reported: set[str] = set()  # Modules `reconcile` named.
         self.edited: bool = False  # Was the program's file changed?
         self.restarted: bool = False  # Is this run a `restart`'s?
@@ -3609,19 +3492,12 @@ class EZPkg:
 
     def sync_dependencies(self, asking: Sequence[str],
                           argv: Sequence[str] = ()) -> list[str]:
-        """Offer to bring Part 1's `dependencies` in line with the imports.
+        """Keep Part 1's `dependencies` in step with the imports, silently.
 
-        Once per change of the program's imports or `dependencies`
-        (`dependency_fingerprint`), any discrepancy (`discrepancy`) is
-        named.  Two or more changes are one question, whose `y` shows
-        and makes them all; with one change, or `i`, each addition and
-        removal is asked about in line order, since only the answer can
-        say whether an import is coming or going, and the changes are
-        shown and approved once.  Additions are fetched and proved to
-        contain their modules, and only then is the file edited, once.  `EZPkg` edits `dependencies` and `[tool.ezpkg]`,
-        and never an import, except to copy the author's `mypy` comment
-        (`with_type_ignores`).  With no terminal, the discrepancy is
-        only named, once per change.  See `T.kdaiis` in `TASKS/`.
+        For the program's developer, with `auto-dependencies` on, once
+        per change of the program's imports or `dependencies`
+        (`dependency_fingerprint`): any discrepancy (`discrepancy`) is
+        fixed without asking (`reconcile`, `T.abfd`).
 
         Arguments:
         * `asking` (`Sequence[str]`):
@@ -3635,7 +3511,8 @@ class EZPkg:
         """
         # Nothing has changed since this program was last looked at.
         source: tuple[Path, str] | None = main_source()
-        if source is None:
+        settings: Settings | None = self.settings()
+        if source is None or settings is None:
             return list(asking)
         program: Path
         text: str
@@ -3649,58 +3526,19 @@ class EZPkg:
         record: Path
         kept: dict[str, Any]
         record, kept = self.development_record(program)
-        breaking: bool = (kept.get("breaking") == fingerprint
-                          and not self.developing())
-        if (kept.get("asked") == fingerprint and not self.changed
-                and not breaking):
+        if kept.get("asked") == fingerprint and "imported" in kept:
             return list(asking)
 
         # Worked out only now, since it reads the installed metadata.
         found: Discrepancy | None = self.discrepancy(program, text, asking)
-        if found is None or not found.pending():
-            # A changed copy with nothing to offer asks nothing yet.
+        if found is None:
+            return list(asking)
+        if not found.pending():
             self.keep(record, kept, asked=fingerprint,
-                      **({"source": self.changed} if self.changed else {}))
+                      imported=found.imported(set()))
             return list(asking)
-
-        # A missing package breaks the program on every run, whoever
-        # runs it, so an end-user hears of it every run; the rest is a
-        # developer's business (Wayne, 2026-10-18).
-        missing: list[tuple[int, str, str]] = [
-            addition for addition in found.additions
-            if not self.developing() and not importable(addition[1])]
-        breaking = bool(missing)
-        if breaking:
-            self.keep(record, kept, breaking=fingerprint)
-
-        # Named once per change; asked only of a developer, and only on
-        # a terminal.  An end-user whose copy has changed, or will break,
-        # may be its developer, and is asked.
-        opened: tuple[IO[str], IO[str]] | None = (
-            None if not (self.developing() or self.changed or breaking)
-            else self.terminal())
-        if opened is not None and not self.developing():
-            with opened[0], opened[1]:
-                if not self.working_on(found, missing, opened, record,
-                                       kept):
-                    self.keep(record, kept, warned=fingerprint,
-                              asked=fingerprint)
-                    return list(asking)
-            opened = self.terminal()
-        if opened is None:
-            if breaking:
-                print(found.stopping(missing, False), file=sys.stderr)
-                self.declined = True  # Said, so `scan_imports` is quiet.
-            elif kept.get("warned") != fingerprint:
-                print(found.summary(), file=sys.stderr)
-            self.keep(record, kept, warned=fingerprint)
-            return list(asking)
-        writer: IO[str]
-        reader: IO[str]
-        writer, reader = opened
-        with writer, reader:
-            return self.reconcile(found, list(asking), argv, record, kept,
-                                  fingerprint, approved, opened)
+        return self.reconcile(found, list(asking), argv, record, kept,
+                              fingerprint, approved, settings)
 
     def fetching(self, final: Sequence[str]) -> list[str]:
         """Return what fetching a `dependencies` asks of the index.
@@ -3720,68 +3558,28 @@ class EZPkg:
         return ([one for one in final if one != own]
                 if own is not None and self.chosen(own) else list(final))
 
-    def versions_of(self, requirements: Sequence[str],
-                    argv: Sequence[str] = ()) -> dict[str, str]:
-        """Return the versions fetching some requirements would bring.
-
-        Fetched into a holding directory as `provide` would fetch them
-        (lock and date included), read off the wheels' names, and
-        thrown away: nothing is unpacked or run, and `pip`'s own cache
-        makes the real fetch cheap.  For the list before `reconcile`'s
-        question.
-
-        Arguments:
-        * `requirements` (`Sequence[str]`):
-          What to fetch; nothing is fetched for none.
-        * `argv` (`Sequence[str]`):
-          Extra arguments for `pip`, as `install` takes them.
-
-        Returns:
-        * (`dict[str, str]`): Each wheel's version by its `normal_name`,
-          empty when nothing could be fetched.
-        """
-        # A failure here is reported by the real fetch, if it comes.
-        if not requirements:
-            return {}
-        arrived: list[Path] = []
-        try:
-            arrived = self.download(requirements, argv, self.locked(),
-                                    self.cutoff())
-            return {normal_name(one.name.split("-")[0]):
-                    one.name.split("-")[1] for one in arrived}
-        except (RuntimeError, ValueError):
-            return {}
-        finally:
-            holding: Path
-            for holding in {one.parent for one in arrived}:
-                shutil.rmtree(holding, ignore_errors=True)
-
     def edit_for(self, found: Discrepancy, final: Sequence[str],
-                 keeping: Sequence[str], why: Mapping[str, str],
-                 modules: Collection[str], comment: bool
-                 ) -> tuple[str, str, bool, str, str, str] | str:
-        """Work out the whole edit `reconcile` would make, in stages.
-
-        In three stages, so that `Discrepancy.display` can say which
-        change each line is.
+                 marks: Mapping[str, str], modules: Collection[str],
+                 comment: bool) -> tuple[str, str, bool, str, str] | str:
+        """Work out the whole edit `reconcile` makes, in two stages.
 
         Arguments:
         * `found` (`Discrepancy`):
           What disagrees.
         * `final` (`Sequence[str]`):
           The `dependencies` afterwards.
-        * `keeping`, `why` (`Sequence[str]`, `Mapping[str, str]`):
-          The entries kept as `unimported`, and the developer's reasons.
+        * `marks` (`Mapping[str, str]`):
+          New `# Needed ...` comments, by the entry's `normal_name`.
         * `modules` (`Collection[str]`):
           The added imports, which get the author's `mypy` comment.
         * `comment` (`bool`):
           True when `import ezpkg` gets it too.
 
         Returns:
-        * (`tuple[str, str, bool, str, str, str] | str`): The source,
-          its encoding, whether its lines end in CRLF, then the program
-          with only `dependencies` changed, with `[tool.ezpkg]` too, and
-          the whole edit; or the line saying why it cannot be made.
+        * (`tuple[str, str, bool, str, str] | str`): The source, its
+          encoding, whether its lines end in CRLF, then the program with
+          only `dependencies` changed, and the whole edit; or the line
+          saying why it cannot be made.
         """
         # The file as it is, then each stage.
         program: Path = found.program
@@ -3791,18 +3589,15 @@ class EZPkg:
         try:
             source, encoding, crlf = read_program(program)
         except OSError as error:
-            return f"ezpkg: {program.name}: cannot read it: {error}\n"
-        listed: str | None = with_dependency_list(source, final)
-        kept: str | None = listed
-        if kept is not None and keeping:
-            kept = self.with_unimported(kept, list(keeping), dict(why))
-        if listed is None or kept is None:
+            return f"ezpkg: {program.name}: cannot read it: {error}"
+        listed: str | None = with_dependency_list(source, final, marks)
+        if listed is None:
             return (f"ezpkg: {program.name}: cannot edit its script "
-                    f"block; change `dependencies` by hand\n")
+                    f"block; change `dependencies` by hand")
         edited: str
         edited, _ = with_type_ignores(
-            kept, {*modules, *(["ezpkg"] if comment else [])}, found.used)
-        return source, encoding, crlf, listed, kept, edited
+            listed, {*modules, *(["ezpkg"] if comment else [])}, found.used)
+        return source, encoding, crlf, listed, edited
 
     def prove(self, package: str, module: str,
               argv: Sequence[str] = ()) -> str:
@@ -3861,11 +3656,20 @@ class EZPkg:
     def reconcile(self, found: Discrepancy, asking: list[str],
                   argv: Sequence[str], record: Path, kept: dict[str, Any],
                   fingerprint: str, approved: set[str],
-                  opened: tuple[IO[str], IO[str]]) -> list[str]:
-        """Talk a discrepancy through on the terminal, and fix it.
+                  settings: Settings) -> list[str]:
+        """Fix a discrepancy without asking, as `sync_dependencies` says.
 
-        The conversation `sync_dependencies` describes, in Wayne's
-        design (2026-10-15).
+        Each new import gets an entry, a guessed name only once `prove`
+        shows it provides the module (else one line, and Python's
+        `ImportError` follows), with a range from the version that
+        arrived (`version_range`), and its import gets the author's
+        `mypy` comment.  An entry whose import was removed is removed;
+        one that no import ever explained (`kept`'s `imported`, the
+        packages the imports implied last time) was added by hand, and
+        is kept and marked `# Needed ...` (`needed_by`), so it is never
+        removed.  Entries follow the order of the first imports.  The
+        file is edited once, and `report` prints a line per change
+        (`T.abfd`).
 
         Arguments:
         * `found` (`Discrepancy`):
@@ -3874,228 +3678,77 @@ class EZPkg:
           The requirements the program declared.
         * `argv` (`Sequence[str]`):
           Extra arguments for `pip install`.
-        * `record` (`Path`):
-          The program's development record.
-        * `kept` (`dict[str, Any]`):
-          What the record holds.
+        * `record`, `kept` (`Path`, `dict[str, Any]`):
+          The program's development record, and what it holds.
         * `fingerprint` (`str`):
           The program's `dependency_fingerprint`.
         * `approved` (`set[str]`):
           The names its approvals cover.
-        * `opened` (`tuple[IO[str], IO[str]]`):
-          The terminal.
+        * `settings` (`Settings`):
+          The developer's settings.
 
         Returns:
         * (`list[str]`): The requirements now declared.
         """
-        # Guessed names are proved first, so that nothing is offered,
-        # or counted, that could never be added.
-        writer: IO[str] = opened[0]
+        # Guessed names are proved first, so that nothing is added that
+        # does not provide its module.
         program: Path = found.program
-        # Only Auto is remembered; an old `d` ("never") is forgotten.
-        answer: str = ("update" if kept.get("answer") == "update" else "")
-        offered: list[int] = []
-        position: int
+        width: int = columns(sys.stderr)
+        declared: list[int] = [one for one in found.lines if one]
+        where: str = f" ({line_list(declared)})" if declared else ""
+        modules: dict[str, str] = {}
         line: int
         module: str
         package: str
-        for position, (line, module, package) in enumerate(found.additions):
+        for line, module, package in found.additions:
             problem: str = (self.prove(package, module, argv)
                             if package in found.guessed else "")
             if problem:
-                declared: list[int] = [one for one in found.lines if one]
-                where: str = (f" ({line_list(declared)})" if declared
-                              else "")
-                writer.write(wrapped(
+                print(wrapped(
                     f"{program.name}:{line}: `import {module}` needs a "
                     f"package, but {problem}.  Please check the spelling, "
-                    f"or manually add the right package to "
-                    f"`dependencies`{where}.", columns(writer)) + "\n")
+                    f"or add the right package to `dependencies`{where} by "
+                    f"hand.", width), file=sys.stderr)
                 self.reported.add(module)
             else:
-                offered.append(position)
-        every: set[str] = {found.additions[position][2]
-                           for position in offered}
-        count: int = found.updating(found.arrange(every, found.removals))
-        if not count and found.uncommented is None:
-            writer.write("Nothing to change.\n")
-            self.keep(record, kept, asked=fingerprint, answer=answer)
-            return asking
+                modules[package] = module
 
-        # Several changes are one question, unless `a` chose Auto;
-        # `i` goes through them one by one.  Two modes only, Manual
-        # (asked) and Auto (`a`, done with a line per change): an old
-        # record's `d` ("never") now just asks (Wayne, `ux11`).  See
-        # `T.kdaiis`.
-        added: set[str] = set()
+        # An unused entry was the imports' (removed) or the developer's
+        # (kept and marked).
+        before: object = kept.get("imported")
+        previous: set[str] = set(before) if isinstance(before, list) else set()
         removed: set[int] = set()
-        keeping: list[str] = []
-        why: dict[str, str] = {}
-        comment: bool = False
-        confirm: bool = True
-        chosen: str = "update" if answer == "update" else (
-            "individually" if count < 1 else "")
-        remembered: bool = chosen == "update"  # Auto (`ux11`).
-        modules: dict[str, str]
-        listed_first: list[str] | None = None
-        if not chosen:
-            # Listed before the question, ranges and all, so the answer
-            # is an informed one (Wayne, `ux/ux04_Batch_y.txt`); the
-            # additions are fetched for that silently, then let go.
-            listed_first = found.arrange(every, found.removals)
-            modules = {package: module for _, module, package
-                       in found.additions if package in every}
-            versions: dict[str, str] = self.versions_of(
-                self.fetching(listed_first) if modules else [], argv)
-            listed_first = [version_range(entry, versions[normal_name(entry)])
-                     if entry in modules and normal_name(entry) in versions
-                     else entry for entry in listed_first]
-            edit: tuple[str, str, bool, str, str, str] | str = self.edit_for(
-                found, listed_first, [], {}, set(modules.values()),
-                found.uncommented is not None)
-            if isinstance(edit, str):
-                listed_first = None
-                writer.write(found.needing(count) + "\n")
+        marks: dict[str, str] = {}
+        index: int
+        for index in found.removals:
+            name: str = normal_name(requirement_name(found.entries[index]))
+            if name in previous:
+                removed.add(index)
             else:
-                writer.write(found.display(
-                    listed_first, edit[0], edit[3], edit[4], edit[5], False,
-                    found.needing(count, ":")))
-        # Asked once: nobody wants to answer the same question twice
-        # (Wayne, `ux10`), so `a` takes effect at once, and says how to
-        # undo it.  A lone unused entry can be kept with `k`.
-        lone: bool = count == 1 and not offered and len(found.removals) == 1
-        if not chosen:
-            chosen = self.choose(
-                opened, (f"Update it? [y=>Yes|n=>No|"
-                         f"{'k=>Keep it, needed without an import|' if lone else ''}"
-                         f"a=>Auto, from now on]: ") if count == 1
-                else "Update them? [y=>Yes|n=>No|i=>Individually|"
-                     "a=>Auto, from now on]: ",
-                {"y": "yes", "yes": "yes", "n": "no", "no": "no",
-                 "a": "update", "auto": "update",
-                 **({"i": "individually"} if count > 1 else {}),
-                 **({"k": "keep", "keep": "keep"} if lone else {})}) or "no"
-            if chosen == "update":
-                writer.write(wrapped(
-                    f"From now on, `ezpkg` updates `{program.name}`'s "
-                    f"`dependencies` without asking.  To be asked again, "
-                    f"delete `{shown(record)}`.", columns(writer)) + "\n")
-                answer = chosen
-        if chosen == "no":
-            # Said here, so `scan_imports` is quiet (`ux06_Batch_n`).
-            writer.write(wrapped(
-                f"Nothing changed.  This is asked again when the "
-                f"imports or `dependencies` of `{program.name}` "
-                f"change.", columns(writer)) + "\n")
-            self.declined = True
-            self.keep(record, kept, asked=fingerprint, answer=answer)
+                marks[name] = self.needed_by(name, found.entries)
+        final: list[str] = found.arrange(set(modules), removed)
+        comment: bool = found.uncommented is not None
+        imported: list[str] = found.imported(set(modules))
+        if final == found.entries and not marks and not comment:
+            self.keep(record, kept, asked=fingerprint, imported=imported)
             return asking
-        # A blank line comes before what follows: the list of new
-        # packages, or the changes (`ux/ux02_Batch_y.txt`).
-        blank: bool = False
-        if chosen in ("yes", "update", "keep"):
-            # A remembered `a` is silent (Wayne, `ux10`).
-            if listed_first is not None:
-                writer.write("\n")
-                blank = True
-            added = every
-            removed = set(found.removals) if chosen != "keep" else set()
-            comment = found.uncommented is not None
-            confirm = False
-            if chosen == "keep":
-                lone_name: str = requirement_name(
-                    found.entries[found.removals[0]])
-                keeping.append(lone_name)
-                writer.write(f"What needs `{lone_name}`? (a few words, or "
-                             f"Enter to skip): ")
-                writer.flush()
-                why[lone_name] = "".join(
-                    one for one in answer_from(opened[1], writer).strip()
-                    if one.isprintable())
-
-        # Otherwise each addition and removal, in line order.
-        else:
-            writer.write(found.summary() + "\n" if count < 2 else "\n")
-            items: list[tuple[int, str, int]] = sorted(
-                [(found.additions[position][0], "add", position)
-                 for position in offered]
-                + [(found.lines[index], "remove", index)
-                   for index in found.removals]
-                + ([(found.uncommented, "comment", 0)]
-                   if found.uncommented is not None else []))
-            kind: str
-            which: int
-            for line, kind, which in items:
-                reply: str
-                if kind == "comment":
-                    reply = self.choose(
-                        opened, f"Line {line}: `ezpkg` is imported without "
-                        f"the mypy comment your other\nimports carry.  Add "
-                        f"it? [y=>Yes|n=>No]: ", YES_NO)
-                    comment = reply == "yes"
-                elif kind == "add":
-                    _, module, package = found.additions[which]
-                    reply = self.choose(
-                        opened, f"Line {line}: `{module}` is imported, but "
-                        f'not in `dependencies`.\nAdd "{package}"? '
-                        f"[y=>Yes|n=>No]: ", YES_NO)
-                    if reply == "yes":
-                        added.add(package)
-                else:
-                    entry: str = found.entries[which]
-                    reply = self.choose(
-                        opened, f'Line {line}: "{entry}" is in '
-                        f"`dependencies`, but nothing imports it.\nRemove "
-                        f"it? [y=>Yes|n=>No|k=>Keep it, needed without an "
-                        f"import]: ",
-                        {**YES_NO, "k": "keep", "keep": "keep"})
-                    if reply == "yes":
-                        removed.add(which)
-                    elif reply == "keep":
-                        # Only the developer knows why, so the program
-                        # says it in their words (Wayne, 2026-10-18).
-                        kept_name: str = requirement_name(entry)
-                        keeping.append(kept_name)
-                        writer.write(f"What needs `{kept_name}`? (a few "
-                                     f"words, or Enter to skip): ")
-                        writer.flush()
-                        why[kept_name] = "".join(
-                            one for one in answer_from(opened[1], writer
-                                                       ).strip()
-                            if one.isprintable())
-                if not reply:
-                    return asking
 
         # The additions are fetched and proved first, since the versions
-        # that arrive decide what is written: each gets a range from the
-        # version it ran with (`version_range`).
-        final: list[str] = found.arrange(added, removed)
-        if final == found.entries and not keeping and not comment:
-            writer.write("Nothing to change.\n")
-            self.keep(record, kept, asked=fingerprint, answer=answer)
-            return asking
-        modules = {package: module for _, module, package
-                   in found.additions if package in added}
+        # that arrive decide what is written.
         fetching: list[str] = self.fetching(final)
-        listings: int = self.listings
-        writer.flush()
         try:
             self.provide(fetching, argv, {normal_name(package): module
                                           for package, module
                                           in modules.items()})
-            if self.listings != listings:
-                blank = True  # The list ends with one.
         except Declined:
-            # A no to the download stops the program, as on any run;
-            # nothing is recorded, so the change is offered again.
             raise
         except (RuntimeError, ValueError) as error:
-            reason: str = failure_reason(error)
             hint: str = ("; with an approvals file, run it with "
                          "EZPKG_APPROVE=write" if self.approved() else "")
-            writer.write(f"ezpkg: {program.name}: nothing changed: "
-                         f"{reason}{hint}\n")
-            self.keep(record, kept, asked=fingerprint, answer=answer)
+            print(wrapped(f"ezpkg: {program.name}: `dependencies` is left "
+                          f"as it is: {failure_reason(error)}{hint}",
+                          width), file=sys.stderr)
+            self.keep(record, kept, asked=fingerprint)
             return asking
         fetched: tuple[list[str], list[str]] | None = self.remember(
             self.request_for(fetching))
@@ -4108,61 +3761,87 @@ class EZPkg:
                 ranged[package] = package
         final = [ranged.get(entry, entry) for entry in final]
 
-        # The whole edit, worked out before it is shown; not shown
-        # again when the list before the question already was.
-        made: tuple[str, str, bool, str, str, str] | str = self.edit_for(
-            found, final, keeping, why, set(modules.values()), comment)
+        # Written once.  What was just fetched answers the request the
+        # ranges make, so the next run does not fetch it all again.
+        made: tuple[str, str, bool, str, str] | str = self.edit_for(
+            found, final, marks, set(modules.values()), comment)
         if isinstance(made, str):
-            writer.write(made)
+            print(made, file=sys.stderr)
             return asking
-        source: str
         encoding: str
         crlf: bool
         listed: str
-        kept_text: str
         edited: str
-        source, encoding, crlf, listed, kept_text, edited = made
-        if confirm or final != listed_first and not remembered:
-            writer.write(("" if blank else "\n")
-                         + found.display(final, source, listed, kept_text,
-                                         edited, not confirm))
-        if confirm and self.choose(
-                opened, "Make these changes? [y=>Yes|n=>No]: ",
-                YES_NO) != "yes":
-            self.keep(record, kept, asked=fingerprint, answer=answer)
-            return asking
-
-        # Written once.  What was just fetched answers the request the
-        # ranges make, so the next run does not fetch it all again.
+        _, encoding, crlf, listed, edited = made
         try:
             write_program(program, edited, encoding, crlf)
             self.edited = True
         except OSError as error:
-            writer.write(f"ezpkg: {program.name}: nothing changed: "
-                         f"{error}\n")
-            self.keep(record, kept, asked=fingerprint, answer=answer)
+            print(f"ezpkg: {program.name}: `dependencies` is left as it "
+                  f"is: {error}", file=sys.stderr)
+            self.keep(record, kept, asked=fingerprint)
             return asking
         if fetched is not None:
             self.remember(self.request_for(final), *fetched)
 
-        # In Auto mode nothing was shown, so each change gets a line,
-        # since the file changed under its developer (Wayne, `ux11`).
-        # Otherwise the display has said it all (Wayne, `ux02`).
-        if remembered:
+        # Silent, unless the developer asked for a line per change.
+        if settings.report:
+            lines: list[int] = dependency_lines(edited) or []
             report: str
             for report in found.reported(
-                    final, kept_text, edited,
+                    final, listed, edited,
                     {ranged.get(package, package): module
-                     for package, module in modules.items()}):
-                writer.write(wrapped(report, columns(writer)) + "\n")
+                     for package, module in modules.items()}) + [
+                    f'ezpkg: marked "{entry}" in `{program.name}`\'s '
+                    f"`dependencies`{f' (line {at})' if at else ''} "
+                    f"`{marks[normal_name(requirement_name(entry))]}`."
+                    for entry, at in itertools.zip_longest(final, lines)
+                    if entry is not None
+                    and normal_name(requirement_name(entry)) in marks]:
+                print(wrapped(report, width), file=sys.stderr)
 
         # Remembered as settled.
         try:
             settled: str = dependency_fingerprint(edited, final, approved)
         except SyntaxError:
             settled = fingerprint
-        self.keep(record, kept, asked=settled, answer=answer)
+        self.keep(record, kept, asked=settled, imported=imported)
         return final
+
+    def needed_by(self, name: str, entries: Sequence[str]) -> str:
+        """Return the mark for an entry no import explains.
+
+        `# Needed by pandas (excel)` when it is an optional extra of
+        another entry, as this Python's metadata says, else `# Needed,
+        but not imported`, for the developer to reword (`T.abfd`).
+
+        Arguments:
+        * `name` (`str`):
+          The entry's `normal_name`.
+        * `entries` (`Sequence[str]`):
+          The program's `dependencies`.
+
+        Returns:
+        * (`str`): The comment, `#` and all.
+        """
+        # Each other entry's requirements, as its metadata lists them.
+        entry: str
+        for entry in entries:
+            other: str = requirement_name(entry)
+            if normal_name(other) == name:
+                continue
+            try:
+                requires: list[str] = importlib.metadata.requires(other) or []
+            except importlib.metadata.PackageNotFoundError:
+                continue
+            requirement: str
+            for requirement in requires:
+                extra: re.Match[str] | None = re.search(
+                    r"""extra\s*==\s*["']([^"']+)["']""", requirement)
+                if (extra is not None and normal_name(
+                        requirement_name(requirement)) == name):
+                    return f"# Needed by {other} ({extra.group(1)})"
+        return "# Needed, but not imported"
 
     def discrepancy(self, program: Path, text: str,
                     asking: Sequence[str]) -> Discrepancy | None:
@@ -4207,6 +3886,8 @@ class EZPkg:
         names: list[str] = [normal_name(requirement_name(entry))
                             for entry in entries]
         keep: set[str] = {normal_name(name) for name in unimported(text)}
+        keep |= {name for name, comment in dependency_comments(text).items()
+                 if comment.lstrip("#").strip().startswith("Needed")}
         approved: set[str] = {normal_name(wheel.split("-")[0])
                               for wheel in self.approved() or {}}
         providers: Mapping[str, list[str]] = (
@@ -4280,184 +3961,76 @@ class EZPkg:
         return Discrepancy(program, entries, lines, order, placed_by,
                            additions, removals, used, guessed, uncommented)
 
-    def with_unimported(self, text: str, adding: Sequence[str],
-                        reasons: Mapping[str, str] | None = None
-                        ) -> str | None:
-        """Return a program with names added to `[tool.ezpkg] unimported`.
+    def settings(self) -> Settings | None:
+        """Return the running program's developer settings, if it has any.
 
-        One entry per line, each with the developer's reason as its
-        comment, such as `"requests",  # Needed by the sync script`, so
-        the program says why a package nothing imports is kept (Wayne,
-        2026-10-18).  An array already written that way gains lines
-        before its `]`, and its comments are kept as they are.
+        `ezpkg` has two customers (`T.abfd`).  A program with a
+        `prog.py.toml` beside it is its developer's, who is never asked
+        anything and whose settings are in that file; without one, it is
+        an end user's, who is asked one question and whose program is
+        never edited.  Nothing else decides.
 
-        Arguments:
-        * `text` (`str`):
-          The program's source.
-        * `adding` (`Sequence[str]`):
-          The package names to keep.
-        * `reasons` (`Mapping[str, str] | None`):
-          What needs each, for its comment; one missing gets
-          `Needed, but not imported.`
+        An empty file (or one of blank lines) is an invitation: it is
+        filled with `SETTINGS_TEMPLATE`, every setting commented out at
+        its default, and one line says so.  After that `ezpkg` never
+        writes it.
 
         Returns:
-        * (`str | None`): The program, or `None` when its block cannot
-          be edited safely.
+        * (`Settings | None`): The settings, or `None` for an end user's
+          program, as for one with no file of its own.
+
+        Raises:
+        * `SystemExit`:
+          With `read_settings`' message, when the file is wrong, since
+          running with a setting the developer misspelt would mislead.
         """
-        # The new lines, then where they go.
-        block: tuple[re.Match[str], str] | None = script_toml(text)
-        if block is None:
+        # Read once per run.
+        if self.looked:
+            return self.chosen_settings
+        self.looked = True
+        program: Path | None = main_path()
+        if program is None:
             return None
-        names: list[str] = unimported(text)
-        fresh: list[str] = [name for name in adding if name not in names]
-
-        def entry(name: str) -> str:
-            """Return one line of the array, with its comment."""
-            # A reason ending in neither stop gets one.
-            reason: str = (f"Needed by {(reasons or {})[name]}"
-                           if (reasons or {}).get(name)
-                           else "Needed, but not imported")
-            return (f'  "{name}",  # {reason}'
-                    + ("" if reason[-1] in ".!?" else "."))
-
-        # Lines added before the `]` of an array already one per line,
-        # checked by parsing; otherwise the whole key is written anew.
-        toml: str | None = None
-        lines: list[str] = block[1].split("\n")
-        start: int | None = next(
-            (index for index, line in enumerate(lines)
-             if re.fullmatch(r"\s*unimported\s*=\s*\[\s*(#.*)?", line)),
-            None)
-        end: int | None = None if start is None else next(
-            (index for index in range(start + 1, len(lines))
-             if re.fullmatch(r"\s*\]\s*(#.*)?", lines[index])), None)
-        if start is not None and end is not None:
-            lines[end:end] = [entry(name) for name in fresh]
-            toml = "\n".join(lines)
+        path: Path = settings_path(program)
+        try:
+            text: str = path.read_text(encoding="utf-8")
+        except FileNotFoundError:
+            return None
+        except (OSError, UnicodeDecodeError) as error:
+            raise SystemExit(f"{path.name}: {error}") from None
+        if not text.strip():
             try:
-                if tomllib.loads(toml).get("tool", {}).get("ezpkg", {}).get(
-                        "unimported") != names + fresh:
-                    toml = None
-            except tomllib.TOMLDecodeError:
-                toml = None
-        else:
-            toml = uv_setting(
-                block[1], "unimported",
-                "[\n" + "".join(f'  "{name}",\n' for name in names)
-                + "".join(entry(name) + "\n" for name in fresh) + "]",
-                "ezpkg")
-        return None if toml is None else with_script_toml(
-            text, block[0], toml)
+                path.write_text(SETTINGS_TEMPLATE.format(name=program.name),
+                                encoding="utf-8")
+                print(wrapped(
+                    f"`{path.name}` was empty, so `ezpkg` filled it with "
+                    f"every setting, commented out at its default.",
+                    columns(sys.stderr)), file=sys.stderr)
+            except OSError:
+                pass  # Empty is every default anyway.
+        try:
+            self.chosen_settings = read_settings(path)
+        except ValueError as error:
+            raise SystemExit(str(error)) from None
+        return self.chosen_settings
 
     def developing(self) -> bool:
-        """Say whether the running program's developer is running it.
-
-        `ezpkg` has two kinds of customer, end-users and developers,
-        and cannot tell which is running a program the first time it
-        sees it, so it assumes an end-user: somebody who can only
-        decide whether to trust its author, and must never be asked
-        about `dependencies` or have the program edited (Wayne,
-        2026-10-18).  When the program's file has changed since then,
-        its developer may be at work, so `changed` is set, and
-        `working_on` asks the first time there is something to offer;
-        only a `y` puts the program in developer mode, from then on.
-        Per program, in its record under `develop/` (`mode` and the
-        file's SHA-256 as `source`), so one person can be an end-user of
-        some programs and the developer of others.  Deleting the record
-        makes it an end-user's again.
+        """Say whether the running program is its developer's.
 
         Returns:
-        * (`bool`): True in developer mode.  A program with no file of
-          its own is an end-user's.
+        * (`bool`): True when it has a `prog.py.toml`; see `settings`.
         """
-        # Decided once per run.
-        if self.developer is not None:
-            return self.developer
-        self.developer = False
-        found: tuple[Path, str] | None = main_source()
-        if found is None:
-            return False
-        digest: str = hashlib.sha256(
-            found[1].encode("utf-8", "surrogateescape")).hexdigest()
-        record: Path
-        kept: dict[str, Any]
-        record, kept = self.development_record(found[0])
-        if kept.get("mode") == "developer":
-            self.developer = True
-        elif "source" not in kept:
-            self.keep(record, kept, mode="end-user", source=digest)
-        elif kept["source"] != digest:
-            self.changed = digest
-        return self.developer
-
-    def working_on(self, found: Discrepancy,
-                   missing: Sequence[tuple[int, str, str]],
-                   opened: tuple[IO[str], IO[str]], record: Path,
-                   kept: dict[str, Any]) -> bool:
-        """Ask whether the person running a changed program is its developer.
-
-        Asked only when `developing` saw the file change and there is a
-        discrepancy to offer (Wayne, 2026-10-18).  `y` puts the program
-        in developer mode; `n` leaves it an end-user's, says so, and
-        is asked again only when the file changes again.  No answer
-        decides nothing.
-
-        Arguments:
-        * `found` (`Discrepancy`):
-          What there is to offer.
-        * `missing` (`Sequence[tuple[int, str, str]]`):
-          The additions whose modules cannot be imported here, which
-          will stop the program (`Discrepancy.additions`' shape).
-        * `opened` (`tuple[IO[str], IO[str]]`):
-          The terminal.
-        * `record`, `kept` (`Path`, `dict[str, Any]`):
-          The program's record and what it holds, which the caller
-          writes again (`development_record`).
-
-        Returns:
-        * (`bool`): True for a `y`.
-        """
-        # The paragraph, then the question, as the download prompt does.
-        writer: IO[str] = opened[0]
-        name: str = f"`{found.program.name}`"
-        width: int = columns(writer)
-        why: str = (f"{name} has changed since it was first run"
-                    if self.changed or not missing else
-                    f"{name} imports a package its `dependencies` do not "
-                    f"list")
-        writer.write(wrapped(
-            f"{why}, so you may be working on it.  If you are, `ezpkg` "
-            f"will offer to keep its `dependencies` in step with its "
-            f"imports, and you can turn down any change until you are "
-            f"ready.  If the imports and dependencies are not in sync, the "
-            f"program will typically fail at an `import` statement.",
-            width) + "\n\n")
-        reply: str = self.choose(
-            opened, f"Are you working on {name}? [y=>Yes|n=>No]: ", YES_NO)
-        source: dict[str, str] = (
-            {"source": self.changed} if self.changed else {})
-        if reply == "yes":
-            self.keep(record, kept, mode="developer", **source)
-            self.developer = True
-            writer.write("\n")
-            return True
-        if reply == "no":
-            self.keep(record, kept, **source)
-            self.declined = True  # Said here, so `scan_imports` is quiet.
-            writer.write(
-                found.stopping(missing, True, width) if missing
-                else wrapped(f"{name} is left as it is.  This is asked again "
-                             f"when {name} changes.", width) + "\n")
-        return False
+        # The file decides, and nothing else.
+        return self.settings() is not None
 
     def development_record(self, program: Path
                            ) -> tuple[Path, dict[str, Any]]:
         """Return a program's record under `develop/`, and what it holds.
 
-        It holds the program's path, the fingerprint last dealt with on
-        a terminal (`asked`) and without one (`warned`), the answer that
-        outlives a run, `update` or `never`, and the program's mode and
-        the SHA-256 that decided it (`developing`).  Touched on
+        It holds the program's path, the fingerprint `reconcile` last
+        settled (`asked`), the packages its imports implied then
+        (`imported`), and whether its end user agreed to its packages
+        (`agreed`, `gate`).  Touched on
         use, so that `stale` ages out only records nothing uses.
 
         Arguments:
@@ -4484,7 +4057,7 @@ class EZPkg:
         return record, kept
 
     def keep(self, record: Path, kept: dict[str, Any],
-             **changes: str) -> None:
+             **changes: object) -> None:
         """Update a development record, the way `scan_imports` writes.
 
         Arguments:
@@ -4507,44 +4080,6 @@ class EZPkg:
             Path(temporary).replace(record)
         except OSError:
             pass
-
-    def choose(self, opened: tuple[IO[str], IO[str]], question: str,
-               answers: Mapping[str, str]) -> str:
-        """Ask a question on the terminal until it is answered.
-
-        Anything that is not an answer is asked about again, up to
-        `ATTEMPTS` times; there is no default, as for the download
-        prompt.
-
-        Arguments:
-        * `opened` (`tuple[IO[str], IO[str]]`):
-          The terminal.
-        * `question` (`str`):
-          The question, with its answers spelled out.
-        * `answers` (`Mapping[str, str]`):
-          What each reply means, lowercased.
-
-        Returns:
-        * (`str`): The meaning, or empty when the terminal went away
-          or nothing sensible was said.
-        """
-        # A terminal that has gone away reads as empty.
-        writer: IO[str]
-        reader: IO[str]
-        writer, reader = opened
-        attempt: int
-        for attempt in range(ATTEMPTS):
-            writer.write(question if not attempt
-                         else "Please answer with one of the letters.\n"
-                         + question)
-            writer.flush()
-            reply: str = answer_from(reader, writer)
-            if not reply:
-                return ""
-            meaning: str | None = answers.get(reply.strip().lower())
-            if meaning is not None:
-                return meaning
-        return ""
 
     def check_imports(self, asking: Sequence[str]) -> None:
         """Refuse an export whose imports Part 1 does not cover.
@@ -5315,13 +4850,9 @@ class EZPkg:
         because a person who has never seen this question before should
         not have to guess what a letter means.  Case does not matter.
 
-        `y` or `yes` goes ahead once; `n` or `no` declines; `?`
-        describes each wheel and asks again; `a` or
-        `always` stops the question being asked at all, and is the one
-        answer that asks for confirmation first, because it is the only
-        one that outlives this run.  Declining that confirmation returns
-        to the question rather than cancelling the install, and counts as
-        an attempt so that the pair cannot loop for ever.
+        `y` or `yes` goes ahead, for this program and every later
+        version of it (`gate` remembers); `n` or `no` declines; `?`
+        describes each wheel and asks again (`T.abfd`).
 
         Anything else is taken for a typo and the question is put again,
         up to `ATTEMPTS` typos.  A bare newline is one of them: there is
@@ -5375,18 +4906,7 @@ class EZPkg:
             f"{place}.  If you do not trust the author, answer `n` and "
             f"{place} will simply go away without running {name}.", width)
         question: str = wrapped(f"Retain {place} and run {name}?", width)
-        if self.developing():
-            # The developer chose them, by changing the program, and
-            # `n` removes only these (Wayne, 2026-10-18).
-            paragraph = wrapped(
-                f"Your changes to {name} need {len(wheels)} more software "
-                f"package(s) from the internet.  They have been downloaded, "
-                f"but nothing in them has run yet.  Answer `n` and they "
-                f"will be removed again, without running {name}.", width)
-            question = wrapped(f"Keep them in {place} and run {name}?",
-                               width)
-        question += ("\n[y=>Yes, this time|n=>No|a=>Always, list|"
-                     "s=>Always, silently|?=>Explain]: ")
+        question += "\n[y=>Yes|n=>No|?=>Explain]: "
         told: bool = False
         with writer, reader:
             writer.write(paragraph + "\n\n")
@@ -5410,33 +4930,9 @@ class EZPkg:
                     return False
                 answer = answer.strip().lower()
                 if answer in ("y", "yes"):
-                    # This time only; `a` is for never being asked
-                    # again (Wayne, 2026-10-18).
                     return True
                 if answer in ("n", "no"):
                     return False
-                if answer in ("a", "always", "s", "silently"):
-                    # Asked once, since the label says what it does
-                    # (Wayne, `ux10`).  `a` still lists each new
-                    # download; `s` says nothing more (Wayne, `ux22`).
-                    # A permanent decision deserves a visible way back.
-                    silent: bool = answer.startswith("s")
-                    marker: Path = self.forever()
-                    marker.write_text(
-                        ("silent" if silent else "always")
-                        + "\nThis file means: do not ask again before "
-                        "installing packages\ninto this directory"
-                        + (", or list them" if silent else "")
-                        + ".  Delete it to be asked again.\n",
-                        encoding="utf-8")
-                    writer.write("\n" + wrapped(
-                        f"From now on, `ezpkg` downloads software packages "
-                        f"into {place} "
-                        f"{'silently' if silent else 'without asking'}.  "
-                        f"To be asked again, delete `{shown(marker)}`.  To "
-                        f"remove `ezpkg` and everything it downloaded, run "
-                        f"`{removal_command(self.root)}`.", width) + "\n\n")
-                    return True
                 if answer == "?":
                     writer.write(
                         "\nSoftware packages are code from PyPI, the "
@@ -5444,9 +4940,7 @@ class EZPkg:
                         + "\n".join(self.details(wheels)) + "\n\n")
                     continue
                 typos += 1
-                writer.write(
-                    "Please answer y, n, a for always, s for silently, or ? for "
-                    "more.\n")
+                writer.write("Please answer y, n, or ? for more.\n")
         return False
 
     def ask(self, question: str) -> bool:
@@ -5489,43 +4983,6 @@ class EZPkg:
                 writer.write("Please answer y or n.\n")
         return False
 
-    def forever(self) -> Path:
-        """Return the file that says never to ask on this machine again.
-
-        The `a` answer to the consent question writes it.  It belongs to
-        the cache rather than to any program, because it records a
-        decision by whoever uses this machine and not by any author: the
-        person has understood that packages are downloaded and would
-        rather not be asked each time a new cache needs filling.
-
-        It lives in the cache, so deleting the cache restores the
-        question, which is the same lifetime the question already had:
-        asked once per cache.  See `T.rd`.
-
-        Returns:
-        * (`Path`): The marker, whether or not it exists.
-        """
-        # One file, named so that somebody listing the directory can
-        # guess what it does without reading anything else.
-        return self.root / "FOREVER_APPROVE"
-
-    def silent(self) -> bool:
-        """Say whether `s` answered the download prompt for good.
-
-        `s` writes `silent` as the marker's first line; `a`, or a marker
-        from before `s` existed, means only "do not ask" (`ux22`).
-
-        Returns:
-        * (`bool`): True when no download is to be listed either.
-        """
-        # Unreadable or absent is not silent.
-        try:
-            first: str = self.forever().read_text(
-                encoding="utf-8").partition("\n")[0]
-        except OSError:
-            return False
-        return first.strip() == "silent"
-
     def gate(self, wheels: Sequence[Path], asking: Sequence[str] = (),
              new: Sequence[Path] | None = None) -> None:
         """Write, skip, enforce or ask, as the environment says.
@@ -5542,11 +4999,14 @@ class EZPkg:
         asked once.  The author's judgement replaces the recipient's
         prompt rather than being added to it.
 
-        A `FOREVER_APPROVE` marker in the cache, written by answering `a`,
-        skips the question.  It is checked **after** the approvals, so it
-        can never hide a wheel that fails `verify`; see `forever`.
-        Nor is anybody asked about a fetch that brought nothing new,
-        since there is nothing to agree to (`ux/ux03_Batch_i_with_keep`).
+        The program's developer is never asked, and an end user is asked
+        once per program (its path): a yes covers it and its later
+        versions, whose new packages arrive silently, as Ubuntu updates
+        do (`T.abfd`).  The run that agrees sets `agreeing`, so that
+        `provide` lists what was stored.  Approvals stand in for the
+        question, but never for `verify`.  Nor is anybody asked about a
+        fetch that brought nothing new, since there is nothing to agree
+        to.
 
         Arguments:
         * `wheels` (`Sequence[Path]`):
@@ -5588,32 +5048,38 @@ class EZPkg:
             return
         if mode == "skip":
             return
+        # The program's record says whether its end user agreed; a
+        # program with no file of its own is asked every time.
+        program: Path | None = main_path()
+        record: Path | None = None
+        kept: dict[str, Any] = {}
+        if program is not None:
+            record, kept = self.development_record(program)
         if self.approved() is not None:
             self.verify(wheels)
-            return
-
-        # The marker answers the question; it does **not** answer
-        # `verify`, which is above it on purpose.  A wheel that does not
-        # match what an author approved is a different matter from a
-        # person who would rather not be asked, and no amount of
-        # impatience should hide it.
-        asked: Sequence[Path] = wheels if new is None else new
-        if self.forever().is_file() or not (asked or self.bootstrapped()):
-            return
-        # Control-C before the answer's Enter is a no; after it, the
-        # answer stands (Wayne, `ux14`).
-        how: str = "Declined"
-        try:
-            agreed: bool = self.consent(asked, asking)
-        except KeyboardInterrupt:
-            agreed = False
-            how = "Interrupted"
-            print(file=sys.stderr)  # After the `^C`.
-        if not agreed:
-            raise Declined(
-                f"declined: nothing was installed into {self.root}",
-                f"{how}, so {self.removed()} and "
-                f"{name_of(program_name())} did not run.")
+        else:
+            asked: Sequence[Path] = wheels if new is None else new
+            if (self.developing() or kept.get("agreed")
+                    or not (asked or self.bootstrapped())):
+                return
+            # Control-C before the answer's Enter is a no; after it,
+            # the answer stands (Wayne, `ux14`).
+            how: str = "Declined"
+            try:
+                agreed: bool = self.consent(asked, asking)
+            except KeyboardInterrupt:
+                agreed = False
+                how = "Interrupted"
+                print(file=sys.stderr)  # After the `^C`.
+            if not agreed:
+                raise Declined(
+                    f"declined: nothing was installed into {self.root}",
+                    f"{how}, so {self.removed()} and "
+                    f"{name_of(program_name())} did not run.")
+        if not (self.developing() or kept.get("agreed")):
+            self.agreeing = True
+            if record is not None:
+                self.keep(record, kept, agreed="yes")
 
     def removed(self) -> str:
         """Take away what a no refuses, and say what that was.
@@ -6313,8 +5779,8 @@ class EZPkg:
         self.check_python(declaration)
         asked: list[str] = self.declared()
 
-        # Before anything else can change the file, the program's mode.
-        self.developing()
+        # The program's mode, and a misspelt setting stops it at once.
+        self.settings()
 
         # The program's own `ezpkg` entry chooses which `ezpkg` runs
         # it.  This one judges the bootstrap only if it is that one;
@@ -6342,10 +5808,14 @@ class EZPkg:
             sys.exit(0)
 
         # An ordinary run keeps Part 1 in step with the imports for
-        # somebody developing the program, then warns about every
-        # import still uncovered, now that the declared packages
-        # can be found.
-        self.scan_imports(self.sync_dependencies(asked, argv))
+        # the program's developer, then warns about every import still
+        # uncovered, now that the declared packages can be found.  An
+        # end user's program is never edited, and a forgotten package
+        # is Python's `ImportError` to report; a developer who turned
+        # `auto-dependencies` off hears nothing either (`T.abfd`).
+        settings: Settings | None = self.settings()
+        if settings is not None and settings.auto_dependencies:
+            self.scan_imports(self.sync_dependencies(asked, argv))
         if self.edited:
             self.restart()
 
@@ -6796,7 +6266,9 @@ class EZPkg:
                 # wheels before `unpack` moves them away.
                 stored: str = self.listing(new, columns(sys.stderr))
                 trees = [self.unpack(wheel) for wheel in arrived]
-                if (new or self.bootstrapped()) and not self.silent():
+                # Only on the run that agreed: later downloads are
+                # silent, and a developer chose them (`T.abfd`).
+                if (new or self.bootstrapped()) and self.agreeing:
                     print(stored, file=sys.stderr)
                     self.listings += 1
                 self.told = True

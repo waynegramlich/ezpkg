@@ -666,3 +666,81 @@ developers section.  5. Iterate.
   go on with the old one (`Details.md`, release step 2).  How the
   offer is made without a developer prompt (a message saying how, or
   `ezpkg` replacing it) is to be settled when building the release.
+
+## 2026-10-19: Slice 1, `prog.py.toml` and the two modes (built)
+
+* `ezpkg.py`: `SETTINGS_TEMPLATE`, `EXPORT_FORMS`, `Settings` (frozen
+  dataclass, one field per key), `settings_path`, `setting_line` (the
+  line of a top-level key, since `tomllib` gives none), `read_settings`
+  (`ValueError` with `prog.py.toml line N: ...`; unknown key with
+  `difflib`'s nearest, else the list; `release` must match `RELEASE`;
+  `exports` a list from `EXPORT_FORMS`, no repeats; the rest bools).
+  `and_list` takes `last` ("or").
+* `EZPkg.settings()` (once per run; fills an empty file and says so in
+  one line; a bad file is `SystemExit`); `developing()` is just "has a
+  `prog.py.toml`".  Gone: `working_on`, `changed`, the `develop/`
+  record's `mode`/`source`/`breaking`, `Discrepancy.stopping`,
+  `importable`.
+* `provide_declared` reconciles and scans imports only for a developer
+  with `auto-dependencies` on; an end user's program is never examined.
+  `gate` never asks a developer.  The reconciliation itself still asks
+  (`Update them?`) until slice 3.
+* Tests: `developer_settings` helper (`synced_program` uses it);
+  `test_an_end_user_is_never_asked_about_dependencies` rewritten;
+  new `test_a_developer_is_never_asked_to_download`,
+  `test_auto_dependencies_off_says_nothing`,
+  `test_an_empty_settings_file_is_filled`,
+  `test_a_misspelt_setting_stops_the_run`,
+  `test_read_settings_checks_every_key`;
+  `test_a_missing_package_is_explained_every_run` deleted.
+* A developer's downloads are not listed either (`provide`); asked
+  of Wayne.  Quick suite: 309 tests, the 3 failures fixed and
+  `InstallTest` rerun (165 OK, 2 skipped).
+
+## 2026-10-19: Slice 2, the end user's path (built)
+
+* `consent`: `[y=>Yes|n=>No|?=>Explain]:`, typo line "Please answer
+  y, n, or ? for more."  Gone: `a`, `s`, `forever()`, `silent()`,
+  `FOREVER_APPROVE` (and its cache README bullet).
+* `gate`: the program's `develop/` record holds `agreed: "yes"`; an
+  agreed program, or a developer's, is never asked.  The run that
+  agrees (a yes, no terminal, or approvals verified on a first run)
+  sets `self.agreeing` and records it; `provide` lists the stored
+  packages only then, so later downloads are silent.  A program with
+  no file is asked every time.  Approvals still `verify` first.
+* Tests: `PROMPT` follows; `test_a_yes_covers_later_versions` (yes,
+  cold refetch silent, another program asked) replaces the five
+  `a`/`s`/marker tests; `test_a_yes_never_hides_a_mismatch`.
+* Quick suite: 305 OK, 18 skipped.
+
+## 2026-10-19: Slice 3, silent reconciliation (built)
+
+* `sync_dependencies` → `reconcile(found, ..., settings)`: no terminal,
+  no questions.  Guessed names `prove`d (failure: one wrapped line,
+  `self.reported`, then Python's `ImportError`); additions fetched with
+  `provide(expect=)`, ranged; the `ezpkg` mypy comment added; one
+  write, then `restart`.  A fetch failure: "`dependencies` is left as
+  it is: REASON".  `report = true`: `Discrepancy.reported` lines plus
+  `ezpkg: marked "X" in ... `# Needed, but not imported`.`
+* Removed import vs added by hand: the `develop/` record's `imported`
+  (normal names of the packages the imports implied when last
+  settled, `Discrepancy.imported`).  An unused entry in it is
+  removed; otherwise it is marked (`needed_by`: `# Needed by pandas
+  (excel)` from another entry's `Requires-Dist` extra, else `# Needed,
+  but not imported`).  A record without `imported` (first run, or an
+  old record) marks rather than removes.
+* `dependency_comments`; `with_dependency_list(text, entries,
+  comments)` keeps each entry's comment and goes one-per-line when any
+  exist; `discrepancy` treats a `# Needed...` comment as kept (and
+  still reads `[tool.ezpkg] unimported`).  `every_import` counts
+  `import_module("x")` / `__import__("x")` as optional imports.
+* Deleted: `choose`, `YES_NO`, `versions_of`, `with_unimported`,
+  `inserted`, `removal_command`, `Discrepancy.summary/needing/display/
+  updating/rows`, and the old interactive `reconcile`.
+* Tests rewritten to `run_program` (silent): added, mypy comment(s),
+  removed import, added by hand (marked, reworded), order, optional,
+  string import, report, misspelt/decoy/source-only, own `ezpkg`
+  entry, restart; unit tests `test_needed_by_names_the_extra`,
+  `test_dependency_comments_survive_a_rewrite`.  `synced_program`
+  makes the program a developer's before its first run.  Quick suite:
+  307 OK, 18 skipped.

@@ -143,8 +143,7 @@ FLOOR: str = floor()
 
 # The consent question, spelled once here so that changing the wording in
 # `ezpkg.py` fails in one obvious place rather than in six.
-PROMPT: str = ("[y=>Yes, this time|n=>No|a=>Always, list|"
-                "s=>Always, silently|?=>Explain]:")
+PROMPT: str = "[y=>Yes|n=>No|?=>Explain]:"
 
 # The case that ships: `nopip7` uses an `ezpkg` that is already
 # importable, and otherwise fetches a `pip` of its own and runs it as a
@@ -3726,100 +3725,43 @@ class InstallTest(unittest.TestCase):
         self.assertIn(PROMPT, seen)
         self.assertIn("1.2.3", seen)
 
-    def test_always_writes_the_marker_and_proceeds(self) -> None:
-        """`a` installs and records that the question is settled.
+    def test_a_yes_covers_later_versions(self) -> None:
+        """A yes is asked once per program, and covers what it needs later.
 
-        Wayne's reason for wanting this: nearly everybody approves, and
-        the point of the question is that a person understands packages
-        are being downloaded, not that they are nagged forever.
+        Its later downloads arrive silently, as Ubuntu updates do; a
+        second program is asked for itself (`T.abfd`).
         """
-        # The answer says where the switch is, because one keystroke
-        # making a permanent decision deserves a visible way back.
-        program: Path = self.program("asked_always", "widget")
-        seen: str = self.answer_on_a_terminal(program, b"a\n")
-        self.assertIn(PROMPT, seen)
-        self.assertNotIn("Really", seen)
-        flat: str = " ".join(seen.split())
-        self.assertIn("From now on, `ezpkg` downloads software packages "
-                      "into", flat)
-        self.assertIn("without asking.", flat)
-        self.assertIn("remove.py`.", flat)
-        self.assertNotIn("rm -rf", seen)
-        self.assertIn("1.2.3", seen)
-        marker: Path = program.parent / "cache" / "FOREVER_APPROVE"
-        self.assertTrue(marker.is_file())
-        self.assertEqual(marker.read_text().partition("\n")[0], "always")
-        self.assertIn("Delete it to be asked again",
-                      marker.read_text())
-        self.assertIn(str(marker), flat)
-
-    def test_silently_asks_and_lists_nothing_again(self) -> None:
-        """`s` is `a` without the lists, now and from then on (`ux22`)."""
-        # The answer, then a cold fetch that says nothing at all.
-        program: Path = self.program("asked_silently", "widget")
-        seen: str = self.answer_on_a_terminal(program, b"s\n")
-        self.assertIn("silently.", " ".join(seen.split()))
-        self.assertNotIn("now installed", seen)
-        marker: Path = program.parent / "cache" / "FOREVER_APPROVE"
-        self.assertEqual(marker.read_text().partition("\n")[0], "silent")
-        shutil.rmtree(program.parent / "cache" / "versions")
-        shutil.rmtree(program.parent / "cache" / "requests")
+        # Yes, listed; then a cold fetch: not asked, not listed.
+        program: Path = self.program("asked_once", "widget")
+        seen: str = self.answer_on_a_terminal(program, b"Y\n")
+        self.assertEqual(seen.count(PROMPT), 1, seen)
+        self.assertNotIn("Please answer", seen)
+        self.assertIn("now installed", seen)
+        cache: Path = program.parent / "cache"
+        shutil.rmtree(cache / "versions")
+        shutil.rmtree(cache / "requests")
         seen = self.answer_on_a_terminal(program, b"")
         self.assertNotIn(PROMPT, seen)
         self.assertNotIn("now installed", seen)
         self.assertIn("1.2.3", seen)
 
-    def test_always_is_asked_once(self) -> None:
-        """`a` is never confirmed: nobody wants to answer twice.
-
-        The label says what it does (Wayne, `ux10`, 2026-10-18).
-        """
-        # One question, one install, and the marker.
-        program: Path = self.program("asked_once", "widget")
-        seen: str = self.answer_on_a_terminal(program, b"a\n")
+        # Another program, needing the same, cold: asked.
+        other: Path = program.with_name("other.py")
+        other.write_text(program.read_text())
+        shutil.rmtree(cache / "versions")
+        shutil.rmtree(cache / "requests")
+        seen = self.answer_on_a_terminal(other, b"y\n")
         self.assertEqual(seen.count(PROMPT), 1, seen)
-        self.assertIn("1.2.3", seen)
-        self.assertTrue(
-            (program.parent / "cache" / "FOREVER_APPROVE").exists())
+        self.assertIn("`other.py`", seen)
 
-    def test_answers_are_case_insensitive(self) -> None:
-        """`Y` and `A` work as well as `y` and `a`.
+    def test_a_yes_never_hides_a_mismatch(self) -> None:
+        """An altered wheel is still refused, after a yes or not.
 
-        Somebody with caps lock on, or who has seen prompts that wanted
-        capitals, should not be told they made a typo.
+        A yes answers the question, which is only asked when an author
+        approved nothing.  A wheel that fails its approval is a
+        different matter, and no earlier agreement should conceal it.
         """
-        # Capitals throughout, including the confirmation.
-        program: Path = self.program("asked_caps", "widget")
-        seen: str = self.answer_on_a_terminal(program, b"A\nY\n")
-        self.assertNotIn("Please answer", seen)
-        self.assertIn("1.2.3", seen)
-        self.assertTrue(
-            (program.parent / "cache" / "FOREVER_APPROVE").is_file())
-
-    def test_the_marker_means_no_question(self) -> None:
-        """With the marker in place nothing is asked, even on a terminal.
-
-        The cache is emptied of packages first, so this is a cold fetch
-        that would otherwise ask.
-        """
-        # `a` once, then a second cold install that must be silent.
-        program: Path = self.program("marked", "widget")
-        self.answer_on_a_terminal(program, b"a\ny\n")
-        shutil.rmtree(program.parent / "cache" / "versions")
-        shutil.rmtree(program.parent / "cache" / "requests")
-        seen: str = self.answer_on_a_terminal(program, b"")
-        self.assertNotIn(PROMPT, seen)
-        self.assertIn("1.2.3", seen)
-
-    def test_the_marker_never_hides_a_mismatch(self) -> None:
-        """An altered wheel is still refused, marker or no marker.
-
-        The invariant that makes the marker safe: it answers the
-        question, and the question is only asked when an author approved
-        nothing.  A wheel that fails its approval is a different matter
-        and no amount of impatience should conceal it.
-        """
-        # Approve, corrupt the record, mark forever, then fetch cold.
+        # Approve, corrupt the record, then fetch cold.
         program: Path = self.program("marked_mismatch", "widget")
         self.assertEqual(
             self.run_program(program, EZPKG_APPROVE="write").returncode,
@@ -3827,7 +3769,6 @@ class InstallTest(unittest.TestCase):
         record: Path = program.with_suffix(".ezpkg")
         record.write_text(record.read_text().replace(
             record.read_text().split()[-1], "0" * 64))
-        (program.parent / "cache" / "FOREVER_APPROVE").write_text("x\n")
         shutil.rmtree(program.parent / "cache" / "versions")
         shutil.rmtree(program.parent / "cache" / "requests")
 
@@ -3865,8 +3806,7 @@ class InstallTest(unittest.TestCase):
         program: Path = self.program("asked_enter", "widget")
         seen: str = self.answer_on_a_terminal(program, b"\ny\n")
         self.assertEqual(seen.count(PROMPT), 2, seen)
-        self.assertIn("Please answer y, n, a for always, s for silently, "
-                      "or ? for more.", seen)
+        self.assertIn("Please answer y, n, or ? for more.", seen)
         self.assertIn("1.2.3", seen)
 
         # Enter every time: asked until the patience runs out.
@@ -3882,8 +3822,7 @@ class InstallTest(unittest.TestCase):
         program: Path = self.program("asked_again", "widget")
         seen: str = self.answer_on_a_terminal(program, b"x\nmaybe\ny\n")
         self.assertEqual(
-            seen.count("Please answer y, n, a for always, s for "
-                       "silently, or ? for more."),
+            seen.count("Please answer y, n, or ? for more."),
             2, seen)
         self.assertEqual(seen.count(PROMPT), 3, seen)
         self.assertIn("1.2.3", seen)
@@ -5405,6 +5344,7 @@ class InstallTest(unittest.TestCase):
         program: Path = self.declaring_program(
             "scanned", 'dependencies = ["widget"]',
             "import widget\nimport lurker\nprint('ran')")
+        self.developer_settings(program)
         system: Path = self.root / "scanned" / "system"
         (system / "lurker").mkdir(parents=True)
         (system / "lurker" / "__init__.py").write_text("")
@@ -5445,16 +5385,15 @@ class InstallTest(unittest.TestCase):
                           if one.parent.name == "scans"], records)
 
     def synced_program(self, name: str, declared: str, tail: str,
-                       comment: str = "") -> Path:
+                       comment: str = "",
+                       settings: str = "auto-dependencies = true\n"
+                       ) -> Path:
         """Write a program, run it once clean, then change its imports.
 
-        The first run has nothing to raise, so it only records the
-        program; the edit is the change that makes `sync_dependencies`
-        speak.  Downloads go ahead without the consent question, which
-        other tests cover, and the program is already its developer's
-        (`EZPkg.working_on`, covered by
-        `test_an_end_user_is_never_asked_about_dependencies`), so that
-        the terminal sees only this one.
+        The program is its developer's (a `prog.py.toml`), so downloads
+        go ahead without the consent question.  The first run has nothing
+        to change, so it only records the program and its imports; the
+        edit is the change that `sync_dependencies` then makes.
 
         Arguments:
         * `name` (`str`):
@@ -5465,6 +5404,8 @@ class InstallTest(unittest.TestCase):
           What to put below `import widget` after the first run.
         * `comment` (`str`):
           A comment for the `widget` import, such as a `mypy` one.
+        * `settings` (`str`):
+          The `prog.py.toml`, as `developer_settings` takes it.
 
         Returns:
         * (`Path`): The program, edited but not run again.
@@ -5476,20 +5417,37 @@ class InstallTest(unittest.TestCase):
             f"import widget{comment}\nprint('ran')")
         program.write_text(program.read_text().replace(
             "import ezpkg\n", f"import ezpkg{comment}\n"))
+        self.developer_settings(program, settings)
         done: subprocess.CompletedProcess[str] = self.run_program(program)
         self.assertEqual(done.returncode, 0, done.stderr[-400:])
-        self.assertNotIn("disagree", done.stderr)
-        (program.parent / "cache" / "FOREVER_APPROVE").write_text("x\n")
-        venv: ezpkg.EZPkg = ezpkg.EZPkg(program.parent / "cache")
-        record: Path
-        kept: dict[str, Any]
-        record, kept = venv.development_record(program)
-        venv.keep(record, kept, mode="developer")
+        self.assertEqual(done.stderr, "")
         program.write_text(program.read_text().replace(
             'dependencies = ["widget"]', f"dependencies = {declared}").replace(
             f"import widget{comment}\n",
             f"import widget{comment}\n{tail}\n"))
         return program
+
+    def developer_settings(self, program: Path,
+                           settings: str = "auto-dependencies = true\n"
+                           ) -> Path:
+        """Make a program its developer's, with a `prog.py.toml`.
+
+        Not empty, by default, since `EZPkg.settings` fills an empty one
+        and says so.
+
+        Arguments:
+        * `program` (`Path`):
+          The program.
+        * `settings` (`str`):
+          What the file holds.
+
+        Returns:
+        * (`Path`): The settings file.
+        """
+        # Beside the program, named after it.
+        path: Path = program.with_name(f"{program.name}.toml")
+        path.write_text(settings, encoding="utf-8")
+        return path
 
     def declared_now(self, program: Path) -> list[str]:
         """Return a program's `dependencies` as its file says now.
@@ -5508,32 +5466,22 @@ class InstallTest(unittest.TestCase):
         found: list[str] = metadata["dependencies"]
         return found
 
-    def test_a_missing_dependency_is_listed_and_added(self) -> None:
-        """A new import is named, asked about, shown, approved and added.
+    def test_a_missing_dependency_is_added(self) -> None:
+        """A new import gets its entry, with a range, without a word.
 
         The package is fetched before the program's own import runs, so
-        the run that asked succeeds.  See `T.kdaiis`.
+        the run that added it succeeds (`T.abfd`).
         """
-        # One change: listed, then one question (Wayne, `ux09`).
+        # Added silently, then settled.
         program: Path = self.synced_program(
             "added", '["widget"]', "import sprocket")
-        seen: str = self.answer_on_a_terminal(program, b"y\n")
-        flat: str = " ".join(seen.split())
-        self.assertIn("`prog.py` has 1 entry in `dependencies` (line 3) that "
-                      "needs to be updated:", flat)
-        self.assertIn("Update it? [y=>Yes|n=>No|a=>Auto, from now on]:",
-                      flat)
-        self.assertNotIn("Make these changes?", flat)
-        self.assertIn('remove dependencies = ["widget"]', flat)
-        self.assertIn('add dependencies = ["widget", "sprocket>=2.0.0,<3"]',
-                      flat)
-        self.assertNotIn("mypy", seen)
-        self.assertIn("ran", seen)
-        self.assertEqual(self.declared_now(program), ["widget", "sprocket>=2.0.0,<3"])
-
-        # Settled, so the next run says nothing at all.
         done: subprocess.CompletedProcess[str] = self.run_program(program)
-        self.assertEqual(done.returncode, 0, done.stderr[-400:])
+        self.assertEqual((done.returncode, done.stdout, done.stderr),
+                         (0, "ran\n", ""))
+        self.assertEqual(self.declared_now(program),
+                         ["widget", "sprocket>=2.0.0,<3"])
+        self.assertNotIn("type: ignore", program.read_text())
+        done = self.run_program(program)
         self.assertEqual((done.stdout, done.stderr), ("ran\n", ""))
 
     def test_the_authors_mypy_comment_is_copied(self) -> None:
@@ -5542,9 +5490,8 @@ class InstallTest(unittest.TestCase):
         comment: str = "  # type: ignore[import-not-found]  # For mypy."
         program: Path = self.synced_program(
             "commented", '["widget"]', "import sprocket", comment)
-        seen: str = self.answer_on_a_terminal(program, b"y\ny\n")
-        self.assertIn(" ".join(f"mypy import sprocket{comment}".split()),
-                      " ".join(seen.split()))
+        done: subprocess.CompletedProcess[str] = self.run_program(program)
+        self.assertEqual(done.returncode, 0, done.stderr[-400:])
         self.assertIn(f"\nimport sprocket{comment}\n", program.read_text())
 
     def test_an_ezpkg_import_gets_the_mypy_comment_alone(self) -> None:
@@ -5558,17 +5505,9 @@ class InstallTest(unittest.TestCase):
         program: Path = self.declaring_program(
             "ezpkg-comment", 'dependencies = ["widget"]',
             f"import widget{comment}\nprint('ran')")
+        self.developer_settings(program)
         done: subprocess.CompletedProcess[str] = self.run_program(program)
-        self.assertIn("its imports (line 7) disagree", done.stderr)
-
-        # Its developer edits it, and is asked (`EZPkg.working_on`).
-        program.write_text(program.read_text() + "# Edited.\n")
-        seen: str = self.answer_on_a_terminal(program, b"y\ny\ny\n")
-        flat: str = " ".join(seen.split())
-        self.assertIn("Line 7: `ezpkg` is imported without the mypy comment "
-                      "your other imports carry. Add it? [y=>Yes|n=>No]:",
-                      flat)
-        self.assertIn(" ".join(f"mypy import ezpkg{comment}".split()), flat)
+        self.assertEqual((done.returncode, done.stderr), (0, ""))
         self.assertIn(f"\nimport ezpkg{comment}\n", program.read_text())
         self.assertEqual(self.declared_now(program), ["widget"])
 
@@ -5577,302 +5516,265 @@ class InstallTest(unittest.TestCase):
         self.assertEqual((done.stdout, done.stderr), ("ran\n", ""))
 
     def test_an_end_user_is_never_asked_about_dependencies(self) -> None:
-        """A program is an end-user's until its file changes.
+        """Without a `prog.py.toml`, nothing is said and nothing is edited.
 
-        Its first run cannot tell who is running it, so it assumes the
-        end-user, who can do nothing about `dependencies` (Wayne,
-        2026-10-18).  A change asks whether they are working on it: `n`
-        leaves it an end-user's until the next change, `y` makes it a
-        developer's for good.
+        An end user can do nothing about `dependencies`, so a
+        discrepancy is not theirs to hear about, and a package the
+        author forgot is Python's `ImportError` to report (`T.abfd`).
         """
-        # A discrepancy from the start, on a terminal: not asked.
+        # A discrepancy (the `ezpkg` mypy comment), on a terminal.
         comment: str = "  # type: ignore[import-not-found]  # For mypy."
         program: Path = self.declaring_program(
             "end-user", 'dependencies = ["widget"]',
             f"import widget{comment}\nprint('ran')")
-        (program.parent / "cache").mkdir(exist_ok=True)
-        (program.parent / "cache" / "FOREVER_APPROVE").write_text("x\n")
         before: str = program.read_text()
         seen: str = self.answer_on_a_terminal(program, b"y\ny\n")
         self.assertIn("ran", seen)
         self.assertNotIn("Add it?", seen)
+        self.assertNotIn("disagree", seen)
         self.assertEqual(program.read_text(), before)
-        venv: ezpkg.EZPkg = ezpkg.EZPkg(program.parent / "cache")
-        kept: dict[str, Any] = venv.development_record(program)[1]
-        self.assertEqual(kept["mode"], "end-user")
 
-        # Edited, and not by its developer: told once, nothing changed.
-        program.write_text(before + "# Edited.\n")
-        seen = self.answer_on_a_terminal(program, b"n\n")
-        self.assertIn("Are you working on `prog.py`?", seen)
-        self.assertIn("`prog.py` is left as it is.", seen)
-        self.assertNotIn("Add it?", seen)
-        self.assertEqual(venv.development_record(program)[1]["mode"],
-                         "end-user")
-        seen = self.answer_on_a_terminal(program, b"")
-        self.assertNotIn("Are you working on", seen)
+        # A forgotten package: only Python's own error.
+        program.write_text(before.replace("print('ran')",
+                                          "import sprocket\nprint('ran')"))
+        done: subprocess.CompletedProcess[str] = self.run_program(program)
+        self.assertNotEqual(done.returncode, 0)
+        self.assertIn("No module named 'sprocket'", done.stderr)
+        self.assertNotIn("ezpkg:", done.stderr)
+        self.assertNotIn("dependencies", done.stderr)
 
-        # Edited again, by its developer: asked, and one for good.
-        program.write_text(before + "# Edited twice.\n")
-        seen = self.answer_on_a_terminal(program, b"y\ny\ny\n")
-        self.assertIn("Are you working on `prog.py`?", seen)
-        self.assertIn("Add it?", seen)
-        self.assertEqual(venv.development_record(program)[1]["mode"],
-                         "developer")
-        seen = self.answer_on_a_terminal(program, b"")
-        self.assertEqual(venv.development_record(program)[1]["mode"],
-                         "developer")
+    def test_a_developer_is_never_asked_to_download(self) -> None:
+        """With a `prog.py.toml`, the first download asks nothing.
 
-    def test_a_missing_package_is_explained_every_run(self) -> None:
-        """An import `dependencies` lacks stops the program on every run.
-
-        So an end-user is asked on every run, changed copy or not, and
-        an `n`, or no terminal, explains whose mistake it is (Wayne,
-        2026-10-18).  Deleting the cache changes nothing.
+        The developer chose the packages, so there is nobody to ask
+        (`T.abfd`).
         """
-        # Not changed, never run: asked anyway, and told on `n`.
+        # A fresh cache, a terminal, and no answer typed.
         program: Path = self.declaring_program(
-            "missing", 'dependencies = ["widget"]',
-            "import widget\nimport sprocket\nprint('ran')")
-        (program.parent / "cache").mkdir(exist_ok=True)
-        (program.parent / "cache" / "FOREVER_APPROVE").write_text("x\n")
-        before: str = program.read_text()
-        explained: str = ("This is a mistake in `prog.py`, not in Python "
-                          "or `ezpkg`.")
-        attempt: int
-        for attempt in range(2):
-            seen: str = self.answer_on_a_terminal(program, b"n\n")
-            flat: str = " ".join(seen.split())
-            self.assertIn("Are you working on `prog.py`?", flat)
-            self.assertIn("imports `sprocket`, but its `dependencies`", flat)
-            self.assertIn(explained, flat)
-            self.assertNotIn("not importable here", flat)
-            self.assertEqual(program.read_text(), before)
+            "developer-download", 'dependencies = ["widget"]',
+            "import widget\nprint('ran')")
+        self.developer_settings(program)
+        seen: str = self.answer_on_a_terminal(program, b"")
+        self.assertIn("ran", seen)
+        self.assertNotIn("Retain", seen)
+        self.assertNotIn("[y=>Yes", seen)
 
-        # No terminal: told every run, without the `y` fix.
-        for attempt in range(2):
-            done: subprocess.CompletedProcess[str] = self.run_program(program)
-            flat = " ".join(done.stderr.split())
-            self.assertIn(explained, flat)
-            self.assertNotIn("answer `y`", flat)
-            self.assertIn("No module named 'sprocket'", flat)
+    def test_auto_dependencies_off_says_nothing(self) -> None:
+        """`auto-dependencies = false` leaves `dependencies` to the developer.
 
-    def test_an_unused_dependency_is_removed_or_kept(self) -> None:
-        """Nothing importing a package offers to remove it, or keep it.
-
-        `k` records it in `[tool.ezpkg] unimported`, after which it is
-        not raised again.
+        Nothing is edited, and nothing is said (`T.abfd`).
         """
-        # Removed.
-        program: Path = self.synced_program(
-            "removed", '["widget", "sprocket"]', "")
-        seen: str = self.answer_on_a_terminal(program, b"y\n")
-        flat: str = " ".join(seen.split())
-        self.assertIn("Update it? [y=>Yes|n=>No|k=>Keep it, needed without "
-                      "an import|a=>Auto, from now on]:", flat)
-        self.assertIn('remove "sprocket",', flat)
+        # Declares `widget`, imports nothing of it: a discrepancy.
+        program: Path = self.declaring_program(
+            "auto-off", 'dependencies = ["widget"]', "print('ran')")
+        self.developer_settings(program, "auto-dependencies = false\n")
+        before: str = program.read_text()
+        done: subprocess.CompletedProcess[str] = self.run_program(program)
+        self.assertEqual((done.returncode, done.stdout, done.stderr),
+                         (0, "ran\n", ""))
+        self.assertEqual(program.read_text(), before)
+
+    def test_an_empty_settings_file_is_filled(self) -> None:
+        """An empty `prog.py.toml` is filled with the template, once.
+
+        Every setting commented out at its default, and one line saying
+        so; after that, `ezpkg` never writes it (`T.abfd`).
+        """
+        # Blank lines count as empty.
+        program: Path = self.declaring_program(
+            "filled", 'dependencies = ["widget"]',
+            "import widget\nprint('ran')")
+        settings: Path = self.developer_settings(program, "\n\n")
+        done: subprocess.CompletedProcess[str] = self.run_program(program)
+        self.assertEqual(done.returncode, 0, done.stderr[-400:])
+        self.assertIn("`prog.py.toml` was empty, so `ezpkg` filled it",
+                      done.stderr)
+        self.assertEqual(settings.read_text(encoding="utf-8"),
+                         ezpkg.SETTINGS_TEMPLATE.format(name="prog.py"))
+
+        # Filled, it is every default, and left alone.
+        self.assertEqual(ezpkg.read_settings(settings), ezpkg.Settings())
+        done = self.run_program(program)
+        self.assertEqual((done.stdout, done.stderr), ("ran\n", ""))
+
+    def test_a_misspelt_setting_stops_the_run(self) -> None:
+        """A setting `ezpkg` does not know stops the program at once.
+
+        Running with a setting the developer misspelt would mislead
+        (`T.abfd`).
+        """
+        # Line 3, and the nearest name.
+        program: Path = self.declaring_program(
+            "misspelt-setting", 'dependencies = ["widget"]',
+            "import widget\nprint('ran')")
+        self.developer_settings(program, '# Mine.\n\nrelase = "1.0.0"\n')
+        done: subprocess.CompletedProcess[str] = self.run_program(program)
+        self.assertNotEqual(done.returncode, 0)
+        self.assertNotIn("ran", done.stdout)
+        self.assertEqual(done.stderr.strip(),
+                         "prog.py.toml line 3: unknown setting `relase` "
+                         "(did you mean `release`?)")
+
+    def test_a_removed_import_removes_its_entry(self) -> None:
+        """An entry whose import has gone goes too.
+
+        Its packages stay in the cache for `cull` (`T.abfd`).
+        """
+        # Imported on the first run, then not.
+        program: Path = self.declaring_program(
+            "removed", 'dependencies = ["widget", "sprocket"]',
+            "import widget\nimport sprocket\nprint('ran')")
+        self.developer_settings(program)
+        done: subprocess.CompletedProcess[str] = self.run_program(program)
+        self.assertEqual((done.returncode, done.stderr), (0, ""))
+        program.write_text(program.read_text().replace(
+            "import sprocket\n", ""))
+        done = self.run_program(program)
+        self.assertEqual((done.returncode, done.stdout, done.stderr),
+                         (0, "ran\n", ""))
         self.assertEqual(self.declared_now(program), ["widget"])
 
-        # Kept, with the developer's reason as its comment, and then
-        # left alone.
-        program = self.synced_program("kept", '["widget", "sprocket"]', "")
-        seen = self.answer_on_a_terminal(program, b"k\nthe build\n")
-        flat = " ".join(seen.split())
-        self.assertIn("What needs `sprocket`? (a few words, or Enter to "
-                      "skip):", flat)
-        self.assertIn('add "sprocket", # Needed by the build.', flat)
-        self.assertIn('#   "sprocket",  # Needed by the build.\n',
+        # Put back, it comes back.
+        program.write_text(program.read_text().replace(
+            "import widget\n", "import widget\nimport sprocket\n"))
+        done = self.run_program(program)
+        self.assertEqual(done.returncode, 0, done.stderr[-400:])
+        self.assertEqual(self.declared_now(program),
+                         ["widget", "sprocket>=2.0.0,<3"])
+
+    def test_an_entry_added_by_hand_is_marked(self) -> None:
+        """An entry no import ever explained is kept, and marked.
+
+        A comment starting `# Needed` keeps it for good, in the
+        developer's own words if they reword it (`T.abfd`).
+        """
+        # Never imported: marked, not removed.
+        program: Path = self.synced_program(
+            "kept", '["widget", "sprocket"]', "")
+        done: subprocess.CompletedProcess[str] = self.run_program(program)
+        self.assertEqual((done.returncode, done.stderr), (0, ""))
+        self.assertIn('#   "sprocket",  # Needed, but not imported\n',
                       program.read_text())
         self.assertEqual(self.declared_now(program), ["widget", "sprocket"])
-        self.assertEqual(ezpkg.unimported(program.read_text()), ["sprocket"])
-        seen = self.answer_on_a_terminal(program, b"o\n")
-        self.assertNotIn("disagree", seen)
+
+        # Reworded, and still kept, through other changes too.
+        program.write_text(program.read_text().replace(
+            "# Needed, but not imported", "# Needed by the build").replace(
+            "import widget\n", "import widget\nimport needy\n"))
+        done = self.run_program(program)
+        self.assertEqual((done.returncode, done.stderr), (0, ""))
+        self.assertEqual(self.declared_now(program),
+                         ["widget", "sprocket", "needy>=1.0.0,<2"])
+        self.assertIn('#   "sprocket",  # Needed by the build\n',
+                      program.read_text())
 
     def test_dependencies_follow_the_order_of_the_imports(self) -> None:
-        """Out of order is a discrepancy; approving puts it in order."""
-        # Nothing to add or remove, so straight to the changes.
+        """Out of order is a discrepancy, and is put in order."""
+        # Nothing to add or remove, only the order.
         program: Path = self.synced_program(
             "ordered", '["sprocket", "widget"]', "import sprocket")
-        seen: str = self.answer_on_a_terminal(program, b"y\n")
-        flat: str = " ".join(seen.split())
-        self.assertIn("`prog.py` has 1 entry in `dependencies` (line 3) that "
-                      "needs to be updated:", flat)
-        self.assertIn('add dependencies = ["widget", "sprocket"]', flat)
+        done: subprocess.CompletedProcess[str] = self.run_program(program)
+        self.assertEqual((done.returncode, done.stderr), (0, ""))
         self.assertEqual(self.declared_now(program), ["widget", "sprocket"])
 
     def test_an_optional_import_counts_as_used(self) -> None:
         """A declared package imported only under `try` is not unused."""
-        # Silent, since the two agree.
+        # Nothing changes, since the two agree.
         program: Path = self.synced_program(
             "optional", '["widget", "sprocket"]',
             "try:\n    import sprocket\nexcept ImportError:\n    pass")
-        seen: str = self.answer_on_a_terminal(program, b"o\n")
-        self.assertNotIn("disagree", seen)
-        self.assertIn("ran", seen)
-
-    def test_without_a_terminal_it_is_named_once(self) -> None:
-        """No terminal, or `n`: named once per change, nothing edited."""
-        # Named, then not again for the same imports.
-        program: Path = self.synced_program(
-            "quiet", '["widget"]', "import sprocket")
         before: str = program.read_text()
         done: subprocess.CompletedProcess[str] = self.run_program(program)
-        self.assertIn("disagree", done.stderr)
+        self.assertEqual((done.returncode, done.stderr), (0, ""))
         self.assertEqual(program.read_text(), before)
-        done = self.run_program(program)
-        self.assertNotIn("disagree", done.stderr)
 
-        # A terminal is still asked, since nobody has answered yet; `n`.
-        seen: str = self.answer_on_a_terminal(program, b"n\n")
-        self.assertIn("Update it?", seen)
+    def test_a_string_import_counts_as_an_import(self) -> None:
+        """`importlib.import_module("sprocket")` explains its entry."""
+        # Declared and named in a string: nothing to mark.
+        program: Path = self.synced_program(
+            "string", '["widget", "sprocket"]',
+            'import importlib\nimportlib.import_module("sprocket")')
+        before: str = program.read_text()
+        done: subprocess.CompletedProcess[str] = self.run_program(program)
+        self.assertEqual((done.returncode, done.stderr), (0, ""))
         self.assertEqual(program.read_text(), before)
-        seen = self.answer_on_a_terminal(program, b"y\n")
-        self.assertNotIn("Update it?", seen)
 
-    def test_several_changes_are_one_question(self) -> None:
-        """Two or more changes: `y` makes them all, `i` one by one.
-
-        The changes are listed, ranges and all, before the question, and
-        `y` makes them with no second question and no second list; a
-        guess that fails `prove` is reported and not counted (Wayne,
-        2026-10-17 and `ux/ux04_Batch_y.txt`).
-        """
-        # Yes: both added, the misspelt one named and left out.
-        tail: str = "import sprocket\nimport needy\nimport bogus_package"
-        program: Path = self.synced_program("batch", '["widget"]', tail)
-        seen: str = self.answer_on_a_terminal(program, b"y\n")
-        flat: str = " ".join(seen.split())
+    def test_report_prints_a_line_per_change(self) -> None:
+        """`report = true` names each change made to `dependencies`."""
+        # Two additions, a misspelt one, and a mark.
+        program: Path = self.synced_program(
+            "reported", '["widget", "sprocket"]',
+            "import needy\nimport bogus_package",
+            settings="report = true\n")
+        done: subprocess.CompletedProcess[str] = self.run_program(program)
+        flat: str = " ".join(done.stderr.split())
         self.assertIn('no package "bogus_package" is currently available',
                       flat)
-        self.assertIn("`prog.py` has 2 entries in `dependencies` (line 3) "
-                      "that need to be updated: : remove dependencies = "
-                      '["widget"] 3: add dependencies = ["widget", '
-                      '"sprocket>=2.0.0,<3", "needy>=1.0.0,<2"] Update them? '
-                      "[y=>Yes|n=>No|i=>Individually|a=>Auto, from now "
-                      "on]:", flat)
-        self.assertNotIn("Changes made to `prog.py`:", flat)
-        self.assertNotIn("Make these changes?", flat)
-        self.assertNotIn("is imported, but not in", flat)
+        self.assertRegex(flat, r'ezpkg: added "needy>=1\.0\.0,<2" to '
+                         r"`prog\.py`'s `dependencies` \(line \d+\)\.")
+        self.assertRegex(flat, r'ezpkg: marked "sprocket" in `prog\.py`\'s '
+                         r"`dependencies` \(line \d+\) `# Needed, but not "
+                         r"imported`\.")
+        self.assertIn("No module named 'bogus_package'", done.stderr)
         self.assertEqual(self.declared_now(program),
-                         ["widget", "sprocket>=2.0.0,<3", "needy>=1.0.0,<2"])
+                         ["widget", "sprocket", "needy>=1.0.0,<2"])
 
-        # No: nothing changes, and nothing is asked until a change.
-        program = self.synced_program("batch-no", '["widget"]', tail)
-        before: str = program.read_text()
-        seen = self.answer_on_a_terminal(program, b"n\n")
-        self.assertIn("Update them?", seen)
-        self.assertIn("Nothing changed.  This is asked again", seen)
-        self.assertNotIn("not importable here", seen)
-        self.assertEqual(program.read_text(), before)
-        seen = self.answer_on_a_terminal(program, b"y\n")
-        self.assertNotIn("Update them?", seen)
+    def test_a_name_the_index_lacks_is_not_added(self) -> None:
+        """A misspelt import is named in one line, then Python's error.
 
-        # Individually: each asked, then the changes approved.
-        program = self.synced_program("batch-each", '["widget"]', tail)
-        seen = self.answer_on_a_terminal(program, b"i\nn\ny\ny\n")
-        flat = " ".join(seen.split())
-        self.assertIn('Add "sprocket"?', flat)
-        self.assertIn('Add "needy"?', flat)
-        self.assertIn("Make these changes?", flat)
-        self.assertEqual(self.declared_now(program),
-                         ["widget", "needy>=1.0.0,<2"])
-
-    def test_auto_outlives_the_run(self) -> None:
-        """`a` updates from then on without asking, a line per change.
-
-        Two modes only, Manual and Auto; `d` is gone (Wayne, `ux11`).
+        The index is asked first, so nothing is fetched for a package
+        that does not exist (Wayne's dogfood, 2026-10-15).
         """
-        # Auto, asked once: updated now, and next time without asking.
-        tail: str = "import sprocket\nimport needy"
-        program: Path = self.synced_program("always", '["widget"]', tail)
-        seen: str = self.answer_on_a_terminal(program, b"a\n")
-        self.assertNotIn("Really", seen)
-        self.assertIn("From now on, `ezpkg` updates `prog.py`'s "
-                      "`dependencies` without asking.", " ".join(seen.split()))
-        self.assertIn("To be asked again, delete", " ".join(seen.split()))
-        self.assertNotIn("Make these changes?", seen)
-        self.assertRegex(" ".join(seen.split()),
-                         r'add dependencies = \[[^]]*"needy>=1\.0\.0,<2"')
-        program.write_text(program.read_text().replace(
-            "import needy\n", ""))
-        seen = self.answer_on_a_terminal(program, b"")
-        self.assertNotIn("Update", seen)
-        self.assertNotIn("Remove it?", seen)
-        self.assertIn('ezpkg: removed "needy>=1.0.0,<2" from `prog.py`\'s '
-                      "`dependencies`.", " ".join(seen.split()))
-        self.assertEqual(self.declared_now(program),
-                         ["widget", "sprocket>=2.0.0,<3"])
-
-        # An addition in Auto mode: one line, with where it went.
-        program.write_text(program.read_text() + "import needy\n")
-        seen = self.answer_on_a_terminal(program, b"")
-        self.assertNotIn("Update", seen)
-        self.assertRegex(" ".join(seen.split()),
-                         r'ezpkg: added "needy>=1\.0\.0,<2" to `prog\.py`\'s '
-                         r"`dependencies` \(line \d+\)[.,]")
-        self.assertEqual(self.declared_now(program),
-                         ["widget", "sprocket>=2.0.0,<3", "needy>=1.0.0,<2"])
-
-    def test_a_name_the_index_lacks_is_not_offered(self) -> None:
-        """A misspelt import is caught before anything is offered.
-
-        The index is asked first, so no question is asked about a
-        package that does not exist (Wayne's dogfood, 2026-10-15).
-        """
-        # Nothing to answer, since nothing is offered.
+        # One line, and the program unchanged.
         program: Path = self.synced_program(
             "misspelt", '["widget"]', "import bogus_package")
         before: str = program.read_text()
-        seen: str = self.answer_on_a_terminal(program, b"o\n")
-        flat: str = " ".join(seen.split())
+        done: subprocess.CompletedProcess[str] = self.run_program(program)
+        flat: str = " ".join(done.stderr.split())
         self.assertIn("prog.py:12: `import bogus_package` needs a package, "
                       'but no package "bogus_package" is currently '
                       "available. Please check the spelling", flat)
-        self.assertNotIn('Add "bogus_package"?', flat)
-        self.assertIn("Nothing to change.", seen)
+        self.assertIn("No module named 'bogus_package'", flat)
         self.assertEqual(program.read_text(), before)
 
-    def test_a_wrong_guess_is_not_offered(self) -> None:
-        """A package that is not what its name says is never offered.
+    def test_a_wrong_guess_is_not_added(self) -> None:
+        """A package that is not what its name says is never added.
 
         `decoy` exists but holds `elsewhere`, as a squatted name might.
-        It is fetched and looked at before any question, so nothing is
-        unpacked and the program is not edited.
+        It is fetched and looked at first, so nothing is unpacked and
+        the program is not edited.
         """
-        # Nothing to answer, since nothing is offered.
+        # One line, and nothing unpacked.
         program: Path = self.synced_program(
             "decoyed", '["widget"]', "import decoy")
         before: str = program.read_text()
-        seen: str = self.answer_on_a_terminal(program, b"o\n")
-        flat: str = " ".join(seen.split())
+        done: subprocess.CompletedProcess[str] = self.run_program(program)
+        flat: str = " ".join(done.stderr.split())
         self.assertIn("prog.py:12: `import decoy` needs a package, but the "
                       "index's "
                       '"decoy" does not provide `decoy`. Please check the '
                       "spelling",
                       flat)
-        self.assertNotIn('Add "decoy"?', flat)
-        self.assertIn("Nothing to change.", seen)
         self.assertEqual(program.read_text(), before)
         self.assertFalse(list((program.parent / "cache" / "versions")
                               .glob("decoy-*")))
 
-    def test_a_source_only_package_is_not_offered(self) -> None:
-        """A name the index has only as source code is never offered.
+    def test_a_source_only_package_is_not_added(self) -> None:
+        """A name the index has only as source code is never added.
 
         `pip` here installs wheels only, so it could never be added
         (Wayne's dogfood of `import bogus`, 2026-10-17).
         """
-        # Nothing to answer, since nothing is offered.
+        # One line.
         program: Path = self.synced_program(
             "sourced", '["widget"]', "import sourceonly")
-        seen: str = self.answer_on_a_terminal(program, b"o\n")
-        flat: str = " ".join(seen.split())
+        done: subprocess.CompletedProcess[str] = self.run_program(program)
+        flat: str = " ".join(done.stderr.split())
         self.assertIn("prog.py:12: `import sourceonly` needs a package, but "
                       "the index's "
                       '"sourceonly" has no wheel, only source code, so it '
                       "cannot be installed. Please check the spelling",
                       flat)
-        self.assertNotIn('Add "sourceonly"?', flat)
 
     def test_an_addition_does_not_fetch_this_ezpkg(self) -> None:
         """The `ezpkg` entry this `ezpkg` meets is not fetched again.
@@ -5884,9 +5786,9 @@ class InstallTest(unittest.TestCase):
         # Added, and no `ezpkg` tree in the cache.
         program: Path = self.synced_program(
             "own_entry", '["ezpkg>=0.0.1.dev0", "widget"]', "import sprocket")
-        seen: str = self.answer_on_a_terminal(program, b"y\ny\n")
-        self.assertRegex(" ".join(seen.split()),
-                         r'add dependencies = \[[^]]*"sprocket>=2\.0\.0,<3"')
+        done: subprocess.CompletedProcess[str] = self.run_program(program)
+        self.assertEqual(done.returncode, 0, done.stderr[-400:])
+        self.assertIn("sprocket>=2.0.0,<3", self.declared_now(program))
         self.assertFalse(list((program.parent / "cache" / "versions")
                               .glob("ezpkg-*")))
 
@@ -5949,12 +5851,10 @@ class InstallTest(unittest.TestCase):
         program: Path = self.synced_program(
             "restart", '[\n#     "widget",\n# ]',
             "import sprocket\nprint('before')\nimport bogus_package")
-        seen: str = self.answer_on_a_terminal(program, b"y\n")
-        self.assertIn("Update it?", seen)
-        self.assertEqual(seen.count("before"), 1)
-        self.assertIn("    import bogus_package\r\n", seen)
-        self.assertIn("No module named 'bogus_package'", seen)
-        self.assertNotIn("not importable here", seen)
+        done: subprocess.CompletedProcess[str] = self.run_program(program)
+        self.assertEqual(done.stdout.count("before"), 1)
+        self.assertIn("    import bogus_package\n", done.stderr)
+        self.assertIn("No module named 'bogus_package'", done.stderr)
         self.assertIn('"sprocket>=2.0.0,<3"', program.read_text())
 
     def test_export_refuses_an_import_above_the_bootstrap(self) -> None:
@@ -7632,6 +7532,82 @@ class MetadataTest(unittest.TestCase):
         self.assertTrue(ezpkg.meets(ezpkg.__version__,
                                     entry.removeprefix("ezpkg")))
 
+    def test_needed_by_names_the_extra(self) -> None:
+        """An optional extra of another entry is marked with its name."""
+        # A distribution whose `fancy` extra needs `guest`.
+        with tempfile.TemporaryDirectory() as scratch:
+            info: Path = Path(scratch) / "host-1.0.dist-info"
+            info.mkdir()
+            (info / "METADATA").write_text(
+                "Metadata-Version: 2.1\nName: host\nVersion: 1.0\n"
+                "Requires-Dist: other\n"
+                'Requires-Dist: guest>=1; extra == "fancy"\n')
+            sys.path.insert(0, scratch)
+            try:
+                venv: ezpkg.EZPkg = ezpkg.EZPkg(Path(scratch) / "cache")
+                self.assertEqual(venv.needed_by("guest", ["host", "guest"]),
+                                 "# Needed by host (fancy)")
+                self.assertEqual(venv.needed_by("other", ["host", "other"]),
+                                 "# Needed, but not imported")
+            finally:
+                sys.path.remove(scratch)
+
+    def test_dependency_comments_survive_a_rewrite(self) -> None:
+        """Each entry keeps its comment when `dependencies` is rewritten."""
+        # One commented entry, then another added and marked.
+        text: str = ("# /// script\n# dependencies = [\n"
+                     '#   "a",  # Needed by the build\n#   "b",\n# ]\n# ///\n')
+        self.assertEqual(ezpkg.dependency_comments(text),
+                         {"a": "# Needed by the build"})
+        edited: str | None = ezpkg.with_dependency_list(
+            text, ["b", "a", "c"], {"c": "# Needed, but not imported"})
+        self.assertEqual(edited, (
+            "# /// script\n# dependencies = [\n#   \"b\",\n"
+            '#   "a",  # Needed by the build\n'
+            '#   "c",  # Needed, but not imported\n# ]\n# ///\n'))
+
+    def test_read_settings_checks_every_key(self) -> None:
+        """`read_settings` names the line and what is wrong with it."""
+        # Each file, and what it says or holds.
+        with tempfile.TemporaryDirectory() as scratch:
+            path: Path = Path(scratch) / "prog.py.toml"
+            cases: list[tuple[str, str | ezpkg.Settings]] = [
+                ("", ezpkg.Settings()),
+                (('report = true\nrelease = "1.2.0"\nexports = ["uv"]\n'
+                 "ranges = true\nauto-dependencies = false\n"),
+                 ezpkg.Settings(False, True, "1.2.0", ("uv",), True)),
+                ("\nauto_dependencies = true\n",
+                 ("prog.py.toml line 2: unknown setting `auto_dependencies` "
+                 "(did you mean `auto-dependencies`?)")),
+                ("\n\n[colour]\nx = 1\n",
+                 ("prog.py.toml line 3: unknown setting `colour` (the "
+                 "settings are `auto-dependencies`, `report`, `release`, "
+                 "`exports` and `ranges`)")),
+                ('report = "yes"\n',
+                 "prog.py.toml line 1: `report` must be `true` or `false`"),
+                ("release = 1.0\n",
+                 ('prog.py.toml line 1: `release` must be a version in '
+                 'quotes, such as "1.0.0"')),
+                ('exports = ["zip"]\n',
+                 ('prog.py.toml line 1: `exports` must be a list of '
+                 '"zipapp" or "uv", each at most once')),
+                ('exports = ["uv", "uv"]\n',
+                 ('prog.py.toml line 1: `exports` must be a list of '
+                 '"zipapp" or "uv", each at most once')),
+                ("report = \n", ("prog.py.toml: Invalid value (at line 1, "
+                 "column 10)")),
+            ]
+            text: str
+            expected: str | ezpkg.Settings
+            for text, expected in cases:
+                path.write_text(text, encoding="utf-8")
+                if isinstance(expected, ezpkg.Settings):
+                    self.assertEqual(ezpkg.read_settings(path), expected)
+                    continue
+                with self.assertRaises(ValueError) as caught:
+                    ezpkg.read_settings(path)
+                self.assertEqual(str(caught.exception), expected, text)
+
     def test_version_range_is_conservative(self) -> None:
         """A floor always; a cap only where a version number means it.
 
@@ -7737,8 +7713,8 @@ class MetadataTest(unittest.TestCase):
         self.assertEqual(ezpkg.line_list([9, 5, 6, 5]), "lines 5-6, 9")
         self.assertEqual(ezpkg.line_list([7]), "line 7")
 
-    def test_a_discrepancy_is_arranged_and_shown(self) -> None:
-        """Unexplained entries keep their neighbour; changes are shown.
+    def test_a_discrepancy_is_arranged(self) -> None:
+        """Unexplained entries keep their neighbour.
 
         `widget` and `sprocket` are placed by imports, `PyYAML` is
         added, `rich` is unused, and `pywin32`, whose modules are not
@@ -7754,60 +7730,8 @@ class MetadataTest(unittest.TestCase):
                          ["sprocket", "PyYAML", "widget", "pywin32"])
         self.assertEqual(found.arrange((), ()),
                          ["rich", "sprocket", "widget", "pywin32"])
-        self.assertIn("EZPkg: prog.py: its `dependencies` (lines 4, 7) and "
-                      "its imports (lines 12-13) disagree.",
-                      " ".join(found.summary().split()))
-
-        # The display numbers each line as it will be, and marks it.
-        source: str = ('# /// script\n# dependencies = [\n#   "rich",\n'
-                       '#   "widget",\n#   "pywin32",\n#   "sprocket",\n'
-                       "# ]\n# ///\nimport sprocket\nimport yaml\n"
-                       "import widget\n")
-        final: list[str] = found.target()
-        listed: str | None = ezpkg.with_dependency_list(source, final)
-        assert listed is not None
-        scratch: str
-        with tempfile.TemporaryDirectory() as scratch:
-            kept: str | None = ezpkg.EZPkg(Path(scratch)).with_unimported(
-                listed, ["pywin32"])
-        assert kept is not None
-        edited: str = kept.replace("import yaml\n",
-                                   "import yaml  # type: ignore\n")
-        self.assertEqual(
-            found.display(final, source, listed, kept, edited, False
-                          ).splitlines(),
-            ["Changes to be made to `prog.py`:",
-             " 2:           dependencies = [",
-             '  :    remove "rich",',
-             ' 3:    move   "sprocket",',
-             ' 4:    add    "PyYAML",',
-             ' 5:           "widget",',
-             ' 6:           "pywin32",',
-             " 7:           ]",
-             " 8:    add",
-             " 9:    add    [tool.ezpkg]",
-             "10:    add    unimported = [",
-             '11:    add      "pywin32",  # Needed, but not imported.',
-             "12:    add    ]",
-             "15:    mypy   import yaml  # type: ignore"])
-        self.assertTrue(found.display(final, source, listed, kept, edited,
-                                      True).startswith("Changes made to "))
-
-        # An array on one line is shown before and after.
-        alone: str = '# /// script\n# dependencies = ["rich"]\n# ///\n'
-        one: ezpkg.Discrepancy = ezpkg.Discrepancy(
-            Path("prog.py"), ["rich"], [2], [("entry", 0, ""),
-                                             ("add", 0, "widget")],
-            {0: 4}, [(5, "widget", "widget")], [], set())
-        both: str | None = ezpkg.with_dependency_list(alone,
-                                                      ["rich", "widget"])
-        assert both is not None
-        self.assertEqual(
-            one.display(["rich", "widget"], alone, both, both, both, True
-                        ).splitlines(),
-            ["Changes made to `prog.py`:",
-             ' :    remove dependencies = ["rich"]',
-             '2:    add    dependencies = ["rich", "widget"]'])
+        self.assertEqual(found.imported({"PyYAML"}),
+                         ["pyyaml", "sprocket", "widget"])
 
     def test_with_type_ignores_copies_the_authors_comment(self) -> None:
         """New imports get the nearest `type: ignore` above, or none.
