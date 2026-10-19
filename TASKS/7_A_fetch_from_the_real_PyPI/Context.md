@@ -140,3 +140,10 @@
   question asked once.  `ux/drive.py --only STEP` runs single steps.
 * Not rehearsed on test.pypi.org since `1efdcae`; a rehearsal is due
   once the UX review settles.
+
+## 2026-10-18: The UX review is done
+
+* `ux01`-`ux27` built and agreed (`T.abfd`'s `Context.md` has the
+  decisions).  Next: Wayne's README read, then a test.pypi.org
+  rehearsal (none since `1efdcae`), then closing `T.abfd`, `T.kdaiis`,
+  `T.reb`, `T.eui`.

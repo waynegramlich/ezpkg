@@ -134,6 +134,39 @@ BOOTSTRAPS: dict[str, str] = {
         "nopip7 of 2026-10-17",
 }
 
+# The constructor writes this into the cache as `remove.py`, so that
+# removing the cache is one command that is the same everywhere, and
+# never an `rm -rf` handed to a stranger (Wayne, `ux22`).  It removes
+# only a directory that looks like a cache, and moves out of it first,
+# since Windows cannot remove the directory a process is in.
+REMOVE_SCRIPT: str = '''#!/usr/bin/env python3
+"""Remove this `ezpkg` cache, and everything `ezpkg` downloaded into it.
+
+Written by `ezpkg` (https://pypi.org/project/ezpkg/).  It is always
+safe: a program that needs a package again downloads it again.
+"""
+
+import os
+import shutil
+import sys
+from pathlib import Path
+
+here: Path = Path(__file__).resolve().parent
+# As `ezpkg` shows it: `~/.ezpkg`, except on Windows, which has no `~`.
+shown: str = str(here)
+if os.name != "nt" and here.is_relative_to(Path.home()):
+    shown = "~/" + here.relative_to(Path.home()).as_posix()
+if here == Path.home() or not (here / "versions").is_dir():
+    sys.exit(f"`{shown}` does not look like an `ezpkg` cache, so it is "
+             f"left alone.")
+os.chdir(here.parent)
+shutil.rmtree(here, ignore_errors=True)
+if here.exists():
+    sys.exit(f"`{shown}` could not be removed completely; a program may "
+             f"still be using it.")
+print(f"Removed `{shown}`.")
+'''
+
 # The Quick Start program from `README.md`, which the constructor writes
 # into the cache as `quick_start.py`, so that somebody who has run one
 # program can open the template in an editor and copy its parts into
@@ -447,7 +480,17 @@ class Declined(RuntimeError):
     A `RuntimeError`, as it always was, for a program calling `install`
     with arguments.  `install()` with none ends the program instead, with
     one line saying so (`T.abfd`).
+
+    Attributes:
+    * `said` (`str`):
+      That line, such as "Declined, so `~/.ezpkg` has been removed and
+      `prog.py` did not run."
     """
+
+    def __init__(self, message: str, said: str = "") -> None:
+        """Keep the line to say, beside the message."""
+        super().__init__(message)
+        self.said: str = said
 
 
 def shown(path: Path) -> str:
@@ -566,6 +609,34 @@ def program_name() -> str:
     # The interactive interpreter and `-c` have none.
     program: Path | None = main_path()
     return program.name if program is not None else "this program"
+
+
+def removal_command(root: Path) -> str:
+    """Return the command that runs a cache's `remove.py`.
+
+    Arguments:
+    * `root` (`Path`):
+      The cache.
+
+    Returns:
+    * (`str`): Such as `python3 ~/.ezpkg/remove.py`; on Windows, whose
+      Python is started as `py`, the full path.
+    """
+    return (f"py {shown(root / 'remove.py')}" if os.name == "nt"
+            else f"python3 {shown(root / 'remove.py')}")
+
+
+def name_of(name: str) -> str:
+    """Return a program's name as the questions show it, in backticks.
+
+    Arguments:
+    * `name` (`str`):
+      From `program_name`; `this program` is left bare.
+
+    Returns:
+    * (`str`): Such as `` `prog.py` ``.
+    """
+    return f"`{name}`" if main_path() is not None else name
 
 
 def main_path() -> Path | None:
@@ -2753,6 +2824,61 @@ class Discrepancy:
         return sum(1 for label, _ in self.rows(final, ())
                    if label.split(" ")[0] in ("add", "remove", "move"))
 
+    def reported(self, final: Sequence[str], before: str, edited: str,
+                 modules: Mapping[str, str]) -> list[str]:
+        """Return a line for each change Auto mode made, in line order.
+
+        Nothing was shown before an Auto mode edit, so each entry added,
+        removed or moved is named, with its line afterwards, and the
+        `mypy` comment an added entry's import was given (Wayne,
+        `ux11`).
+
+        Arguments:
+        * `final` (`Sequence[str]`):
+          The `dependencies` afterwards.
+        * `before`, `edited` (`str`):
+          The program before and after the `mypy` comments, which add
+          no lines.
+        * `modules` (`Mapping[str, str]`):
+          The module each added entry was added for.
+
+        Returns:
+        * (`list[str]`): Such as `ezpkg: added "sprocket" to
+          `prog.py`'s `dependencies` (line 12).`.
+        """
+        # Each entry's line afterwards, if it can be counted.
+        name: str = f"`{self.program.name}`'s `dependencies`"
+        lines: list[int] = dependency_lines(edited) or []
+        at: dict[str, str] = {
+            entry: f" (line {line})" for entry, line in zip(final, lines)}
+        reports: list[str] = [
+            f'ezpkg: removed "{entry}" from {name}.'
+            for entry in self.entries if entry not in final]
+        moved: set[str] = {
+            entry for entry in final if entry in self.entries
+            and [one for one in self.entries if one in final].index(entry)
+            != [one for one in final if one in self.entries].index(entry)}
+        # The import lines that were given the comment, by module.
+        old: list[str] = before.splitlines()
+        new: list[str] = edited.splitlines()
+        commented: dict[str, int] = {
+            module: line for module, line, _ in program_imports(edited)
+            if line <= min(len(old), len(new))
+            and old[line - 1] != new[line - 1]}
+        entry: str
+        for entry in final:
+            if entry not in self.entries:
+                module: str = modules.get(entry, "")
+                comment: str = (
+                    f", and the `mypy` comment to `import {module}` (line "
+                    f"{commented[module]})" if module in commented else "")
+                reports.append(f'ezpkg: added "{entry}" to {name}'
+                               f'{at.get(entry, "")}{comment}.')
+            elif entry in moved:
+                reports.append(f'ezpkg: moved "{entry}" in {name}'
+                               f'{at.get(entry, "")}.')
+        return reports
+
     def rows(self, final: Sequence[str],
              kept: Sequence[str]) -> list[tuple[str, str]]:
         """Return the label and entry of each `dependencies` line of `display`.
@@ -2894,9 +3020,11 @@ class EZPkg:
           cache was last swept and when `pip` was last checked.
         * `ezpkg/` and `ezpkg-<version>.dist-info/` are `EZPkg`
           itself, which the bootstrap installed.
-        * `FOREVER_APPROVE`, if present, means somebody answered `a` to
-          the download prompt, so nobody is asked before packages are
-          installed.  Delete it to be asked again.
+        * `FOREVER_APPROVE`, if present, means somebody answered `a` or
+          `s` to the download prompt, so nobody is asked before packages
+          are installed (and, after `s`, nothing is said about them).
+          Delete it to be asked again.
+        * `remove.py` removes this whole directory.
         * `quick_start.py` is a complete program that uses `EZPkg`.
           Copy its parts into a program of your own; the comments in
           it say which part is which.  It is the copy that came with
@@ -2906,8 +3034,8 @@ class EZPkg:
         Deleting this whole directory is safe.  The next program that
         needs one of these packages will fetch it again.  To delete it:
 
-        * Linux and macOS: `rm -rf ~/.ezpkg`
-        * Windows: `rmdir /s /q %USERPROFILE%\\.ezpkg`
+        * Linux and macOS: `python3 ~/.ezpkg/remove.py`
+        * Windows: `py %USERPROFILE%\\.ezpkg\\remove.py`
 
         A program can say which packages it needs in a PEP 723 block at
         its top, and can carry a `.ezpkg` file beside it recording
@@ -2960,6 +3088,7 @@ class EZPkg:
         refresh(self.readme, f"# {title}\n{body}\n")
         self.quick_start = self.root / "quick_start.py"
         refresh(self.quick_start, QUICK_START)
+        refresh(self.root / "remove.py", REMOVE_SCRIPT)
 
         # Repair a single module install, so that the bootstrap that
         # fetched this one recognises it next time.  See `I.cctfd`.
@@ -3528,7 +3657,6 @@ class EZPkg:
 
         # Worked out only now, since it reads the installed metadata.
         found: Discrepancy | None = self.discrepancy(program, text, asking)
-        answer: str = str(kept.get("answer", ""))
         if found is None or not found.pending():
             # A changed copy with nothing to offer asks nothing yet.
             self.keep(record, kept, asked=fingerprint,
@@ -3549,8 +3677,7 @@ class EZPkg:
         # a terminal.  An end-user whose copy has changed, or will break,
         # may be its developer, and is asked.
         opened: tuple[IO[str], IO[str]] | None = (
-            None if answer == "never"
-            or not (self.developing() or self.changed or breaking)
+            None if not (self.developing() or self.changed or breaking)
             else self.terminal())
         if opened is not None and not self.developing():
             with opened[0], opened[1]:
@@ -3566,9 +3693,7 @@ class EZPkg:
                 self.declined = True  # Said, so `scan_imports` is quiet.
             elif kept.get("warned") != fingerprint:
                 print(found.summary(), file=sys.stderr)
-            self.keep(record, kept, warned=fingerprint,
-                      **({"asked": fingerprint} if answer == "never"
-                         else {}))
+            self.keep(record, kept, warned=fingerprint)
             return list(asking)
         writer: IO[str]
         reader: IO[str]
@@ -3767,7 +3892,8 @@ class EZPkg:
         # or counted, that could never be added.
         writer: IO[str] = opened[0]
         program: Path = found.program
-        answer: str = str(kept.get("answer", ""))
+        # Only Auto is remembered; an old `d` ("never") is forgotten.
+        answer: str = ("update" if kept.get("answer") == "update" else "")
         offered: list[int] = []
         position: int
         line: int
@@ -3796,8 +3922,11 @@ class EZPkg:
             self.keep(record, kept, asked=fingerprint, answer=answer)
             return asking
 
-        # Several changes are one question, unless `a` said always;
-        # `i` goes through them one by one.  See `T.kdaiis`.
+        # Several changes are one question, unless `a` chose Auto;
+        # `i` goes through them one by one.  Two modes only, Manual
+        # (asked) and Auto (`a`, done with a line per change): an old
+        # record's `d` ("never") now just asks (Wayne, `ux11`).  See
+        # `T.kdaiis`.
         added: set[str] = set()
         removed: set[int] = set()
         keeping: list[str] = []
@@ -3806,7 +3935,7 @@ class EZPkg:
         confirm: bool = True
         chosen: str = "update" if answer == "update" else (
             "individually" if count < 1 else "")
-        remembered: bool = chosen == "update"  # Silent (`ux11`).
+        remembered: bool = chosen == "update"  # Auto (`ux11`).
         modules: dict[str, str]
         listed_first: list[str] | None = None
         if not chosen:
@@ -3832,38 +3961,33 @@ class EZPkg:
                     listed_first, edit[0], edit[3], edit[4], edit[5], False,
                     found.needing(count, ":")))
         # Asked once: nobody wants to answer the same question twice
-        # (Wayne, `ux10`), so `a` and `d` take effect at once, and say
-        # how to undo them.  A lone unused entry can be kept with `k`.
+        # (Wayne, `ux10`), so `a` takes effect at once, and says how to
+        # undo it.  A lone unused entry can be kept with `k`.
         lone: bool = count == 1 and not offered and len(found.removals) == 1
         if not chosen:
             chosen = self.choose(
                 opened, (f"Update it? [y=>Yes|n=>No|"
                          f"{'k=>Keep it, needed without an import|' if lone else ''}"
-                         f"a=>Always|d=>Don't ask again]: ") if count == 1
-                else "Update them? [y=>Yes|n=>No|i=>Individually|a=>Always|"
-                     "d=>Don't ask again]: ",
+                         f"a=>Auto, from now on]: ") if count == 1
+                else "Update them? [y=>Yes|n=>No|i=>Individually|"
+                     "a=>Auto, from now on]: ",
                 {"y": "yes", "yes": "yes", "n": "no", "no": "no",
-                 "a": "update", "always": "update", "d": "never",
+                 "a": "update", "auto": "update",
                  **({"i": "individually"} if count > 1 else {}),
                  **({"k": "keep", "keep": "keep"} if lone else {})}) or "no"
-            undo: str = {
-                "update": f"From now on, `ezpkg` updates `{program.name}`'s "
-                          f"`dependencies` without asking.",
-                "never": f"From now on, `ezpkg` never asks about "
-                         f"`{program.name}`'s `dependencies`."}.get(chosen, "")
-            if undo:
+            if chosen == "update":
                 writer.write(wrapped(
-                    f"{undo}  To be asked again, delete `{shown(record)}`.",
-                    columns(writer)) + "\n")
+                    f"From now on, `ezpkg` updates `{program.name}`'s "
+                    f"`dependencies` without asking.  To be asked again, "
+                    f"delete `{shown(record)}`.", columns(writer)) + "\n")
                 answer = chosen
-        if chosen in ("no", "never"):
-            if chosen == "no":
-                # Said here, so `scan_imports` is quiet (`ux06_Batch_n`).
-                writer.write(wrapped(
-                    f"Nothing changed.  This is asked again when the "
-                    f"imports or `dependencies` of `{program.name}` "
-                    f"change.", columns(writer)) + "\n")
-                self.declined = True
+        if chosen == "no":
+            # Said here, so `scan_imports` is quiet (`ux06_Batch_n`).
+            writer.write(wrapped(
+                f"Nothing changed.  This is asked again when the "
+                f"imports or `dependencies` of `{program.name}` "
+                f"change.", columns(writer)) + "\n")
+            self.declined = True
             self.keep(record, kept, asked=fingerprint, answer=answer)
             return asking
         # A blank line comes before what follows: the list of new
@@ -3961,6 +4085,10 @@ class EZPkg:
                                           in modules.items()})
             if self.listings != listings:
                 blank = True  # The list ends with one.
+        except Declined:
+            # A no to the download stops the program, as on any run;
+            # nothing is recorded, so the change is offered again.
+            raise
         except (RuntimeError, ValueError) as error:
             reason: str = failure_reason(error)
             hint: str = ("; with an approvals file, run it with "
@@ -4017,8 +4145,18 @@ class EZPkg:
         if fetched is not None:
             self.remember(self.request_for(final), *fetched)
 
-        # Remembered as settled; the display has said what changed, so
-        # there are no report lines (Wayne, `ux02`).
+        # In Auto mode nothing was shown, so each change gets a line,
+        # since the file changed under its developer (Wayne, `ux11`).
+        # Otherwise the display has said it all (Wayne, `ux02`).
+        if remembered:
+            report: str
+            for report in found.reported(
+                    final, kept_text, edited,
+                    {ranged.get(package, package): module
+                     for package, module in modules.items()}):
+                writer.write(wrapped(report, columns(writer)) + "\n")
+
+        # Remembered as settled.
         try:
             settled: str = dependency_fingerprint(edited, final, approved)
         except SyntaxError:
@@ -5045,7 +5183,7 @@ class EZPkg:
         return found
 
     def details(self, wheels: Sequence[Path],
-                width: int = 80) -> list[str]:
+                width: int = LINE_WIDTH) -> list[str]:
         """Describe each new package in one numbered line, for `?`.
 
         The name and version, then the package's own summary, cut to fit
@@ -5064,7 +5202,7 @@ class EZPkg:
         * (`list[str]`): Lines to show, without trailing newlines.
         """
         # `  1. cowsay 6.1: The famous cowsay ...`, cut with `...`.
-        return [cut(f"  {number}. {title}" + (f": {told}" if told else ""),
+        return [cut(f"{number}. {title}" + (f": {told}" if told else ""),
                     width)
                 for number, (title, told)
                 in enumerate(self.described(wheels), 1)]
@@ -5228,8 +5366,7 @@ class EZPkg:
         # once, then the question, put again after a `?` or a typo.
         # It does not say the packages are already downloaded:
         # "retained" is true, and on `n` nothing runs.
-        name: str = (f"`{program_name()}`" if main_path() is not None
-                     else program_name())
+        name: str = name_of(program_name())
         place: str = self.place()
         width: int = columns(writer)
         paragraph: str = wrapped(
@@ -5248,8 +5385,8 @@ class EZPkg:
                 f"will be removed again, without running {name}.", width)
             question = wrapped(f"Keep them in {place} and run {name}?",
                                width)
-        question += ("\n[y=>Yes, this time|n=>No|"
-                     "a=>Always, never ask again|?=>Explain]: ")
+        question += ("\n[y=>Yes, this time|n=>No|a=>Always, list|"
+                     "s=>Always, silently|?=>Explain]: ")
         told: bool = False
         with writer, reader:
             writer.write(paragraph + "\n\n")
@@ -5266,8 +5403,10 @@ class EZPkg:
                     told = True
 
                 # An empty read is the terminal going away, not an
-                # answer, and asking again would never end.
+                # answer, and asking again would never end.  Control-D
+                # leaves the cursor after the question (`ux21`).
                 if not answer:
+                    writer.write("\n")
                     return False
                 answer = answer.strip().lower()
                 if answer in ("y", "yes"):
@@ -5276,27 +5415,27 @@ class EZPkg:
                     return True
                 if answer in ("n", "no"):
                     return False
-                if answer in ("a", "always"):
+                if answer in ("a", "always", "s", "silently"):
                     # Asked once, since the label says what it does
-                    # (Wayne, `ux10`, 2026-10-18).  A permanent decision
-                    # deserves a visible way back,
-                    # and the command that gives it.
+                    # (Wayne, `ux10`).  `a` still lists each new
+                    # download; `s` says nothing more (Wayne, `ux22`).
+                    # A permanent decision deserves a visible way back.
+                    silent: bool = answer.startswith("s")
                     marker: Path = self.forever()
                     marker.write_text(
-                        "This file means: do not ask again before "
-                        "installing packages\ninto this directory.  "
-                        "Delete it to be asked again.\n",
+                        ("silent" if silent else "always")
+                        + "\nThis file means: do not ask again before "
+                        "installing packages\ninto this directory"
+                        + (", or list them" if silent else "")
+                        + ".  Delete it to be asked again.\n",
                         encoding="utf-8")
-                    removal: str = (f"rmdir /s /q {shown(self.root)}"
-                                    if os.name == "nt"
-                                    else f"rm -rf {shown(self.root)}")
-                    writer.write(
-                        f"\nFrom now on packages will be downloaded "
-                        f"silently into\n{shown(self.root)}.\n"
-                        f"To be asked again, delete\n{shown(marker)}.\n"
-                        f"It is ALWAYS safe to delete the whole "
-                        f"directory as well, which costs\nonly a "
-                        f"download:\n    {removal}\n\n")
+                    writer.write("\n" + wrapped(
+                        f"From now on, `ezpkg` downloads software packages "
+                        f"into {place} "
+                        f"{'silently' if silent else 'without asking'}.  "
+                        f"To be asked again, delete `{shown(marker)}`.  To "
+                        f"remove `ezpkg` and everything it downloaded, run "
+                        f"`{removal_command(self.root)}`.", width) + "\n\n")
                     return True
                 if answer == "?":
                     writer.write(
@@ -5306,7 +5445,8 @@ class EZPkg:
                     continue
                 typos += 1
                 writer.write(
-                    "Please answer y, n, a for always, or ? for more.\n")
+                    "Please answer y, n, a for always, s for silently, or ? for "
+                    "more.\n")
         return False
 
     def ask(self, question: str) -> bool:
@@ -5368,6 +5508,23 @@ class EZPkg:
         # One file, named so that somebody listing the directory can
         # guess what it does without reading anything else.
         return self.root / "FOREVER_APPROVE"
+
+    def silent(self) -> bool:
+        """Say whether `s` answered the download prompt for good.
+
+        `s` writes `silent` as the marker's first line; `a`, or a marker
+        from before `s` existed, means only "do not ask" (`ux22`).
+
+        Returns:
+        * (`bool`): True when no download is to be listed either.
+        """
+        # Unreadable or absent is not silent.
+        try:
+            first: str = self.forever().read_text(
+                encoding="utf-8").partition("\n")[0]
+        except OSError:
+            return False
+        return first.strip() == "silent"
 
     def gate(self, wheels: Sequence[Path], asking: Sequence[str] = (),
              new: Sequence[Path] | None = None) -> None:
@@ -5443,9 +5600,39 @@ class EZPkg:
         asked: Sequence[Path] = wheels if new is None else new
         if self.forever().is_file() or not (asked or self.bootstrapped()):
             return
-        if not self.consent(asked, asking):
+        # Control-C before the answer's Enter is a no; after it, the
+        # answer stands (Wayne, `ux14`).
+        how: str = "Declined"
+        try:
+            agreed: bool = self.consent(asked, asking)
+        except KeyboardInterrupt:
+            agreed = False
+            how = "Interrupted"
+            print(file=sys.stderr)  # After the `^C`.
+        if not agreed:
             raise Declined(
-                f"declined: nothing was installed into {self.root}")
+                f"declined: nothing was installed into {self.root}",
+                f"{how}, so {self.removed()} and "
+                f"{name_of(program_name())} did not run.")
+
+    def removed(self) -> str:
+        """Take away what a no refuses, and say what that was.
+
+        On a first run the bootstrap's `pip` and `ezpkg` are refused
+        too, so the whole cache goes and it never happened, as the
+        first question promises (`ux01`); if in doubt, delete, since
+        anything deleted is simply fetched again.  Otherwise only the
+        new downloads go, which `provide` does as the refusal passes.
+
+        Returns:
+        * (`str`): Such as "`~/.ezpkg` has been removed".
+        """
+        # Only a cache this run's bootstrap filled, never a home.
+        if (self.pip_run is not None and self.root != Path.home()
+                and (self.root / "pip.whl").is_file()):
+            shutil.rmtree(self.root, ignore_errors=True)
+            return f"{self.place()} has been removed"
+        return "the new software package(s) have been removed"
 
     def verify(self, wheels: Sequence[Path]) -> None:
         """Refuse anything the author did not approve.
@@ -6103,6 +6290,12 @@ class EZPkg:
         self.restarted = held is not None
         try:
             self.provide_declared(argv, bootstrap)
+        except Declined as declined:
+            # One line, not a traceback or the bootstrap's `failed:`
+            # line, which would read as a fault; from the first fetch or
+            # a `dependencies` update's (`ux16`).
+            raise SystemExit(wrapped(declined.said, columns(sys.stderr))
+                             ) from None
         finally:
             if held:
                 os.environ["EZPKG_APPROVE"] = held
@@ -6131,13 +6324,7 @@ class EZPkg:
         if bootstrap and not switching:
             self.refuse_an_edited_bootstrap(bootstrap)
         providing: list[str] = self.providing(asked, own, switching)
-        try:
-            self.switch(self.provide(providing, argv))
-        except Declined:
-            # One line, not a traceback or the bootstrap's
-            # `failed:` line, which would read as a fault.
-            raise SystemExit(f"ezpkg: nothing was installed, so "
-                             f"{program_name()} stops here.") from None
+        self.switch(self.provide(providing, argv))
         if bootstrap and switching:
             # Still here, so no other `ezpkg` came: this one judges.
             self.refuse_an_edited_bootstrap(bootstrap)
@@ -6307,8 +6494,9 @@ class EZPkg:
             except KeyboardInterrupt:
                 # Control-C at a question, or during a download, is a
                 # person saying stop, not a fault (`I.ffspo`).
-                raise SystemExit(f"\nezpkg: interrupted, so "
-                                 f"{program_name()} stops here.") from None
+                raise SystemExit(f"\nInterrupted, so "
+                                 f"{name_of(program_name())} stops here."
+                                 ) from None
             return None
 
         # An edited bootstrap stops the program; see `bootstrap_refusal`.
@@ -6608,7 +6796,7 @@ class EZPkg:
                 # wheels before `unpack` moves them away.
                 stored: str = self.listing(new, columns(sys.stderr))
                 trees = [self.unpack(wheel) for wheel in arrived]
-                if new or self.bootstrapped():
+                if (new or self.bootstrapped()) and not self.silent():
                     print(stored, file=sys.stderr)
                     self.listings += 1
                 self.told = True

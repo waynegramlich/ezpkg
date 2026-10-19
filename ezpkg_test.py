@@ -143,8 +143,8 @@ FLOOR: str = floor()
 
 # The consent question, spelled once here so that changing the wording in
 # `ezpkg.py` fails in one obvious place rather than in six.
-PROMPT: str = ("[y=>Yes, this time|n=>No|a=>Always, never ask again|"
-                "?=>Explain]:")
+PROMPT: str = ("[y=>Yes, this time|n=>No|a=>Always, list|"
+                "s=>Always, silently|?=>Explain]:")
 
 # The case that ships: `nopip7` uses an `ezpkg` that is already
 # importable, and otherwise fetches a `pip` of its own and runs it as a
@@ -3739,16 +3739,35 @@ class InstallTest(unittest.TestCase):
         seen: str = self.answer_on_a_terminal(program, b"a\n")
         self.assertIn(PROMPT, seen)
         self.assertNotIn("Really", seen)
-        self.assertIn("From now on packages will be downloaded silently",
-                      seen)
-        self.assertIn("ALWAYS safe to delete the whole directory", seen)
-        self.assertIn("rm -rf", seen)
+        flat: str = " ".join(seen.split())
+        self.assertIn("From now on, `ezpkg` downloads software packages "
+                      "into", flat)
+        self.assertIn("without asking.", flat)
+        self.assertIn("remove.py`.", flat)
+        self.assertNotIn("rm -rf", seen)
         self.assertIn("1.2.3", seen)
         marker: Path = program.parent / "cache" / "FOREVER_APPROVE"
         self.assertTrue(marker.is_file())
+        self.assertEqual(marker.read_text().partition("\n")[0], "always")
         self.assertIn("Delete it to be asked again",
                       marker.read_text())
-        self.assertIn(str(marker), seen)
+        self.assertIn(str(marker), flat)
+
+    def test_silently_asks_and_lists_nothing_again(self) -> None:
+        """`s` is `a` without the lists, now and from then on (`ux22`)."""
+        # The answer, then a cold fetch that says nothing at all.
+        program: Path = self.program("asked_silently", "widget")
+        seen: str = self.answer_on_a_terminal(program, b"s\n")
+        self.assertIn("silently.", " ".join(seen.split()))
+        self.assertNotIn("now installed", seen)
+        marker: Path = program.parent / "cache" / "FOREVER_APPROVE"
+        self.assertEqual(marker.read_text().partition("\n")[0], "silent")
+        shutil.rmtree(program.parent / "cache" / "versions")
+        shutil.rmtree(program.parent / "cache" / "requests")
+        seen = self.answer_on_a_terminal(program, b"")
+        self.assertNotIn(PROMPT, seen)
+        self.assertNotIn("now installed", seen)
+        self.assertIn("1.2.3", seen)
 
     def test_always_is_asked_once(self) -> None:
         """`a` is never confirmed: nobody wants to answer twice.
@@ -3846,8 +3865,8 @@ class InstallTest(unittest.TestCase):
         program: Path = self.program("asked_enter", "widget")
         seen: str = self.answer_on_a_terminal(program, b"\ny\n")
         self.assertEqual(seen.count(PROMPT), 2, seen)
-        self.assertIn("Please answer y, n, a for always, or ? for more.",
-                      seen)
+        self.assertIn("Please answer y, n, a for always, s for silently, "
+                      "or ? for more.", seen)
         self.assertIn("1.2.3", seen)
 
         # Enter every time: asked until the patience runs out.
@@ -3863,7 +3882,8 @@ class InstallTest(unittest.TestCase):
         program: Path = self.program("asked_again", "widget")
         seen: str = self.answer_on_a_terminal(program, b"x\nmaybe\ny\n")
         self.assertEqual(
-            seen.count("Please answer y, n, a for always, or ? for more."),
+            seen.count("Please answer y, n, a for always, s for "
+                       "silently, or ? for more."),
             2, seen)
         self.assertEqual(seen.count(PROMPT), 3, seen)
         self.assertIn("1.2.3", seen)
@@ -3879,8 +3899,8 @@ class InstallTest(unittest.TestCase):
         program: Path = self.program("curious", "needy")
         seen: str = self.answer_on_a_terminal(program, b"?\ny\n")
         self.assertEqual(seen.count(PROMPT), 2, seen)
-        self.assertIn("  1. needy 1.0.0: Needs a widget.", seen)
-        self.assertIn("  2. widget 1.2.3: A throwaway.", seen)
+        self.assertIn("1. needy 1.0.0: Needs a widget.", seen)
+        self.assertIn("2. widget 1.2.3: A throwaway.", seen)
         self.assertNotIn("sha256", seen)
 
     def test_a_long_summary_is_cut_to_fit(self) -> None:
@@ -3900,8 +3920,8 @@ class InstallTest(unittest.TestCase):
                     + (f"Summary: {told}\n" if told else ""))
             wheels.append(wheel)
         lines: list[str] = venv.details(wheels)
-        self.assertEqual(lines[0], "  1. bare 1.0")
-        self.assertTrue(lines[1].startswith("  2. long 1.0: word word"))
+        self.assertEqual(lines[0], "1. bare 1.0")
+        self.assertTrue(lines[1].startswith("2. long 1.0: word word"))
         self.assertTrue(lines[1].endswith("..."))
         self.assertLessEqual(len(lines[1]), 80)
 
@@ -3938,8 +3958,8 @@ class InstallTest(unittest.TestCase):
             [], 0, "", "")
         venv: ezpkg.EZPkg = ezpkg.EZPkg(root, pip=ran)
         self.assertEqual(venv.details([wheel]), [
-            "  1. pip 26.2.1 (used by `ezpkg`): The tool.",
-            "  2. ezpkg 0.0.1: Easy.", "  3. cowsay 6.1: Moo."])
+            "1. pip 26.2.1 (used by `ezpkg`): The tool.",
+            "2. ezpkg 0.0.1: Easy.", "3. cowsay 6.1: Moo."])
         self.assertEqual(venv.listing([wheel], 200), "\n".join([
             f"The following 3 package(s) are now installed in `{root}`:",
             "1. pip 26.2.1 (used by `ezpkg`): The tool.",
@@ -3948,9 +3968,9 @@ class InstallTest(unittest.TestCase):
 
         # Once told, and on any other run, only what arrived.
         venv.told = True
-        self.assertEqual(venv.details([wheel]), ["  1. cowsay 6.1: Moo."])
+        self.assertEqual(venv.details([wheel]), ["1. cowsay 6.1: Moo."])
         self.assertEqual(ezpkg.EZPkg(root).details([wheel]),
-                         ["  1. cowsay 6.1: Moo."])
+                         ["1. cowsay 6.1: Moo."])
 
     def test_asking_for_detail_is_not_a_typo(self) -> None:
         """`?` does not spend the patience meant for mistakes.
@@ -5501,8 +5521,8 @@ class InstallTest(unittest.TestCase):
         flat: str = " ".join(seen.split())
         self.assertIn("`prog.py` has 1 entry in `dependencies` (line 3) that "
                       "needs to be updated:", flat)
-        self.assertIn("Update it? [y=>Yes|n=>No|a=>Always|d=>Don't ask "
-                      "again]:", flat)
+        self.assertIn("Update it? [y=>Yes|n=>No|a=>Auto, from now on]:",
+                      flat)
         self.assertNotIn("Make these changes?", flat)
         self.assertIn('remove dependencies = ["widget"]', flat)
         self.assertIn('add dependencies = ["widget", "sprocket>=2.0.0,<3"]',
@@ -5649,7 +5669,7 @@ class InstallTest(unittest.TestCase):
         seen: str = self.answer_on_a_terminal(program, b"y\n")
         flat: str = " ".join(seen.split())
         self.assertIn("Update it? [y=>Yes|n=>No|k=>Keep it, needed without "
-                      "an import|a=>Always|d=>Don't ask again]:", flat)
+                      "an import|a=>Auto, from now on]:", flat)
         self.assertIn('remove "sprocket",', flat)
         self.assertEqual(self.declared_now(program), ["widget"])
 
@@ -5728,8 +5748,8 @@ class InstallTest(unittest.TestCase):
                       "that need to be updated: : remove dependencies = "
                       '["widget"] 3: add dependencies = ["widget", '
                       '"sprocket>=2.0.0,<3", "needy>=1.0.0,<2"] Update them? '
-                      "[y=>Yes|n=>No|i=>Individually|a=>Always|d=>Don't ask "
-                      "again]:", flat)
+                      "[y=>Yes|n=>No|i=>Individually|a=>Auto, from now "
+                      "on]:", flat)
         self.assertNotIn("Changes made to `prog.py`:", flat)
         self.assertNotIn("Make these changes?", flat)
         self.assertNotIn("is imported, but not in", flat)
@@ -5757,9 +5777,12 @@ class InstallTest(unittest.TestCase):
         self.assertEqual(self.declared_now(program),
                          ["widget", "needy>=1.0.0,<2"])
 
-    def test_always_and_never_outlive_the_run(self) -> None:
-        """`a` updates without asking from then on; `d` stops all asking."""
-        # Always, confirmed: updated now, and next time without asking.
+    def test_auto_outlives_the_run(self) -> None:
+        """`a` updates from then on without asking, a line per change.
+
+        Two modes only, Manual and Auto; `d` is gone (Wayne, `ux11`).
+        """
+        # Auto, asked once: updated now, and next time without asking.
         tail: str = "import sprocket\nimport needy"
         program: Path = self.synced_program("always", '["widget"]', tail)
         seen: str = self.answer_on_a_terminal(program, b"a\n")
@@ -5775,22 +5798,20 @@ class InstallTest(unittest.TestCase):
         seen = self.answer_on_a_terminal(program, b"")
         self.assertNotIn("Update", seen)
         self.assertNotIn("Remove it?", seen)
-        self.assertNotIn("remove", seen)
+        self.assertIn('ezpkg: removed "needy>=1.0.0,<2" from `prog.py`\'s '
+                      "`dependencies`.", " ".join(seen.split()))
         self.assertEqual(self.declared_now(program),
                          ["widget", "sprocket>=2.0.0,<3"])
 
-        # Don't ask again, at once: named, never asked.
-        program = self.synced_program("never", '["widget"]', tail)
-        seen = self.answer_on_a_terminal(program, b"d\n")
-        self.assertNotIn("Really", seen)
-        self.assertIn("never asks about `prog.py`'s", " ".join(seen.split()))
-        program.write_text(program.read_text().replace(
-            "import needy\n", ""))
-        before: str = program.read_text()
-        seen = self.answer_on_a_terminal(program, b"y\n")
-        self.assertNotIn("Update them?", seen)
-        self.assertIn("disagree", seen)
-        self.assertEqual(program.read_text(), before)
+        # An addition in Auto mode: one line, with where it went.
+        program.write_text(program.read_text() + "import needy\n")
+        seen = self.answer_on_a_terminal(program, b"")
+        self.assertNotIn("Update", seen)
+        self.assertRegex(" ".join(seen.split()),
+                         r'ezpkg: added "needy>=1\.0\.0,<2" to `prog\.py`\'s '
+                         r"`dependencies` \(line \d+\)[.,]")
+        self.assertEqual(self.declared_now(program),
+                         ["widget", "sprocket>=2.0.0,<3", "needy>=1.0.0,<2"])
 
     def test_a_name_the_index_lacks_is_not_offered(self) -> None:
         """A misspelt import is caught before anything is offered.
@@ -7451,7 +7472,74 @@ class MetadataTest(unittest.TestCase):
               self.assertRaises(SystemExit) as caught):
             ezpkg.EZPkg(root).install()
         self.assertRegex(str(caught.exception.code),
-                         r"^\nezpkg: interrupted, so \S+ stops here\.$")
+                         r"^\nInterrupted, so \S+ stops here\.$")
+
+    def test_remove_py_removes_only_a_cache(self) -> None:
+        """Every cache carries `remove.py`, which removes it (`ux22`)."""
+        # A cache, removed by its own script.
+        root: Path = Path(tempfile.mkdtemp(prefix="removable-"))
+        self.addCleanup(shutil.rmtree, root, True)
+        cache: Path = root / ".ezpkg"
+        ezpkg.EZPkg(cache).paths()
+        script: Path = cache / "remove.py"
+        self.assertEqual(script.read_text(), ezpkg.REMOVE_SCRIPT)
+        done: subprocess.CompletedProcess[str] = subprocess.run(
+            [sys.executable, str(script)], capture_output=True, text=True,
+            check=False, cwd=cache)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertFalse(cache.exists())
+        self.assertIn("Removed", done.stdout)
+
+        # A copy anywhere else leaves its directory alone.
+        stray: Path = root / "elsewhere"
+        stray.mkdir()
+        (stray / "remove.py").write_text(ezpkg.REMOVE_SCRIPT)
+        done = subprocess.run([sys.executable, str(stray / "remove.py")],
+                              capture_output=True, text=True, check=False)
+        self.assertNotEqual(done.returncode, 0)
+        self.assertIn("does not look like an `ezpkg` cache", done.stderr)
+        self.assertTrue(stray.is_dir())
+
+    def test_a_no_removes_what_it_refuses(self) -> None:
+        """A first run's no removes the cache; a later one, the new.
+
+        Control-C at the download question, before the Enter, is a no
+        (Wayne, `ux14`).
+        """
+        # A first run: the bootstrap filled the cache, then Control-C.
+        root: Path = Path(tempfile.mkdtemp(prefix="refused-"))
+        self.addCleanup(shutil.rmtree, root, True)
+        (root / "pip.whl").write_bytes(b"")
+        first: ezpkg.EZPkg = ezpkg.EZPkg(
+            root, pip=subprocess.CompletedProcess([], 0, "", ""))
+        caught: unittest.case._AssertRaisesContext[ezpkg.Declined]
+        with (unittest.mock.patch.dict(os.environ, {"EZPKG_APPROVE": ""}),
+              unittest.mock.patch.object(first, "approved",
+                                         return_value=None),
+              unittest.mock.patch.object(first, "consent",
+                                         side_effect=KeyboardInterrupt),
+              self.assertRaises(ezpkg.Declined) as caught):
+            first.gate([root / "sprocket-2.0.0-py3-none-any.whl"])
+        self.assertFalse(root.exists())
+        self.assertRegex(caught.exception.said,
+                         r"^Interrupted, so `.+` has been removed and "
+                         r"\S+ did not run\.$")
+
+        # A later run: `n`, and only the new downloads go.
+        root.mkdir()
+        (root / "pip.whl").write_bytes(b"")
+        later: ezpkg.EZPkg = ezpkg.EZPkg(root)
+        with (unittest.mock.patch.dict(os.environ, {"EZPKG_APPROVE": ""}),
+              unittest.mock.patch.object(later, "approved",
+                                         return_value=None),
+              unittest.mock.patch.object(later, "consent",
+                                         return_value=False),
+              self.assertRaises(ezpkg.Declined) as caught):
+            later.gate([root / "sprocket-2.0.0-py3-none-any.whl"])
+        self.assertTrue((root / "pip.whl").exists())
+        self.assertRegex(caught.exception.said,
+                         r"^Declined, so the new software package\(s\) "
+                         r"have been removed and \S+ did not run\.$")
 
     def test_pin_dependencies_rewrites_only_the_array(self) -> None:
         """Part 1 is pinned, `no-build` added, and the rest kept.

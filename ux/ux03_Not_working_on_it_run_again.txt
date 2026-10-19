@@ -1,5 +1,6 @@
 1.1c Not working on it, run again
 Still broken, so asked again; n again, and the same explanation.
+prog.py: `ux03_prog.py`, left unchanged by `ezpkg`.
 -------------------------------------------------------------------------------
 `prog.py` imports a package its `dependencies` do not list, so you may be
 working on it.  If you are, `ezpkg` will offer to keep its `dependencies` in

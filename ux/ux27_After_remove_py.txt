@@ -1,0 +1,29 @@
+1.23 After remove.py
+The program again: a first run, asked as in ux01.
+prog.py: `ux27_prog.py`, left unchanged by `ezpkg`.
+-------------------------------------------------------------------------------
+The author of `prog.py` has selected some software packages from the internet.
+If you agree, they will be retained in `~/.ezpkg`.  If you do not trust the
+author, answer `n` and `~/.ezpkg` will simply go away without running
+`prog.py`.
+
+Retain `~/.ezpkg` and run `prog.py`?
+[y=>Yes, this time|n=>No|a=>Always, list|s=>Always, silently|?=>Explain]: y
+The following 4 package(s) are now installed in `~/.ezpkg`:
+1. pip 26.2.1 (used by `ezpkg`): The PyPA recommended tool for installing Py...
+2. ezpkg 0.0.1: Automatic Package Fetching for One-File Programs
+3. cowsay 6.1: The famous cowsay for GNU/Linux is now available for python
+4. humanize 4.16.0: Python humanize utilities
+`ezpkg` (https://pypi.org/project/ezpkg/) manages `~/.ezpkg`.
+
+  ____________
+| EZPkg works! |
+  ============
+            \
+             \
+               ^__^
+               (oo)\_______
+               (__)\       )\/\
+                   ||----w |
+                   ||     ||
+The cow above was drawn by cowsay 6.1.

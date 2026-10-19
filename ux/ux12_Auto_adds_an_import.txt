@@ -1,0 +1,17 @@
+1.9 Auto adds an import
+import tabulate back, in Auto mode: one line, then the cow; its 0.10.0 is still stored, so no download question.
+prog.py: `ux12_prog.py`, changed by `ezpkg` into `ux12_prog_after.py`.
+-------------------------------------------------------------------------------
+ezpkg: added "tabulate>=0.10.0,<0.11" to `prog.py`'s `dependencies` (line 13),
+and the `mypy` comment to `import tabulate` (line 76).
+  ____________
+| EZPkg works! |
+  ============
+            \
+             \
+               ^__^
+               (oo)\_______
+               (__)\       )\/\
+                   ||----w |
+                   ||     ||
+The cow above was drawn by cowsay 6.1.

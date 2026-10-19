@@ -1,5 +1,6 @@
 1.10 Control-C at the download question
-A first run, interrupted at the question: what does it print?
+A first run, interrupted at the question: ~/.ezpkg is removed.
+prog.py: `ux14_prog.py`, left unchanged by `ezpkg`.
 -------------------------------------------------------------------------------
 The author of `prog.py` has selected some software packages from the internet.
 If you agree, they will be retained in `~/.ezpkg`.  If you do not trust the
@@ -7,5 +8,5 @@ author, answer `n` and `~/.ezpkg` will simply go away without running
 `prog.py`.
 
 Retain `~/.ezpkg` and run `prog.py`?
-[y=>Yes, this time|n=>No|a=>Always, never ask again|?=>Explain]: ^C
-ezpkg: interrupted, so prog.py stops here.
+[y=>Yes, this time|n=>No|a=>Always, list|s=>Always, silently|?=>Explain]: ^C
+Interrupted, so `~/.ezpkg` has been removed and `prog.py` did not run.

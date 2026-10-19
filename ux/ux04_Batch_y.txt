@@ -1,5 +1,6 @@
 1.2 Batch y
 Two new imports: one question, y, and no second approval.
+prog.py: `ux04_prog.py`, changed by `ezpkg` into `ux04_prog_after.py`.
 -------------------------------------------------------------------------------
 `prog.py` has changed since it was first run, so you may be working on it.  If
 you are, `ezpkg` will offer to keep its `dependencies` in step with its
@@ -16,14 +17,14 @@ Are you working on `prog.py`? [y=>Yes|n=>No]: y
 10:           ]
 63:    mypy   import requests  # type: ignore[import-not-found]  # For mypy.
 64:    mypy   import yaml  # type: ignore[import-not-found]  # For mypy.
-Update them? [y=>Yes|n=>No|i=>Individually|a=>Always|d=>Don't ask again]: y
+Update them? [y=>Yes|n=>No|i=>Individually|a=>Auto, from now on]: y
 
 Your changes to `prog.py` need 6 more software package(s) from the internet.
 They have been downloaded, but nothing in them has run yet.  Answer `n` and
 they will be removed again, without running `prog.py`.
 
 Keep them in `~/.ezpkg` and run `prog.py`?
-[y=>Yes, this time|n=>No|a=>Always, never ask again|?=>Explain]: y
+[y=>Yes, this time|n=>No|a=>Always, list|s=>Always, silently|?=>Explain]: y
 The following 6 package(s) are now installed in `~/.ezpkg`:
 1. certifi 2026.10.18: Python package for providing Mozilla's CA Bundle.
 2. charset-normalizer 3.5.2: The Real First Universal Charset Detector. Open...

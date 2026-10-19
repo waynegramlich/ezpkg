@@ -1,5 +1,6 @@
 1.5 A misspelt import in a batch
 A third import nobody publishes: named, not counted, not added.
+prog.py: `ux08_prog.py`, changed by `ezpkg` into `ux08_prog_after.py`.
 -------------------------------------------------------------------------------
 prog.py:69: `import bogus_pkg_xyzzy` needs a package, but no package
 "bogus_pkg_xyzzy" is currently available.  Please check the spelling, or
@@ -11,14 +12,14 @@ manually add the right package to `dependencies` (lines 6-8).
 11:           ]
 69:    mypy   import yaml  # type: ignore[import-not-found]  # For mypy.
 70:    mypy   import rich  # type: ignore[import-not-found]  # For mypy.
-Update them? [y=>Yes|n=>No|i=>Individually|a=>Always|d=>Don't ask again]: y
+Update them? [y=>Yes|n=>No|i=>Individually|a=>Auto, from now on]: y
 
 Your changes to `prog.py` need 4 more software package(s) from the internet.
 They have been downloaded, but nothing in them has run yet.  Answer `n` and
 they will be removed again, without running `prog.py`.
 
 Keep them in `~/.ezpkg` and run `prog.py`?
-[y=>Yes, this time|n=>No|a=>Always, never ask again|?=>Explain]: y
+[y=>Yes, this time|n=>No|a=>Always, list|s=>Always, silently|?=>Explain]: y
 The following 4 package(s) are now installed in `~/.ezpkg`:
 1. markdown-it-py 4.2.0: Python port of markdown-it. Markdown parsing, done...
 2. mdurl 0.1.2: Markdown URL utilities

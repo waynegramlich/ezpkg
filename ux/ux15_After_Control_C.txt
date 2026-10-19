@@ -1,5 +1,6 @@
 1.11 After Control-C
-The same first run again: asked again, y, and the cow.
+The same first run again: as ux01, pip and ezpkg listed too.
+prog.py: `ux15_prog.py`, left unchanged by `ezpkg`.
 -------------------------------------------------------------------------------
 The author of `prog.py` has selected some software packages from the internet.
 If you agree, they will be retained in `~/.ezpkg`.  If you do not trust the
@@ -7,9 +8,11 @@ author, answer `n` and `~/.ezpkg` will simply go away without running
 `prog.py`.
 
 Retain `~/.ezpkg` and run `prog.py`?
-[y=>Yes, this time|n=>No|a=>Always, never ask again|?=>Explain]: y
-The following 1 package(s) are now installed in `~/.ezpkg`:
-1. cowsay 6.1: The famous cowsay for GNU/Linux is now available for python
+[y=>Yes, this time|n=>No|a=>Always, list|s=>Always, silently|?=>Explain]: y
+The following 3 package(s) are now installed in `~/.ezpkg`:
+1. pip 26.2.1 (used by `ezpkg`): The PyPA recommended tool for installing Py...
+2. ezpkg 0.0.1: Automatic Package Fetching for One-File Programs
+3. cowsay 6.1: The famous cowsay for GNU/Linux is now available for python
 `ezpkg` (https://pypi.org/project/ezpkg/) manages `~/.ezpkg`.
 
   ____________

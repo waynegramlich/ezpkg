@@ -1,5 +1,6 @@
 1.4b Batch n, run again
 Nothing changed since the n, so nothing is asked.
+prog.py: `ux07_prog.py`, left unchanged by `ezpkg`.
 -------------------------------------------------------------------------------
   ____________
 | EZPkg works! |

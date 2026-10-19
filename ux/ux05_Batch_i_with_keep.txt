@@ -1,12 +1,13 @@
 1.3 Batch i, with keep
 Both imports removed: i, then k for requests, y for PyYAML.
+prog.py: `ux05_prog.py`, changed by `ezpkg` into `ux05_prog_after.py`.
 -------------------------------------------------------------------------------
 `prog.py` has 2 entries in `dependencies` (lines 6-9) that need to be updated:
 7:           "cowsay",
  :    remove "requests>=2.34.2,<3",
  :    remove "PyYAML>=6.0.3,<7",
 8:           ]
-Update them? [y=>Yes|n=>No|i=>Individually|a=>Always|d=>Don't ask again]: i
+Update them? [y=>Yes|n=>No|i=>Individually|a=>Auto, from now on]: i
 
 Line 8: "requests>=2.34.2,<3" is in `dependencies`, but nothing imports it.
 Remove it? [y=>Yes|n=>No|k=>Keep it, needed without an import]: k

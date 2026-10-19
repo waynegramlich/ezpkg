@@ -424,3 +424,97 @@
   * Next: Wayne reviews `ux10`-`ux15`; README proposals; then the
     download-answer steps (`?`, `x`, Enter, `n` first and later run,
     `a`, Control-D) and `n` on a first run removing `~/.ezpkg`.
+
+## 2026-10-18: Two modes, Manual and Auto (Wayne)
+
+* `ux/drive.py` now leaves `prog.py` per step: `uxNN_prog.py` (as the
+  step ran it) and `uxNN_prog_after.py` (only when `ezpkg` edited it);
+  each `uxNN_*.txt` names them on its third line.  Its `with_imports`
+  keeps an existing import line whole (it had been stripping the
+  `# type: ignore` comments, a false edit in every step).
+* Wayne (#1-#6): a developer has two modes, Manual (the default: each
+  change asked) and Auto (`a`, never asked again).  `d` ("Don't ask
+  again") is gone; an old record's `"never"` now just asks.  The label
+  is `a=>Auto, from now on`.  Auto prints one line per change
+  (`Discrepancy.reported`: `ezpkg: added "X" to `prog.py`'s
+  `dependencies` (line N).`, `removed ... from ...`, `moved`), since
+  the file changed under its developer; the `mypy` comment it adds is
+  not reported.  Auto covers `dependencies` only: an addition still gets
+  the developer download question.  End-user mode is unchanged.
+* `drive`: 1.7 Auto (`ux10_Auto`), 1.8 Auto removes an import (`ux11`),
+  new 1.9 Auto adds an import (`ux12`); the `d` steps went, so 1.10 and
+  1.11 are `ux13` and `ux14` (`git mv`).
+* Test `test_auto_outlives_the_run` (was `..._always_and_never_...`).
+* README still describes `d` (about lines 330-400); rewrite to propose.
+* Later the same day: an Auto addition's line also names the `mypy`
+  comment its import got (Wayne's #2); new step 1.9b (`ux13`, `import
+  humanize`, never fetched, so the download question comes first);
+  Control-C steps are `ux14`, `ux15`.  `drive` 15 of 15.  README:
+  the sync proposal (HTML comment after "Keeping `dependencies` in
+  Sync") rewritten for both modes; the Download Prompt proposal's
+  labels and `a` brought up to date.  Wayne reads README only after
+  the UX review.
+
+## 2026-10-18: A no removes what it refuses; Control-C before Enter is a no
+
+* Wayne (`ux14`, `ux15`): Control-C at the download question before the
+  answer's Enter is a no; after it the answer stands.  A no on a first
+  run (`pip_run` set, `pip.whl` there, root not the home) removes the
+  whole cache (`EZPkg.removed`); on a later run only the new downloads,
+  which `provide`'s `finally` already did.
+* Lines (no `ezpkg:` prefix, backticks): "Declined, so `~/.ezpkg` has
+  been removed and `prog.py` did not run." / "... so the new software
+  package(s) have been removed ...", "Interrupted, ..." for Control-C;
+  elsewhere "Interrupted, so `prog.py` stops here."  `Declined.said`
+  carries the line; `install_declared` turns it into `SystemExit`, so a
+  no during a `dependencies` update stops too (it had been reported as
+  `nothing changed: declined: ...`).  Helper `name_of`.
+* `drive`: 1.10 checks the cache is gone (`mode="gone"`); 1.11 (`ux15`)
+  now equals `ux01`; new 1.12 No on a later run (`ux16`), 1.13 No on a
+  first run (`ux17`).  17 of 17.  Test `test_a_no_removes_what_it_refuses`.
+* Left from the download-answer steps: `?`, `x`, bare Enter, `a`,
+  Control-D.  The Download Prompt README proposal still says "NOT
+  built: `n` on a first run": now built.
+
+## 2026-10-18: `s`, `remove.py`, and steps 1.14-1.23
+
+* Download answers now `[y=>Yes, this time|n=>No|a=>Always, list|
+  s=>Always, silently|?=>Explain]` (Wayne).  `FOREVER_APPROVE`'s first
+  line is `always` or `silent` (an old marker counts as `always`);
+  `EZPkg.silent()` stops `provide`'s list.  The note after `a`/`s`:
+  "From now on, `ezpkg` downloads software packages into `~/.ezpkg`
+  without asking/silently.  To be asked again, delete
+  `~/.ezpkg/FOREVER_APPROVE`.  To remove `ezpkg` and everything it
+  downloaded, run `python3 ~/.ezpkg/remove.py`." (no `rm -rf`; Wayne).
+* `REMOVE_SCRIPT`, written by the constructor as `remove.py` in every
+  cache (`removal_command`: `py FULLPATH` on Windows).  Removes its own
+  directory only if it has `versions/` and is not the home; `chdir`s
+  out first for Windows.  The cache README names it instead of
+  `rm -rf`.
+* The `?` list is no longer indented and cuts at 79 like the other
+  list.  Control-D ends the prompt line.
+* `drive`: steps 1.14 Explain ... 1.23 After remove.py, files
+  `ux18`-`ux27` (file numbers are step positions, not step numbers);
+  a `Step.command` runs something other than `prog.py`.  27 of 27.
+  Tests: `test_silently_asks_and_lists_nothing_again`,
+  `test_remove_py_removes_only_a_cache`.
+* README proposals still name `a=>Always, never ask again`: update.
+
+## 2026-10-18: Where this stopped (before Wayne's commit and `/clear`)
+
+* The UX review is complete: `ux01`-`ux27` agreed by Wayne (`ux14`
+  onwards he was reading at the end), all built, `drive` 27 of 27,
+  quick suite 305 OK, 18 skipped.  `remove.py` says "Removed
+  `~/.ezpkg`." (`ux26`).
+* Decisions today, in short: end-user and developer mode; "Are you
+  working on"; Manual and Auto (`a`), no `d`; Auto's report lines; a
+  no (or Control-C before Enter) removes the whole cache on a first
+  run, the new downloads later; `a=>Always, list`, `s=>Always,
+  silently`; `remove.py` instead of `rm -rf`.
+* README: proposals in HTML comments for the Quick Start paragraph
+  (~94), the Download Prompt (~170) and "Keeping `dependencies` in
+  Sync" (~390); Wayne reads them now that the UX review is done.
+* Next: Wayne's README read; a test.pypi.org rehearsal (none since
+  `1efdcae`; the bootstrap is unchanged, `nopip7`) with
+  `release_check.py` and `check.yml` (its `--console` jobs look for
+  `=>Explain]`, which still matches); then close `T.abfd`, `T.kdaiis`, `T.reb`, `T.eui`.

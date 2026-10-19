@@ -33,17 +33,22 @@ needs live here instead.
   starts it).  Started by hand, not yet by `release.yml` (`T.gar`).
 * `ux/drive.py [--keep] [--until STEP | --only STEP...] [--ux-dir
   DIR]`: Runs the scripted UX steps
-  (1.1-1.11) on a pseudoterminal in a temporary copy of the Quick
+  (1.1-1.23) on a pseudoterminal in a temporary copy of the Quick
   Start, as a stranger's real first run: a fresh home, the bootstrap
   fetching `pip` from pypi.org and installing a wheel of the project's
   `ezpkg.py` (`PIP_FIND_LINKS`), everything else from real pypi.org.
-  Each step declares the program's mode (`end-user` or `developer`,
-  `EZPkg.developing`) and is checked against it.  Claude runs it (about
-  5 minutes, in the background).  The transcript, with framed steps, is
-  `ux/drive_output.txt` (ignored); each step is also written unframed
-  to `ux/uxNN_NAME.txt`, which Wayne edits into the agreed output and
-  commits, so `git diff ux/` after a rerun shows what is left to build
-  (`T.abfd`'s `Context.md`).  A rerun overwrites them.
+  Each step declares the program's mode (`end-user`, `developer`, or
+  `gone` when `~/.ezpkg` must be removed) and is checked against it.
+  Claude runs it (about 7 minutes, in the background).  The transcript,
+  with framed steps, is `ux/drive_output.txt` (ignored); each step is
+  also written unframed to `ux/uxNN_NAME.txt` (`NN` is the step's
+  position, not its number), which Wayne edits into the agreed output
+  and commits, so `git diff ux/` after a rerun shows what is left to
+  build (`T.abfd`'s `Context.md`).  A rerun overwrites them; while
+  Wayne may be editing them, run with `--ux-dir` into the scratchpad
+  and copy back.  Each step also leaves `uxNN_prog.py` (as it ran) and,
+  if `ezpkg` edited it, `uxNN_prog_after.py`, named on the `.txt`'s
+  third line, so Wayne can `diff` the transitions.
   `--only 1.4` runs one step from the snapshot the step before left
   in `ux/.snapshots/` (ignored; dropped when the code changes), or
   after running the earlier steps as unrecorded setup.

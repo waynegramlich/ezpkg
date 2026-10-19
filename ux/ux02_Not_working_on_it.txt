@@ -1,5 +1,6 @@
 1.1b Not working on it
 An end-user's copy changed, answered n: no edit, only a warning.
+prog.py: `ux02_prog.py`, left unchanged by `ezpkg`.
 -------------------------------------------------------------------------------
 `prog.py` has changed since it was first run, so you may be working on it.  If
 you are, `ezpkg` will offer to keep its `dependencies` in step with its

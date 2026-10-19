@@ -1,0 +1,27 @@
+1.9b Auto adds a new package
+import humanize, never fetched before, in Auto mode: one line, the download question, the cow.
+prog.py: `ux13_prog.py`, changed by `ezpkg` into `ux13_prog_after.py`.
+-------------------------------------------------------------------------------
+Your changes to `prog.py` need 1 more software package(s) from the internet.
+They have been downloaded, but nothing in them has run yet.  Answer `n` and
+they will be removed again, without running `prog.py`.
+
+Keep them in `~/.ezpkg` and run `prog.py`?
+[y=>Yes, this time|n=>No|a=>Always, list|s=>Always, silently|?=>Explain]: y
+The following 1 package(s) are now installed in `~/.ezpkg`:
+1. humanize 4.16.0: Python humanize utilities
+`ezpkg` (https://pypi.org/project/ezpkg/) manages `~/.ezpkg`.
+
+ezpkg: added "humanize>=4.16.0,<5" to `prog.py`'s `dependencies` (line 14), and
+the `mypy` comment to `import humanize` (line 78).
+  ____________
+| EZPkg works! |
+  ============
+            \
+             \
+               ^__^
+               (oo)\_______
+               (__)\       )\/\
+                   ||----w |
+                   ||     ||
+The cow above was drawn by cowsay 6.1.

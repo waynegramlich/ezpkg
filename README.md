@@ -168,8 +168,7 @@ into your program's own output.  The prompt takes one of four answers:
 * **`?=>Explanation`** - This lists all requested downloads and then prompts
   again.
 <!-- Claude: proposed replacement for lines 142-169 above (T.abfd,
-ux01, 2026-10-18).  NOT built yet: `n` on a first run removing
-`~/.ezpkg`, and later runs downloading without asking (ux02).
+ux01, ux04, ux10, ux14-ux17; updated 2026-10-18).  Built.
 
 If you tried the Quick Start, you have already seen the download prompt.
 The very first run of `quick_start.py`, with no `~/.ezpkg` yet, begins
@@ -183,7 +182,7 @@ trust the author, answer `n` and `~/.ezpkg` will simply go away without running
 `quick_start.py`.
 
 Retain `~/.ezpkg` and run `quick_start.py`?
-[y=>Yes|n=>No|a=>Always|?=>Explain]: y
+[y=>Yes, this time|n=>No|a=>Always, list|s=>Always, silently|?=>Explain]: y
 The following 3 package(s) are now installed in `~/.ezpkg`:
 1. pip 26.2.1 (used by `ezpkg`): The PyPA recommended tool for installing Py...
 2. ezpkg 0.0.1: Automatic Package Fetching for One-File Programs
@@ -197,20 +196,39 @@ Windows, which has no `~` everywhere, the full path is shown instead,
 such as `C:\Users\you\.ezpkg`.  The list includes `pip` and `ezpkg`
 only on a machine's very first run, when the bootstrap has just fetched
 them; `pip` is the tool `ezpkg` uses, not one the program's author
-chose.  The prompt takes one of four answers:
+chose.  The prompt takes one of five answers:
 * **`n=>No`** - Nothing runs.  On a first run `~/.ezpkg` is removed
   entirely, `pip` and `ezpkg` included; on a later run, only what was
-  just downloaded.
-* **`y=>Yes`** - The packages are kept and the program runs.
-* **`a=>Always`** - As `y`, and no download is asked about again, after
-  `Really never ask again? [y=>Yes|n=>No]:` (`n` goes back to the
-  prompt).  This is sticky.  To reset it, remove the
-  `~/.ezpkg/FOREVER_APPROVE` file.
+  just downloaded.  Control-C before pressing Enter is the same as `n`.
+* **`y=>Yes, this time`** - The packages are kept and the program
+  runs.
+* **`a=>Always, list`** - As `y`, and no download is asked about
+  again; each new one is still listed.
+* **`s=>Always, silently`** - As `a`, but nothing is listed either:
+  from then on `EZPkg` says nothing unless something goes wrong.
+
+  After `a` or `s`, `EZPkg` says how to undo it (delete
+  `~/.ezpkg/FOREVER_APPROVE`), and how to remove `~/.ezpkg` and
+  everything in it: `python3 ~/.ezpkg/remove.py` (on Windows,
+  `py %USERPROFILE%\.ezpkg\remove.py`).  Removing it is always safe;
+  a program that needs a package again downloads it again.
 * **`?=>Explain`** - The same packages are listed, one line each with
   its own summary, and the prompt is asked again.
 
-Once you have answered `y`, later downloads (such as a package newly
-added to `dependencies`) are not asked about; their list is shown.
+Later, a program you are working on (see [Keeping `dependencies` in
+Sync](#keeping-dependencies-in-sync)) asks only about what your own
+changes need:
+
+```
+Your changes to `prog.py` need 1 more software package(s) from the internet.
+They have been downloaded, but nothing in them has run yet.  Answer `n` and
+they will be removed again, without running `prog.py`.
+
+Keep them in `~/.ezpkg` and run `prog.py`?
+[y=>Yes, this time|n=>No|a=>Always, list|s=>Always, silently|?=>Explain]: y
+```
+
+A package already stored is never asked about again.
 -->
 
 Some programs are run with nobody there to answer, such as from `cron`,
@@ -372,70 +390,99 @@ ezpkg: prog.py: added "requests>=2.32.3,<3" to dependencies
 ezpkg: prog.py: added "PyYAML>=6.0.2,<7" to dependencies (for yaml)
 ```
 
-<!-- Claude: proposed replacement for lines 321-373 above (the batch
-question of T.kdaiis, built 2026-10-17):
+<!-- Claude: proposed replacement for lines 333-385 above, and for
+lines 481-490 below (written 2026-10-18 from the agreed `ux/` files:
+end-user and developer mode, the list before `Update them?`, and the
+two modes, Manual and Auto; `d` is gone):
 
 `EZPkg` keeps `dependencies` in step with your imports: one package for
 each module you import, in the order the modules are first imported.
-Whenever your imports or `dependencies` change and the two disagree (a
-package is missing, one is no longer imported, or the order differs),
-`EZPkg` says so once.  When two or more entries need to change, it asks
-about them together:
+It never edits a program it has not been told you are working on.  A
+program is someone else's until its file changes; the next time it
+runs and its imports and `dependencies` disagree, `EZPkg` asks:
 
 ```
-ezpkg: prog.py: 3 entries in `dependencies` (line 5) need to be updated.
-Update them? [y=>Yes/n=>No/i=>Individually/a=>Always/d=>Don't ask again] y
+`prog.py` has changed since it was first run, so you may be working on it.  If
+you are, `ezpkg` will offer to keep its `dependencies` in step with its
+imports, and you can turn down any change until you are ready.  If the imports
+and dependencies are not in sync, the program will typically fail at an
+`import` statement.
+
+Are you working on `prog.py`? [y=>Yes|n=>No]: y
 ```
 
-* **`y=>Yes`** - This makes every change, and shows what it did.
+`n` changes nothing.  If an import has no package at all, so that the
+program is bound to stop there, `EZPkg` says which line, and that the
+mistake is in the program, not in Python or `EZPkg`, every time it
+runs.
+
+Once you are working on it, there are two modes.
+
+**Manual** (the start): whenever your imports or `dependencies` change
+and the two disagree (a package is missing, one is no longer imported,
+or the order differs), `EZPkg` lists the changes, with each new
+package's range of versions and line numbers, and asks once:
+
+```
+`prog.py` has 2 entries in `dependencies` (line 5) that need to be updated:
+ 7:           "cowsay",
+ 8:    add    "requests>=2.34.2,<3",
+ 9:    add    "PyYAML>=6.0.3,<7",
+10:           ]
+63:    mypy   import requests  # type: ignore[import-not-found]  # For mypy.
+64:    mypy   import yaml  # type: ignore[import-not-found]  # For mypy.
+Update them? [y=>Yes|n=>No|i=>Individually|a=>Auto, from now on]: y
+```
+
+* **`y=>Yes`** - This makes every change listed.
 * **`n=>No`** - This changes nothing; you are asked again the next time
   your imports or `dependencies` change.
-* **`i=>Individually`** - This asks about each change, as below.
-* **`a=>Always`** - This is `y`, now and from then on without asking,
-  after `Really update prog.py's dependencies from now on, without
-  asking?` (`n` goes back to the question).
-* **`d=>Don't ask again`** - This never asks about this program again,
-  after `Really never ask about prog.py again?`.
+* **`i=>Individually`** - This asks about each change in line order,
+  since only you know whether an import is coming or going, then shows
+  the changes and asks `Make these changes? [y=>Yes|n=>No]`.
+* **`a=>Auto, from now on`** - This is `y`, and switches to Auto mode.
 
-The packages to add are downloaded first (asking first, as any download
-does), and then the changes to `dependencies` are shown, next to the
-unchanged entries around them:
+With one change the question is `Update it?`.  When the one change is
+a removal, or after `i`, an unused entry can be kept:
 
 ```
-dependencies in prog.py:
-   line 5     "widget",
-   remove     "rich",
-   add        "requests>=2.32.3,<3",
-   add        "PyYAML>=6.0.2,<7",
-              ]
-ezpkg: prog.py: removed "rich" from dependencies
-ezpkg: prog.py: added "requests>=2.32.3,<3" to dependencies
-ezpkg: prog.py: added "PyYAML>=6.0.2,<7" to dependencies (for yaml)
-```
-
-With only one change, or after `i`, each change is asked about in line
-order, since only you know whether an import is coming or going:
-
-```
-line 6: "rich" is in dependencies, but nothing imports it.
-Remove it? [y=>Yes/n=>No/k=>Keep it, and stop asking] y
-line 14: `requests` is imported, but not in dependencies.
-Add "requests"? [y=>Yes/n=>No] y
-line 15: `yaml` is imported, but not in dependencies.
-Add "PyYAML"? [y=>Yes/n=>No] y
+Line 8: "requests>=2.34.2,<3" is in `dependencies`, but nothing imports it.
+Remove it? [y=>Yes|n=>No|k=>Keep it, needed without an import]: k
+What needs `requests`? (a few words, or Enter to skip): the sync script
 ```
 
 `k` is for a package your program needs but never imports, such as a
 plugin that another package loads for itself.  It is listed in Part 1
-as `[tool.ezpkg] unimported`, and is not raised again.  The changes are
-then shown as above, followed by `Make these changes? [y=>Yes/n=>No]`.
+under `[tool.ezpkg] unimported`, with your words as a comment, and is
+not raised again.
 
-Also proposed, for lines 441-442 below: a package your Python already
-has is not downloaded again, so the range starts where the program
-really ran:
+**Auto**: nothing is asked again; each change is made, and gets one
+line:
+
+```
+ezpkg: removed "tabulate>=0.10.0,<0.11" from `prog.py`'s `dependencies`.
+ezpkg: added "humanize>=4.16.0,<5" to `prog.py`'s `dependencies` (line 14), and
+the `mypy` comment to `import humanize` (line 78).
+```
+
+`a` says how to go back to Manual: delete the file it names, under
+`~/.ezpkg/develop/`.  Auto mode covers `dependencies` only: a package
+that has not been downloaded before is still asked about by the
+download question, as any download is.
 
 Each package added gets a range of versions, starting at the version
 your program ran with; see [Choosing Versions](#choosing-versions).
+
+`EZPkg` only ever changes `dependencies` (and `[tool.ezpkg]`), never
+your imports, with one exception: if your other imports carry a
+`# type: ignore` comment for `mypy`, an import whose package is added
+gets the same comment.  If `EZPkg` cannot find a package for an import,
+because nobody publishes one by that name, it says so, with the line,
+and adds nothing; check the spelling, or add the right package by
+hand.  Without a terminal (e.g. under `cron`), the disagreement is
+reported once and nothing is changed.  After every change `EZPkg`
+starts your program again, so that a traceback's line numbers match the
+edited file.
 -->
 
 Each package added gets a range of versions, starting at the version

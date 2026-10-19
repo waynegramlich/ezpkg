@@ -221,3 +221,13 @@ rehearsal and dogfood run, then its `Summary.md` and closing.
   working on" every run and told whose mistake it is
   (`Discrepancy.stopping`).  Every edit restarts the program
   (`EZPkg.restart`).
+
+## 2026-10-18: Manual and Auto (Wayne)
+
+* `reconcile`'s question is `Update them? [y|n|i|a=>Auto, from now
+  on]`; `d` is gone (an old `"never"` record now asks).  A remembered
+  `a` (Auto) edits without asking and prints one line per change
+  (`Discrepancy.reported`), naming any `mypy` comment it added.  A `n`
+  to the download question during an update stops the program
+  (`Declined` passes through `reconcile`).  Details in `T.abfd`'s
+  `Context.md`; `ux10`-`ux13`, `ux16`.
