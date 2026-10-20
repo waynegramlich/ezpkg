@@ -1,0 +1,15 @@
+2.4 An entry added by hand
+tabulate added to dependencies, never imported: kept, and marked.
+prog.py: `ux16_prog.py`, changed by `ezpkg` into `ux16_prog_after.py`.
+-------------------------------------------------------------------------------
+  ____________
+| EZPkg works! |
+  ============
+            \
+             \
+               ^__^
+               (oo)\_______
+               (__)\       )\/\
+                   ||----w |
+                   ||     ||
+The cow above was drawn by cowsay 6.1.

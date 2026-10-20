@@ -7,12 +7,12 @@
 # [tool.ezpkg]
 # approved = [
 #   "cowsay==6.1  id:274b1e6fc1b966d5",
-#   "ezpkg==0.0.1  id:481ad6d4bb9df1c4",
+#   "ezpkg==0.0.1  id:18d1bca9844fcd54",
 #   "tabulate==0.10.0  id:f0b0622e567335c8",
 # ]
 #
 # [tool.uv]
-# exclude-newer = "2026-10-19T23:19:49Z"
+# exclude-newer = "2026-10-20T00:23:21Z"
 # ///
 """Try `EZPkg`: fetch the `cowsay` package on first use, then run."""
 

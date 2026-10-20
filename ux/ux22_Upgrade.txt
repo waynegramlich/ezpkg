@@ -1,0 +1,15 @@
+2.10 Upgrade
+The bad entry gone and the exclude-newer line deleted: today's versions, and a new date.
+prog.py: `ux22_prog.py`, changed by `ezpkg` into `ux22_prog_after.py`.
+-------------------------------------------------------------------------------
+  ____________
+| EZPkg works! |
+  ============
+            \
+             \
+               ^__^
+               (oo)\_______
+               (__)\       )\/\
+                   ||----w |
+                   ||     ||
+The cow above was drawn by cowsay 6.1.

@@ -1,0 +1,5 @@
+2.8 A misspelt setting
+relase (sic) in prog.py.toml: the run stops, naming the line.
+prog.py: `ux20_prog.py`, left unchanged by `ezpkg`.
+-------------------------------------------------------------------------------
+prog.py.toml line 1: unknown setting `relase` (did you mean `release`?)

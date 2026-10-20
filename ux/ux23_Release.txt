@@ -1,0 +1,6 @@
+2.11 Release
+release = "1.0.0", exports = ["zipapp", "uv"]: built, and prog.py does not run.
+prog.py: `ux23_prog.py`, changed by `ezpkg` into `ux23_prog_after.py`.
+-------------------------------------------------------------------------------
+Released `prog.py` 1.0.0, building `prog-1.0.0.pyz` and `prog-1.0.0-uv.py`.
+`prog.py` itself did not run this time.

@@ -2,15 +2,9 @@
 @7_A_fetch_from_the_real_PyPI/Context.md
 @7.3_Write_the_release_workflow/Details.md
 @7.3_Write_the_release_workflow/Context.md
-@7.5_Keep_dependencies_and_imports_in_sync/Details.md
-@7.5_Keep_dependencies_and_imports_in_sync/Context.md
 @7.6_Test_on_Windows_and_macOS/Details.md
 @7.6_Test_on_Windows_and_macOS/Context.md
 @7.6.3_Friends_with_real_machines/Details.md
-@7.7_Refuse_an_edited_bootstrap/Details.md
-@7.7_Refuse_an_edited_bootstrap/Context.md
-@7.8_EZPkg_updates_itself/Details.md
-@7.8_EZPkg_updates_itself/Context.md
 @7.9_Ask_before_the_first_download/Details.md
 @7.9_Ask_before_the_first_download/Context.md
 @7.10_Upload_to_pypi_and_test/Details.md
@@ -19,6 +13,9 @@
 @../ISSUES/19_How_to_deal_with_compiled_packages/Details.md
 @../ISSUES/22_A_failed_fetch_shows_the_pip_output/Details.md
 @../ISSUES/22_A_failed_fetch_shows_the_pip_output/Context.md
+@7.5_Keep_dependencies_and_imports_in_sync/Summary.md
+@7.7_Refuse_an_edited_bootstrap/Summary.md
+@7.8_EZPkg_updates_itself/Summary.md
 @7.6.1_GitHub_Actions_runners/Summary.md
 @../ISSUES/3_Reviewer_thoughts_have_two_formats/Summary.md
 @../ISSUES/20_A_uv_export_drops_an_ezpkg_the_program_imports/Summary.md
@@ -66,7 +63,4 @@
 @../ISSUES/7_The_stashed_pip_is_never_updated/Summary.md
 @../ISSUES/8_A_failed_pip_fetch_is_poorly_explained/Summary.md
 @../ISSUES/9_How_many_machines_does_requiring_pip_exclude/Summary.md
-@../ISSUES/10_The_wheel_tag_matcher_is_a_five_line_stand_in/Summary.md
-@../ISSUES/11_The_venv_executable_directory_is_hard_coded/Summary.md
-@../ISSUES/12_.pth_files_are_installed_but_never_executed/Summary.md
 @Closed.md

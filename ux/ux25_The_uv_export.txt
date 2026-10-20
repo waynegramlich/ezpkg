@@ -1,0 +1,15 @@
+2.13 The uv export
+uv run prog-1.0.0-uv.py: uv provides everything.
+prog.py: `ux25_prog.py`, left unchanged by `ezpkg`.
+-------------------------------------------------------------------------------
+  ____________
+| EZPkg works! |
+  ============
+            \
+             \
+               ^__^
+               (oo)\_______
+               (__)\       )\/\
+                   ||----w |
+                   ||     ||
+The cow above was drawn by cowsay 6.1.

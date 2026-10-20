@@ -1,7 +1,7 @@
 {
-  "state": "Open",
+  "state": "Closed",
   "created": "2026-10-15T20:13:20Z",
-  "updated": "2026-10-15T21:37:00Z",
+  "updated": "2026-10-20T00:16:56Z",
   "history": [
     {
       "state": "Pending",
@@ -10,6 +10,10 @@
     {
       "state": "Open",
       "time": "2026-10-15T20:19:06Z"
+    },
+    {
+      "state": "Closed",
+      "time": "2026-10-20T00:16:56Z"
     }
   ],
   "tag": "kdaiis"

@@ -1,0 +1,6 @@
+2.9 A failed fetch
+An entry nobody publishes, added by hand: one line with pip's reason.
+prog.py: `ux21_prog.py`, left unchanged by `ezpkg`.
+-------------------------------------------------------------------------------
+`prog.py` did not run: ERROR: No matching distribution found for
+no-such-package-xyzzy  (`verbosity = "high"` shows all of pip's output.)

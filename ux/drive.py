@@ -100,6 +100,12 @@ class Step:
     * `command` (`list[str] | None`):
       What to run with Python instead of `prog.py`, such as the
       cache's `remove.py`, relative to the copy.
+    * `runner` (`list[str] | None`):
+      What runs `command` instead of Python, such as `["uv", "run"]`.
+    * `files` (`list[str]`):
+      Files the copy must then have, relative to it.
+    * `written` (`list[str]`):
+      Text `prog.py` must then contain.
     * `environment` (`dict[str, str]`):
       More environment for the run, such as `EZPKG_ANSWER_SECONDS`.
     * `mode` (`str`):
@@ -118,6 +124,9 @@ class Step:
     kept: list[str] | None = None
     before: Callable[[Path], None] | None = None
     command: list[str] | None = None
+    runner: list[str] | None = None
+    files: list[str] = dataclasses.field(default_factory=list)
+    written: list[str] = dataclasses.field(default_factory=list)
     environment: dict[str, str] = dataclasses.field(default_factory=dict)
     mode: str = "end-user"
 
@@ -132,6 +141,53 @@ def developer_first_run(work: Path) -> None:
     """Make the next run a developer's first: an empty `prog.py.toml`."""
     first_run_again(work)
     (work / "prog.py.toml").write_text("", encoding="utf-8")
+
+
+def settings(text: str) -> Callable[[Path], None]:
+    """Return a `before` that writes `prog.py.toml`.
+
+    Never empty, which `ezpkg` would fill with the template; a comment
+    alone means every default.
+    """
+    def write(work: Path) -> None:
+        (work / "prog.py.toml").write_text(text or "# Defaults.\n",
+                                           encoding="utf-8")
+    return write
+
+
+def entries(add: list[str], remove: tuple[str, ...] = ()
+            ) -> Callable[[Path], None]:
+    """Return a `before` that edits `dependencies` by hand."""
+    def edit(work: Path) -> None:
+        program: Path = work / "prog.py"
+        text: str = program.read_text(encoding="utf-8")
+        listed: list[str] = list((ezpkg.script_metadata(text) or {}).get(
+            "dependencies", []))
+        gone: set[str] = {ezpkg.normal_name(one) for one in remove}
+        listed = [one for one in listed if ezpkg.normal_name(
+            ezpkg.requirement_name(one)) not in gone] + add
+        edited: str | None = ezpkg.with_dependency_list(text, listed)
+        assert edited is not None
+        program.write_text(edited, encoding="utf-8")
+    return edit
+
+
+def both(*steps: Callable[[Path], None]) -> Callable[[Path], None]:
+    """Return a `before` that runs several, in order."""
+    def run(work: Path) -> None:
+        for step in steps:
+            step(work)
+    return run
+
+
+def undated(work: Path) -> None:
+    """Delete `prog.py`'s `exclude-newer` line: the developer's upgrade."""
+    program: Path = work / "prog.py"
+    lines: list[str] = program.read_text(encoding="utf-8").splitlines(
+        keepends=True)
+    program.write_text("".join(line for line in lines
+                               if "exclude-newer" not in line),
+                       encoding="utf-8")
 
 
 def second_program(work: Path) -> None:
@@ -247,6 +303,72 @@ STEPS: list[Step] = [
          [], present=[WORKS], absent=[DOWNLOAD, "Traceback",
                                             "changed again"],
          declared=BASE, mode="developer"),
+    Step("2.4 An entry added by hand",
+         "tabulate added to dependencies, never imported: kept, and "
+         "marked.",
+         None, present=[WORKS], absent=["Traceback", "changed again"],
+         before=entries(["tabulate"]), declared=[*BASE, "tabulate"],
+         kept=["tabulate"],
+         written=["# not imported: say why it is needed"],
+         mode="developer"),
+    Step("2.5 The mark goes",
+         "import tabulate added: the entry is explained, so its mark "
+         "goes.",
+         ["tabulate"], present=[WORKS], absent=["Traceback", "changed again"],
+         declared=[*BASE, "tabulate"], kept=[], mode="developer"),
+    Step("2.6 A misspelt import",
+         "import tabluate (sic): no such package, one line, then "
+         "Python's own error.",
+         ["tabulate", "tabluate"],
+         present=[("`prog.py` line 73: `import tabluate` needs a package, "
+                  "but PyPI has none called `tabluate`"),
+                  "No module named 'tabluate'"],
+         absent=[WORKS], declared=[*BASE, "tabulate"], mode="developer"),
+    Step("2.7 Medium verbosity",
+         'verbosity = "medium", the misspelling fixed and humanize '
+         "imported: each change said.",
+         ["tabulate", "humanize"], present=['Added "humanize', WORKS],
+         absent=["Traceback", "now retained"], before=settings('verbosity = "medium"\n'),
+         declared=[*BASE, "tabulate", "humanize"], mode="developer"),
+    Step("2.8 A misspelt setting",
+         "relase (sic) in prog.py.toml: the run stops, naming the line.",
+         None, present=[("unknown setting `relase` (did you mean "
+                        "`release`?)")],
+         absent=[WORKS, "Traceback"], before=settings('relase = "1.0.0"\n'),
+         mode="developer"),
+    Step("2.9 A failed fetch",
+         "An entry nobody publishes, added by hand: one line with pip's "
+         "reason.",
+         None, present=["`prog.py` did not run: ERROR:",
+                        'verbosity = "high"` shows all'],
+         absent=[WORKS, "Traceback"],
+         before=both(settings(""), entries(["no-such-package-xyzzy"])),
+         mode="developer"),
+    Step("2.10 Upgrade",
+         "The bad entry gone and the exclude-newer line deleted: today's "
+         "versions, and a new date.",
+         None, present=[WORKS], absent=["Traceback"],
+         before=both(entries([], ("no-such-package-xyzzy",)), undated),
+         declared=[*BASE, "tabulate", "humanize"], written=["exclude-newer"],
+         mode="developer"),
+    Step("2.11 Release",
+         'release = "1.0.0", exports = ["zipapp", "uv"]: built, and '
+         "prog.py does not run.",
+         None, present=["Released `prog.py` 1.0.0"],
+         absent=[WORKS, "Traceback"],
+         before=settings('release = "1.0.0"\nexports = ["zipapp", "uv"]\n'),
+         files=["prog-1.0.0.pyz", "prog-1.0.0-uv.py"],
+         written=['released = "1.0.0"'], mode="developer"),
+    Step("2.12 The zipapp",
+         "python3 prog-1.0.0.pyz: runs with no ~/.ezpkg at all.",
+         None, command=["prog-1.0.0.pyz"], present=[WORKS],
+         absent=["Traceback", DOWNLOAD],
+         before=lambda work: shutil.rmtree(work / "home" / ".ezpkg"),
+         mode="gone"),
+    Step("2.13 The uv export",
+         "uv run prog-1.0.0-uv.py: uv provides everything.",
+         None, command=["prog-1.0.0-uv.py"], runner=["uv", "run", "-q"],
+         present=[WORKS], absent=["Traceback", DOWNLOAD], mode="gone"),
 ]
 
 
@@ -277,7 +399,8 @@ def with_imports(text: str, names: list[str]) -> str:
 
 def run_on_a_terminal(work: Path, script: list[tuple[str, str]],
                       command: list[str] | None = None,
-                      extra: dict[str, str] | None = None
+                      extra: dict[str, str] | None = None,
+                      runner: list[str] | None = None
                       ) -> tuple[str, list[str], int]:
     """Run `prog.py` on a pseudoterminal, answering its questions.
 
@@ -297,6 +420,10 @@ def run_on_a_terminal(work: Path, script: list[tuple[str, str]],
     pid, master = pty.fork()
     if pid == 0:
         os.chdir(work)
+        if runner:
+            found: str = shutil.which(runner[0]) or runner[0]
+            os.execve(found, [found, *runner[1:], *(command or [])],
+                      environment)
         os.execve(python, [python, *(command or ["prog.py"])],
                   environment)
 
@@ -369,6 +496,10 @@ def check(step: Step, shown: str, program: Path, ran: str) -> list[str]:
         if names != step.declared:
             problems.append(f"dependencies are {names}, expected "
                             f"{step.declared}")
+    problems += [f"no file {name}" for name in step.files
+                 if not (program.parent / name).exists()]
+    problems += [f"prog.py lacks {piece!r}" for piece in step.written
+                 if piece not in text]
     if step.mode == "gone":
         if (program.parent / "home" / ".ezpkg").exists():
             problems.append("~/.ezpkg is still there")
@@ -446,7 +577,8 @@ def run_step(step: Step, work: Path
     status: int
     shown, problems, status = run_on_a_terminal(work, step.script,
                                                 step.command,
-                                                step.environment)
+                                                step.environment,
+                                                step.runner)
     problems += check(step, shown, work / "prog.py", ran)
     return shown, problems, status, ran
 

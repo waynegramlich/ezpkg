@@ -1,0 +1,17 @@
+2.7 Medium verbosity
+verbosity = "medium", the misspelling fixed and humanize imported: each change said.
+prog.py: `ux19_prog.py`, changed by `ezpkg` into `ux19_prog_after.py`.
+-------------------------------------------------------------------------------
+Added "humanize>=4.16.0,<5" to `prog.py`'s `dependencies` (line 9), and the
+`mypy` comment to `import humanize` (line 75).
+  ____________
+| EZPkg works! |
+  ============
+            \
+             \
+               ^__^
+               (oo)\_______
+               (__)\       )\/\
+                   ||----w |
+                   ||     ||
+The cow above was drawn by cowsay 6.1.

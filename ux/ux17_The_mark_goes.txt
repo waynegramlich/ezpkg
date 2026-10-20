@@ -1,0 +1,15 @@
+2.5 The mark goes
+import tabulate added: the entry is explained, so its mark goes.
+prog.py: `ux17_prog.py`, changed by `ezpkg` into `ux17_prog_after.py`.
+-------------------------------------------------------------------------------
+  ____________
+| EZPkg works! |
+  ============
+            \
+             \
+               ^__^
+               (oo)\_______
+               (__)\       )\/\
+                   ||----w |
+                   ||     ||
+The cow above was drawn by cowsay 6.1.

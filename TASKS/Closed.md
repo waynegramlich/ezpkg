@@ -5,6 +5,9 @@
 These items are only listed by tag and title; `ai_contexts TAG
 show` shows the rest.
 
+- `I.wtmifs` The wheel tag matcher is a five-line stand-in
+- `I.vedih` The venv executable directory is hard-coded
+- `I.pfaibne` `.pth` files are installed but never executed
 - `I.hsrpbd` How should required packages be declared?
 - `I.bfnprp` The bootstrap fetches the newest `pip` regardless of Python
 - `I.nicav` Nothing identifies a cache as valid

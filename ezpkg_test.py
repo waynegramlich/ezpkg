@@ -5116,7 +5116,8 @@ class InstallTest(unittest.TestCase):
             program, "zipapp", HOME=str(home))
         self.assertEqual(built.returncode, 0, built.stderr[-400:])
         archive: Path = self.built
-        self.assertEqual(built.stdout.strip(), f"Wrote {archive}")
+        self.assertEqual(built.stdout, "")
+        self.assertTrue(archive.is_file())
         with zipfile.ZipFile(archive) as opened:
             self.assertFalse([name for name in opened.namelist()
                               if name.startswith(MODULE)])
@@ -5235,9 +5236,8 @@ class InstallTest(unittest.TestCase):
         self.assertEqual(built.returncode, 0, built.stderr[-400:])
         script: Path = self.built
         lock: Path = self.built.with_name(self.built.name + ".lock")
-        self.assertEqual(built.stdout.splitlines(),
-                         [f"Wrote {path}"
-                          for path in (script, lock)])
+        self.assertEqual(built.stdout, "")
+        self.assertTrue(script.is_file() and lock.is_file())
         self.assertFalse(self.built.with_name(
             f"pylock.{self.built.stem}.toml").exists())
         text: str = script.read_text()
@@ -5834,8 +5834,8 @@ class InstallTest(unittest.TestCase):
             settings='verbosity = "medium"\n')
         done: subprocess.CompletedProcess[str] = self.run_program(program)
         flat: str = " ".join(done.stderr.split())
-        self.assertIn('no package "bogus_package" is currently available',
-                      flat)
+        self.assertIn("needs a package, but PyPI has none called "
+                      "`bogus_package`", flat)
         self.assertRegex(flat, r'Added "needy>=1\.0\.0,<2" to '
                          r"`prog\.py`'s `dependencies` \(line \d+\)\.")
         self.assertRegex(flat, r'Marked "sprocket" in `prog\.py`\'s '
@@ -5871,7 +5871,8 @@ class InstallTest(unittest.TestCase):
         self.assertIn("ezpkg: fetching ", done.stderr)
         self.assertIn("ezpkg: approvals written into Part 1", done.stderr)
         self.assertRegex(done.stderr, r'Added "sprocket>=2\.0\.0,<3"')
-        self.assertIn("The following", done.stderr)
+        # The end user's list is never a developer's (`ux` step 2.7).
+        self.assertNotIn("The following", done.stderr)
 
         # Nothing to do: the remembered request is said.
         done = self.run_program(program)
@@ -5890,9 +5891,9 @@ class InstallTest(unittest.TestCase):
         before: str = program.read_text()
         done: subprocess.CompletedProcess[str] = self.run_program(program)
         flat: str = " ".join(done.stderr.split())
-        self.assertIn("prog.py:20: `import bogus_package` needs a package, "
-                      'but no package "bogus_package" is currently '
-                      "available. Please check the spelling", flat)
+        self.assertIn("`prog.py` line 20: `import bogus_package` needs a "
+                      "package, but PyPI has none called `bogus_package`. "
+                      "Please check the spelling", flat)
         self.assertIn("No module named 'bogus_package'", flat)
         self.assertEqual(program.read_text(), before)
 
@@ -5909,7 +5910,8 @@ class InstallTest(unittest.TestCase):
         before: str = program.read_text()
         done: subprocess.CompletedProcess[str] = self.run_program(program)
         flat: str = " ".join(done.stderr.split())
-        self.assertIn("prog.py:20: `import decoy` needs a package, but the "
+        self.assertIn("`prog.py` line 20: `import decoy` needs a package, "
+                      "but the "
                       "index's "
                       '"decoy" does not provide `decoy`. Please check the '
                       "spelling",
@@ -5929,7 +5931,8 @@ class InstallTest(unittest.TestCase):
             "sourced", '["widget"]', "import sourceonly")
         done: subprocess.CompletedProcess[str] = self.run_program(program)
         flat: str = " ".join(done.stderr.split())
-        self.assertIn("prog.py:20: `import sourceonly` needs a package, but "
+        self.assertIn("`prog.py` line 20: `import sourceonly` needs a "
+                      "package, but "
                       "the index's "
                       '"sourceonly" has no wheel, only source code, so it '
                       "cannot be installed. Please check the spelling",
@@ -7881,10 +7884,14 @@ class MetadataTest(unittest.TestCase):
              "could not be reached")),
             (missing, ["cowsay-6.0-py3-none-any.whl",
                        "cowsay-6.2-py3-none-any.whl"],
-             "needs cowsay 6.1, which PyPI no longer offers"),
+             ("needs cowsay 6.1, which PyPI (https://pypi.org) no longer "
+             "offers, so `ezpkg_test.py` did not run.  Request an "
+             "updated version of")),
             (missing, ["cowsay-6.1-cp312-cp312-win_amd64.whl",
                        "cowsay-6.1.tar.gz"],
              "needs cowsay 6.1, which has no version for this computer"),
+            (missing, ["cowsay-6.1-cp312-cp312-win_amd64.whl"],
+             "did not run.  Request an updated version of"),
             (noise + "ERROR: pip is broken today", [],
              ("could not get its software packages, so it did not run: "
              "ERROR: pip is broken today")),

@@ -3838,7 +3838,7 @@ class EZPkg:
         # answer (no network) leaves it to the fetch.
         files: list[str] | None = index_files(package)
         if files is not None and not files:
-            return f'no package "{package}" is currently available'
+            return f"PyPI has none called `{package}`"
         if files is not None and not any(
                 one.endswith(".whl") for one in files):
             return (f'the index\'s "{package}" has no wheel, only '
@@ -3915,8 +3915,9 @@ class EZPkg:
                             if package in found.guessed else "")
             if problem:
                 doubted = True
-                self.say(1, f"{program.name}:{line}: `import {module}` "
-                         f"needs a package, but {problem}.  Please check "
+                self.say(1, f"`{program.name}` line {line}: `import "
+                         f"{module}` needs a package, but {problem}.  "
+                         f"Please check "
                          f"the spelling, or add the right package to "
                          f"`dependencies`{where} by hand.")
                 self.reported.add(module)
@@ -4832,7 +4833,7 @@ class EZPkg:
             (stage / "__main__.py").write_bytes(stripped.encode(encoding))
             zipapp.create_archive(stage, target,
                                   interpreter="/usr/bin/env python3")
-        print(f"Wrote {target}")
+        self.say(3, f"ezpkg: wrote {target}")
         return target
 
     def build_uv(self, target: Path | None = None) -> Path:
@@ -4889,7 +4890,7 @@ class EZPkg:
             raise RuntimeError(
                 "cannot find the dependencies in Part 1 to pin")
         target.write_bytes(pinned.encode(encoding))
-        print(f"Wrote {target}")
+        self.say(3, f"ezpkg: wrote {target}")
 
         # `uv` locks it; without `uv`, say how to finish elsewhere.
         commands: list[list[str]] = [["lock", "--script", str(target)]]
@@ -4924,7 +4925,7 @@ class EZPkg:
             raise RuntimeError(
                 "uv's lock disagrees with the approvals: "
                 + "; ".join(problems))
-        print(f"Wrote {lock}")
+        self.say(3, f"ezpkg: wrote {lock}")
         return target
 
     def summary(self, wheel: Path) -> str:
@@ -5805,11 +5806,13 @@ class EZPkg:
         # A lock that `dependencies` has moved past fails here, as a
         # conflict `pip` cannot resolve, so say which file to regenerate.
         if done.returncode != 0:
+            # On a line of its own, so `failure_reason` keeps `pip`'s
+            # `ERROR:` line apart from this guess (`ux` step 2.9).
             stale: str = (
-                f"; if `dependencies` changed, the versions locked in "
+                f"\nIf `dependencies` changed, the versions locked in "
                 f"Part 1 of {program_name()} may be the conflict: to "
                 f"upgrade them, delete the `exclude-newer` line in Part 1 "
-                f"and run the program again" if constraints else "")
+                f"and run the program again." if constraints else "")
             raise RuntimeError(
                 f"could not fetch {', '.join(requirements)} into "
                 f"{holding}: "
@@ -6399,15 +6402,18 @@ class EZPkg:
         why: str
         package, why = unavailable(text, pinned)
         if why == "gone":
-            return (f"{name} needs {package}, which PyPI no longer offers, "
-                    f"so {name} did not run.  Its author can send a newer "
-                    f"{name}.{kept}")
+            return (f"{name} needs {package}, which PyPI "
+                    f"(https://pypi.org) no longer offers, so {name} did "
+                    f"not run.  Request an updated version of {name} and "
+                    f"try again.{kept}")
         if why == "no wheel":
             here: str = (f"Python {sys.version_info[0]}."
                          f"{sys.version_info[1]} on {platform.system()} "
                          f"{platform.machine()}")
             return (f"{name} needs {package}, which has no version for "
-                    f"this computer ({here}), so {name} did not run.{kept}")
+                    f"this computer ({here}), so {name} did not run.  "
+                    f"Request an updated version of {name} and try "
+                    f"again.{kept}")
         return (f"{name} could not get its software packages, so it did "
                 f"not run: {failure_reason(error)}{kept}")
 
@@ -6960,10 +6966,10 @@ class EZPkg:
                 stored: str = self.listing(new, columns(sys.stderr))
                 trees = [self.unpack(wheel) for wheel in arrived]
                 # Only on the run that agreed: later downloads are
-                # silent, and a developer chose them, so sees them only
-                # from `medium` up (`T.abfd`, S1.5).
-                if (new or self.bootstrapped()) and (
-                        self.agreeing or self.verbosity() >= 2):
+                # silent, and a developer, who chose them and is never
+                # asked, sees the changes to `dependencies` instead
+                # (`ux` step 2.7, Wayne, 2026-10-19).
+                if (new or self.bootstrapped()) and self.agreeing:
                     print(stored, file=sys.stderr)
                     self.listings += 1
                 self.told = True
