@@ -32,8 +32,8 @@ the 2026-10-19 batches) are in `History.md`.
 * `ux/drive.py`: end user 1.1-1.12, developer 2.1-2.13 (including a
   release and running its `.pyz` and `uv` exports): 25 of 25 pass.
   Unread by Wayne, batched for later: `ux/ux01`-`ux25`.
-* Rehearsed as `0.0.1.dev202610192352` (`a4a2af7`): `release_check`
-  and `check.yml` (25 jobs) passed.  Later changes not yet rehearsed.
+* Rehearsed as `0.0.1.dev202610200048` (the day's last commit):
+  `release_check` and `check.yml` run 39349884759 (25 jobs) passed.
 * `README.md.old` is the old README; `README.md` is a skeleton of
   headings (Wayne starts it 2026-10-20).  README gates the pypi.org
   setup (`T.utpat`).

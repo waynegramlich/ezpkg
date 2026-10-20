@@ -5,10 +5,9 @@ Earlier entries are in `History.md`.
 ## 2026-10-19: State (condensed)
 
 * `Details.md` holds the release procedure; it works end to end on
-  test.pypi.org.  Newest upload `0.0.1.dev202610192352` (`a4a2af7`:
-  `I.ffspo`, the second-program wording, the reconcile fix; release
-  run 39344213345), `release_check` and `check.yml` run 39344337125
-  (25 jobs) passed.
+  test.pypi.org.  Newest upload `0.0.1.dev202610200048` (the day's
+  last commit: developer messages, README skeleton), `release_check`
+  and `check.yml` run 39349884759 (25 jobs) passed.
 * Rehearsal, as Claude runs it in the background (about 6 minutes):
   `git push github main`; `gh workflow run release.yml -f
   target=testpypi`; approve via `gh api -X POST

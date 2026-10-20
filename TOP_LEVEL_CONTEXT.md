@@ -15,7 +15,10 @@ needs live here instead.
 * `ezpkg_test.py`: The test suite.
 * `ezpkg_coverage.py`: Coverage with the standard library `trace`
   (`trace_hook/` carries it into child processes).
-* `README.md`: The user documentation.
+* `README.md`: The user documentation, being rewritten by Wayne from a
+  skeleton of headings (2026-10-19; one-line comments say what each
+  section covers and which `ux/` steps show it).  `README.md.old` is
+  the README before the redesign, for reference.
 * `release.py`: Builds the wheel to publish (`./release.py
   testpypi|pypi DIR`), using `release_wheel` from `ezpkg_test.py`.
 * `.github/workflows/release.yml`: Publishes it with Trusted
