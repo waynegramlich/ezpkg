@@ -37,6 +37,11 @@ needs live here instead.
   `--console` job per system: `gh workflow run check.yml -f
   target=testpypi -f version=V` (25 jobs, about 3 minutes; Claude
   starts it).  Started by hand, not yet by `release.yml` (`T.gar`).
+* `email_check.py build DIR` / `friend DIR OUT` and
+  `.github/workflows/email_check.yml`: an `email` release (`T.ee`)
+  built on Linux, then run as a friend's on Windows, macOS and Linux
+  (`gh workflow run email_check.yml`, 7 jobs, about a minute; Claude
+  starts it).
 * `ux/drive.py [--keep] [--until STEP | --only STEP...] [--ux-dir
   DIR]`: Runs the scripted UX steps (end user 1.1-1.12, developer
   2.1-2.13) on a pseudoterminal in a temporary copy of the Quick

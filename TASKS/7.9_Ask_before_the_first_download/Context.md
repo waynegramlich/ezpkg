@@ -106,6 +106,5 @@ the 2026-10-19 batches) are in `History.md`.
   so a marker-dependent package (`click`'s `colorama` on Windows,
   `typing_extensions` on older Pythons) is refused by `verify` on a
   friend's machine.  Wayne's direction: a new `email` export that
-  resolves for every platform and Python at release.  Not built; the
-  open questions (file name, platform matrix, per-platform `id:`s,
-  default `exports`, a new task) are in chat.
+  resolves for every platform and Python at release.  Built and
+  proved on Windows the same night: see `T.ee`.
