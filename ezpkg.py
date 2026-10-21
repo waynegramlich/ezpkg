@@ -869,17 +869,22 @@ SETTINGS_TEMPLATE: str = """\
 # How much ezpkg says: "none", "low", "medium" or "high".
 # verbosity = "low"
 
-# Make a release: set a version and run {name} once.  ezpkg checks
-# the imports and the bootstrap, gives each entry without a version a
-# range (write a range or `==` yourself to choose one), builds what
-# `exports` lists, and stops without running {name}.  A new version
-# makes the next release.
+# Releases: a run with no {name}.release beside {name} builds a
+# release into {stem}_builds/VERSION/ and writes {name}.release, then
+# {name} runs as usual.  So to build the next release, delete
+# {name}.release and run {name}.  Each release checks the imports and
+# the bootstrap, and gives each entry without a version a range (write
+# a range or `==` yourself to choose one).
+
+# The version of the next release.  Without it, the first release is
+# 1.0.0 and each one after adds 1 to the last number (1.0.1, ...).
+# Change it whenever you like, even to go back to 1.0.0.
 # release = "1.0.0"
 
-# What a release builds beside {name}: "zipapp" (a `.pyz` that needs
-# no network), "uv" (a `-uv.py` for `uv run`) and "email" (a `.py` to
-# send, ready for every computer), named by version.
-# exports = ["zipapp", "uv", "email"]
+# What a release builds: "email" (a `.py` to send, ready for every
+# computer), "zipapp" (a `.pyz` that needs no network, skipped when a
+# package is compiled) and "uv" (a `-uv.py` for `uv run`).
+# exports = ["email", "zipapp", "uv"]
 
 # The bootstrap {name} carries: "update" replaces an older one at the
 # next release; a name, such as "nopip8", keeps exactly that one.
@@ -895,8 +900,9 @@ SETTINGS_TEMPLATE: str = """\
 # it and none loaded its package (Wayne, 2026-10-20; `T.abfd`).
 RUNS_KEPT: int = 10
 
-# What a release can build, in the order `exports` documents them.
-EXPORT_FORMS: tuple[str, ...] = ("zipapp", "uv", "email")
+# What a release can build, in the order it builds them, which is also
+# what it builds when `exports` is not set (Wayne, 2026-10-21).
+EXPORT_FORMS: tuple[str, ...] = ("email", "zipapp", "uv")
 
 # The values of `verbosity`, quietest first, so that each one's index is
 # its level for `EZPkg.say` (`T.abfd`, S1.5).
@@ -917,9 +923,11 @@ class Settings:
     * `verbosity` (`str`):
       How much `ezpkg` says, from `VERBOSITY`; see `EZPkg.say`.
     * `release` (`str | None`):
-      The version to release, such as `"1.0.0"`, or `None`.
+      The version of the next release, such as `"1.0.0"`, or `None`
+      to count on from the last one (`next_release`).
     * `exports` (`tuple[str, ...]`):
-      What a release builds, from `EXPORT_FORMS`.
+      What a release builds, from `EXPORT_FORMS`; all of them unless
+      the file says otherwise.
     * `bootstrap` (`str`):
       `update`, or the short name of the published bootstrap the
       program must carry, such as `nopip7` (Wayne, S5.1).
@@ -928,7 +936,7 @@ class Settings:
     auto_dependencies: bool = True
     verbosity: str = "low"
     release: str | None = None
-    exports: tuple[str, ...] = ()
+    exports: tuple[str, ...] = EXPORT_FORMS
     bootstrap: str = "update"
 
 
@@ -945,6 +953,46 @@ def settings_path(program: Path) -> Path:
     # The whole name, suffix included, so `prog.py` and `prog.pyw`
     # cannot share one.
     return program.with_name(f"{program.name}.toml")
+
+
+def release_path(program: Path) -> Path:
+    """Return a program's release record: `prog.py.release` beside it.
+
+    `EZPkg.release` writes it; while it is missing, a developer's run
+    builds a release (Wayne, 2026-10-21: deleting a file is the one
+    gesture every computer makes easily).
+
+    Arguments:
+    * `program` (`Path`):
+      The program, such as `prog.py`.
+
+    Returns:
+    * (`Path`): The record, whether or not it exists.
+    """
+    # Named like the settings file.
+    return program.with_name(f"{program.name}.release")
+
+
+def next_release(last: str) -> str:
+    """Return the version after the last release: its last number plus 1.
+
+    Arguments:
+    * `last` (`str`):
+      The last release, such as `1.0.0`; empty for none.
+
+    Returns:
+    * (`str`): Such as `1.0.1`; `1.0.0` when there was none.  A
+      `.devN` is dropped, and a short version is padded (`2.1` gives
+      `2.1.1`).
+    """
+    # Three numbers at least, the last one counted on.
+    found: re.Match[str] | None = RELEASE.fullmatch(last)
+    if found is None:
+        return "1.0.0"
+    numbers: list[int] = [int(one) for one in found[1].split(".")]
+    numbers += [0] * (3 - len(numbers))
+    numbers[-1] += 1
+    return ".".join(map(str, numbers))
 
 
 def setting_line(text: str, key: str) -> int:
@@ -2881,18 +2929,52 @@ def everywhere_approvals(lock: dict[str, Any], approved: Mapping[str, str],
     return rows, platforms
 
 
+# The oldest `uv` an installed one may be; anything older is passed over
+# and `EZPkg.uv` fetches a newer one.  Measured 2026-10-21: `uv` 0.6.0
+# passed the `email`, `zipapp` and `uv` export tests.
+UV_FLOOR: tuple[int, ...] = (0, 6, 0)
+
+
+def uv_version(command: str) -> tuple[int, ...] | None:
+    """Return the version of a `uv`, or `None` if it does not say.
+
+    Arguments:
+    * `command` (`str`):
+      The `uv` to ask.
+
+    Returns:
+    * (`tuple[int, ...] | None`): Such as `(0, 12, 21)`, from `uv
+      0.12.21 (x86_64-unknown-linux-gnu)`.
+    """
+    # The second word, up to anything that is not a number.
+    try:
+        said: str = subprocess.run(
+            [command, "--version"], capture_output=True, text=True,
+            check=False, timeout=60).stdout
+    except (OSError, subprocess.SubprocessError):
+        return None
+    found: re.Match[str] | None = re.match(r"uv (\d+(?:\.\d+)*)", said)
+    return tuple(map(int, found[1].split("."))) if found else None
+
+
 def find_uv() -> str | None:
-    """Return the `uv` command, or `None` when it is not installed.
+    """Return an installed `uv`, or `None` when none is new enough.
 
     The `PATH` first, then `~/.local/bin`, which is where `uv`'s own
-    installer puts it and which is not always on the `PATH`.
+    installer puts it and which is not always on the `PATH`.  One older
+    than `UV_FLOOR` does not count.  `EZPkg.uv` fetches one when this
+    finds none.
 
     Returns:
     * (`str | None`): The command to run.
     """
     # `shutil.which` also checks that the file is executable.
-    return (shutil.which("uv")
-            or shutil.which("uv", path=str(Path.home() / ".local" / "bin")))
+    found: str | None = (
+        shutil.which("uv")
+        or shutil.which("uv", path=str(Path.home() / ".local" / "bin")))
+    version: tuple[int, ...] | None = (
+        uv_version(found) if found else None)
+    return found if version is not None and version >= UV_FLOOR else None
 
 
 def refresh(path: Path, text: str) -> None:
@@ -4458,8 +4540,8 @@ class EZPkg:
             raise SystemExit(f"{path.name}: {error}") from None
         if not text.strip():
             try:
-                path.write_text(SETTINGS_TEMPLATE.format(name=program.name),
-                                encoding="utf-8")
+                path.write_text(SETTINGS_TEMPLATE.format(
+                    name=program.name, stem=program.stem), encoding="utf-8")
                 print(wrapped(
                     f"`{path.name}` was empty, so `ezpkg` filled it with "
                     f"every setting, commented out at its default.",
@@ -4888,7 +4970,9 @@ class EZPkg:
         Only what the approvals vouch for goes in, and only what a zip
         can carry: Python cannot import compiled code from inside an
         archive, and does not run `.pth` files there, so a package with
-        either is refused rather than bundled half working.
+        either is refused rather than bundled half working.  With `uv`,
+        the pure packages that only other computers need go in too,
+        each checked against `uv`'s lock (`elsewhere_trees`).
 
         Arguments:
         * `asking` (`Sequence[str]`):
@@ -4944,12 +5028,9 @@ class EZPkg:
                 "a zipapp leaves ezpkg out, so the program needs the "
                 "pasted bootstrap for it to take out, and has none")
 
-        # What this request resolved to, as the cache recorded it.
-        approved: dict[str, str] | None = self.approved()
-        if not approved:
-            raise RuntimeError(
-                "no approvals to bundle from; run the program once as "
-                "its developer (with its `.py.toml`) first")
+        # What this request resolved to, as the cache recorded it.  No
+        # approvals means nothing was fetched, so nothing is approved.
+        approved: dict[str, str] = self.approved() or {}
         pinned: set[str] = {normal_pin(pin) for pin in approved}
         remembered: tuple[list[str], list[str]] | None = (
             self.remember(self.request_for(asking)) if asking
@@ -4986,20 +5067,30 @@ class EZPkg:
                 raise RuntimeError(
                     f"cannot bundle {', '.join(names)}: {problem}")
 
+        # What other computers need too, when `uv` can say.
+        elsewhere: list[Path] = self.elsewhere_trees(
+            stripped, encoding, approved, target)
+        hooks = sorted(found.name for tree in elsewhere
+                       for found in tree.glob("*.pth"))
+        if hooks:
+            raise RuntimeError(f"cannot bundle {', '.join(hooks)}: a .pth "
+                               f"file, which a zip never runs")
+
         # Stage the trees and the program, then zip them.
         staging: str
         with tempfile.TemporaryDirectory(prefix="ezpkg-zipapp-") \
                 as staging:
             stage: Path = Path(staging)
-            tree: str
-            for tree in trees:
+            source: Path
+            for source in [versions / tree for tree in trees] + elsewhere:
                 shutil.copytree(
-                    versions / tree, stage, dirs_exist_ok=True,
+                    source, stage, dirs_exist_ok=True,
                     ignore=shutil.ignore_patterns("__pycache__"))
             (stage / "__main__.py").write_bytes(stripped.encode(encoding))
             zipapp.create_archive(stage, target,
                                   interpreter="/usr/bin/env python3")
-        self.say(3, f"ezpkg: wrote {target}")
+        self.say(3, f"ezpkg: wrote {target}, with {len(elsewhere)} more "
+                 f"package(s) that other computers need")
         return target
 
     def build_uv(self, target: Path | None = None) -> Path:
@@ -5059,9 +5150,9 @@ class EZPkg:
         self.say(3, f"ezpkg: wrote {target}")
 
         # `uv` locks it; without `uv`, say how to finish elsewhere.
-        uv: str | None = find_uv()
+        uv: str | None = self.uv()
         if uv is None:
-            print("uv is not installed; to finish, run:")
+            print("uv could not be had; to finish, run:")
             print(f"    uv lock --script {target}")
             return target
 
@@ -5124,6 +5215,227 @@ class EZPkg:
         lock: Path = script.with_name(script.name + ".lock")
         return tomllib.loads(lock.read_text(encoding="utf-8"))
 
+    def uv(self) -> str | None:
+        """Return a `uv` to lock with, fetching one if none is installed.
+
+        A release resolves for every computer with `uv` (`T.ee`), and the
+        developer should never have to install it (Wayne, 2026-10-21).
+        `uv` is published on PyPI as a wheel for each kind of computer,
+        with the program inside, so `pip` picks the right one exactly as
+        it does for any package.  An installed `uv` at least `UV_FLOOR`
+        is used first; then the newest one already fetched into the
+        cache; then the newest from the index, unpacked into the cache
+        like any other package, where `cull` ages it out.
+        `EZPKG_UV=fetch` passes over an installed `uv`, for tests only.
+
+        Returns:
+        * (`str | None`): The command to run, or `None` when none could
+          be had; what went wrong has been said.
+        """
+        # Installed, unless a test wants the fetch.
+        if os.environ.get("EZPKG_UV", "").lower() != "fetch":
+            installed: str | None = find_uv()
+            if installed is not None:
+                return installed
+
+        # Already fetched, the newest first.
+        name: str = "uv.exe" if os.name == "nt" else "uv"
+        versions: Path = self.paths()[2]
+        key: str = self.version_key(Path("uv-0-x-x-x.whl"))
+        suffix: str = key.removeprefix("uv-0")
+
+        def numbered(tree: Path) -> tuple[int, ...]:
+            # `uv-0.12.21-cpython-312-linux-x86_64` to `(0, 12, 21)`.
+            version: str = tree.name.removeprefix("uv-").removesuffix(suffix)
+            return tuple(int(part) if part.isdigit() else -1
+                         for part in version.split("."))
+        tree: Path
+        for tree in sorted(versions.glob(f"uv-*{suffix}"), key=numbered,
+                           reverse=True):
+            if numbered(tree) >= UV_FLOOR:
+                binary: Path | None = next(
+                    tree.glob(f"uv-*.data/scripts/{name}"), None)
+                if binary is not None:
+                    return str(binary)
+
+        # Fetched, as `pip` chooses the wheel for this computer.
+        floor: str = ".".join(map(str, UV_FLOOR))
+        arrived: list[Path] = []
+        try:
+            arrived = self.download([f"uv>={floor}"], ["--no-deps"])
+            wheel: Path | None = next(
+                (one for one in arrived if one.name.startswith("uv-")), None)
+            if wheel is None:
+                raise RuntimeError("no uv wheel arrived")
+            tree = self.unpack(wheel)
+        except (RuntimeError, ValueError, OSError) as error:
+            self.say(1, f"`uv`, which a release uses to find what other "
+                     f"computers need, could not be fetched: "
+                     f"{failure_reason(error)}")
+            return None
+        finally:
+            holding: Path
+            for holding in {one.parent for one in arrived}:
+                shutil.rmtree(holding, ignore_errors=True)
+
+        # A zip keeps no permissions, so the program is made runnable.
+        fetched: Path | None = next(
+            tree.glob(f"uv-*.data/scripts/{name}"), None)
+        if fetched is None:
+            self.say(1, f"The `uv` wheel in {tree} has no {name}.")
+            return None
+        fetched.chmod(fetched.stat().st_mode | 0o111)
+        self.say(2, f"Fetched `uv` into {tree} for this release.")
+        return str(fetched)
+
+    def lock_everywhere(self, uv: str, name: str, stripped: str,
+                        encoding: str, approved: Mapping[str, str]
+                        ) -> dict[str, Any]:
+        """Lock the program for every computer, held to its approvals.
+
+        A copy of the program, pinned to what was approved, is locked
+        in a scratch directory under the program's `exclude-newer`
+        date, and the lock is checked against the approvals by SHA-256
+        (`lock_mismatches`).  Shared by `build_email` and
+        `build_zipapp`, which both need what other computers fetch.
+
+        Arguments:
+        * `uv` (`str`):
+          The `uv` command, from `find_uv`.
+        * `name` (`str`):
+          The program's file name, which the copy takes.
+        * `stripped` (`str`):
+          The program without its bootstrap, which `uv` has no use for.
+        * `encoding` (`str`):
+          The program's encoding.
+        * `approved` (`Mapping[str, str]`):
+          Pins to ids, as `EZPkg.approved` returns them.
+
+        Returns:
+        * (`dict[str, Any]`): The lock, as `tomllib` reads it.
+
+        Raises:
+        * `RuntimeError`:
+          If Part 1 cannot be pinned, `uv` fails, or its lock disagrees
+          with the approvals.
+        """
+        # Pinned, so `uv` resolves to what was approved.
+        pinned: str | None = pin_dependencies(
+            stripped, for_export(self.pins(), stripped))
+        if pinned is None:
+            raise RuntimeError(
+                "cannot find the dependencies in Part 1 to pin")
+        folder: str
+        with tempfile.TemporaryDirectory() as folder:
+            script: Path = Path(folder) / name
+            script.write_bytes(pinned.encode(encoding))
+            lock: dict[str, Any] = self.lock_script(
+                uv, script, self.declared_date())
+        problems: list[str] = lock_mismatches(
+            lock, {pin: approved[pin]
+                   for pin in for_export(approved, stripped)})
+        if problems:
+            raise RuntimeError("uv's lock disagrees with the approvals: "
+                               + "; ".join(problems))
+        return lock
+
+    def elsewhere_trees(self, stripped: str, encoding: str,
+                        approved: Mapping[str, str], target: Path
+                        ) -> list[Path]:
+        """Return the trees of pure packages only other computers need.
+
+        For a `zipapp`, which carries its packages: a developer's run
+        fetched what this computer needs, but a package can need others
+        only elsewhere, as `tqdm` needs `colorama` on Windows alone.
+        With `uv`, the program is locked for every computer
+        (`lock_everywhere`), and each package the lock adds is fetched
+        by the lock's URL, checked against its SHA-256 and unpacked into
+        the cache.  A package already approved is never added again,
+        even at another version for another Python, since a zip can hold
+        only one.  A compiled one cannot go in a zip, so it is named,
+        and the archive runs only where it is not needed.  Without `uv`,
+        one line says the archive carries what this computer needed
+        (Wayne, 2026-10-21: a `zipapp` does not require `uv`).
+
+        Arguments:
+        * `stripped` (`str`):
+          The program without its bootstrap.
+        * `encoding` (`str`):
+          The program's encoding.
+        * `approved` (`Mapping[str, str]`):
+          Pins to ids, as `EZPkg.approved` returns them.
+        * `target` (`Path`):
+          The archive being built, to name in what is said.
+
+        Returns:
+        * (`list[Path]`): The unpacked trees to add, in the lock's order.
+
+        Raises:
+        * `RuntimeError`:
+          If the lock fails, or a fetched wheel is not the one it names.
+        """
+        # Without `uv`, this computer's packages are all there is.
+        uv: str | None = self.uv()
+        if uv is None:
+            self.say(1, f"So `{target.name}` carries only the packages "
+                     f"this computer needed; another kind of computer "
+                     f"may need more.")
+            return []
+        program: Path | None = main_path()
+        lock: dict[str, Any] = self.lock_everywhere(
+            uv, program.name if program else target.stem + ".py",
+            stripped, encoding, approved)
+
+        # Each package the lock adds, by its pure wheel, if it has one.
+        known: set[str] = {normal_name(pin.partition("==")[0])
+                           for pin in approved}
+        pending: Path
+        wheels: Path
+        versions: Path
+        pending, wheels, versions, _unused = self.paths()
+        trees: list[Path] = []
+        compiled: list[str] = []
+        package: dict[str, Any]
+        for package in lock.get("package", []):
+            files: list[tuple[str, str, str]] = []
+            wheel: dict[str, Any]
+            for wheel in package.get("wheels", []):
+                url: str = str(wheel.get("url", ""))
+                file: str = url.rsplit("/", 1)[-1]
+                digest: str = str(wheel.get("hash", ""))
+                if file.endswith(".whl") and digest.startswith("sha256:"):
+                    files.append((file, url, digest.removeprefix("sha256:")))
+            if (not files or normal_name(wheel_pin(files[0][0])
+                                         .partition("==")[0]) in known):
+                continue
+            pure: list[tuple[str, str, str]] = [
+                one for one in files if not wheel_tag(one[0])]
+            if not pure:
+                compiled.append(wheel_pin(files[0][0]))
+                continue
+
+            # The cache's tree, if its wheel is this one; else fetched.
+            url, digest = pure[0][1], pure[0][2]
+            name: Path = Path(pure[0][0])
+            tree: Path = versions / self.version_key(name)
+            hashed: Path = (wheels / name.name).with_suffix(".sha256")
+            if not (tree.is_dir() and hashed.is_file()
+                    and hashed.read_text().strip() == digest):
+                body: bytes = fetch_url(url)
+                if hashlib.sha256(body).hexdigest() != digest:
+                    raise RuntimeError(f"{name.name} from {url} is not "
+                                       f"the file uv's lock names")
+                arrived: Path = pending / name.name
+                arrived.write_bytes(body)
+                tree = self.unpack(arrived)
+            trees.append(tree)
+        if compiled:
+            self.say(1, f"`{target.name}` cannot carry "
+                     f"{and_list(compiled)}, which another kind of "
+                     f"computer needs and which is compiled, so it will "
+                     f"not run on that kind of computer.")
+        return trees
+
     def build_email(self, target: Path | None = None) -> Path:
         """Write the program to send, approved for every computer.
 
@@ -5159,20 +5471,17 @@ class EZPkg:
             raise RuntimeError("an email release needs the program's "
                                "own file")
         target = target or program.with_name(f"{program.stem}-email.py")
-        uv: str | None = find_uv()
+        uv: str | None = self.uv()
         if uv is None:
             raise RuntimeError(
-                "an email release needs `uv` (https://docs.astral.sh/uv/) "
-                "to find the packages other computers need; install it, "
-                "or take \"email\" out of `exports`")
+                "an email release needs `uv` to find the packages other "
+                "computers need, and none could be had")
         text: str
         encoding: str
         crlf: bool
         text, encoding, crlf = read_program(program)
-        approved: dict[str, str] | None = self.approved()
-        if not approved:
-            raise RuntimeError("an email release needs the `checksums` a "
-                               "developer's run writes into Part 1")
+        # No approvals means nothing was fetched, so nothing is approved.
+        approved: dict[str, str] = self.approved() or {}
 
         # Locked for every computer, from a pinned copy without the
         # bootstrap, which `uv` has no use for.
@@ -5181,23 +5490,8 @@ class EZPkg:
         if stripped is None:
             raise RuntimeError("an email release sends the program with "
                                "its bootstrap, and it has none")
-        pinned: str | None = pin_dependencies(
-            stripped, for_export(self.pins(), stripped))
-        if pinned is None:
-            raise RuntimeError(
-                "cannot find the dependencies in Part 1 to pin")
-        folder: str
-        with tempfile.TemporaryDirectory() as folder:
-            script: Path = Path(folder) / program.name
-            script.write_bytes(pinned.encode(encoding))
-            lock: dict[str, Any] = self.lock_script(
-                uv, script, self.declared_date())
-        problems: list[str] = lock_mismatches(
-            lock, {pin: approved[pin]
-                   for pin in for_export(approved, stripped)})
-        if problems:
-            raise RuntimeError("uv's lock disagrees with the approvals: "
-                               + "; ".join(problems))
+        lock: dict[str, Any] = self.lock_everywhere(
+            uv, program.name, stripped, encoding, approved)
 
         # The copy, with every computer's approvals in its Part 1.
         rows: dict[str, str]
@@ -6313,7 +6607,36 @@ class EZPkg:
             os.environ, EZPKG_SWITCHED=version, EZPKG_PYTHONPATH=paths,
             PYTHONPATH=os.pathsep.join(filter(None, [str(tree), paths]))))
 
-    def restart(self) -> None:
+    def release_due(self, settings: Settings | None) -> str:
+        """Return the version to release now, or empty for none.
+
+        Only a developer's run releases.  It does when `prog.py.release`
+        is missing, which is so on the first run with a `prog.py.toml`
+        and whenever the developer deletes it, or when `release` names a
+        version other than the last one released, which is how a
+        developer chooses a number, even an older one (Wayne,
+        2026-10-21).  The version is `release` when it is new, else the
+        one after the last (`next_release`).
+
+        Arguments:
+        * `settings` (`Settings | None`):
+          The developer's settings, or `None` for an end user's run.
+
+        Returns:
+        * (`str`): Such as `1.0.1`, or empty.
+        """
+        # Nothing for an end user, or without the program's file.
+        program: Path | None = main_path()
+        if settings is None or program is None:
+            return ""
+        last: str = self.released()
+        chosen: bool = settings.release not in (None, last)
+        if not chosen and release_path(program).exists():
+            return ""
+        return (settings.release if chosen and settings.release
+                else next_release(last))
+
+    def restart(self, after_release: bool = False) -> None:
         """Run the program again after `ezpkg` has changed its file.
 
         Python compiled the file as it was when the run began, but a
@@ -6324,14 +6647,20 @@ class EZPkg:
         to ask.  Only the docstring and the bootstrap have run so far;
         anything else above the bootstrap is flagged
         (`statements_above_bootstrap`).  Once only: `EZPKG_RESTARTED`
-        marks the second start, and a second edit is only reported.
+        marks the second start, and a second edit is only reported;
+        except after a release, which cannot come twice, since it has
+        written `prog.py.release` and recorded its version.
+
+        Arguments:
+        * `after_release` (`bool`):
+          The edit was a release's, so start again even a second time.
 
         Raises:
         * `SystemExit`:
           With the program's own exit status on Windows.
         """
         # A second edit is said, not restarted, so nothing can loop.
-        if self.restarted:
+        if self.restarted and not after_release:
             print(f"{program_name()} was changed again after "
                   f"starting it again, so a traceback's line numbers may "
                   f"be off until it runs again", file=sys.stderr)
@@ -6485,74 +6814,123 @@ class EZPkg:
                 f"{first + 1}-{last} of `{where.name}`) with `{newest}`.")
 
     def release(self, settings: Settings, asking: list[str],
-                providing: Sequence[str]) -> None:
-        """Make a release, as `release = "X.Y.Z"` in `prog.py.toml` asks.
+                providing: Sequence[str], version: str) -> bool:
+        """Make a release, when `release_due` says one is due.
 
-        Once per new value (`released`): `dependencies` has been
-        reconciled already; then, with `bootstrap = "update"`, an older
-        bootstrap is replaced; the program's `ezpkg` entry gets the
-        range of this `ezpkg` (S5.1, S5.1c); the imports are checked; bare
-        entries get ranges (S5.1b); the approvals (kept up to date
-        by every developer run) are frozen as they are; each of
-        `exports` is built beside the program, named by version
-        (`prog-1.0.0.pyz`, `prog-1.0.0-uv.py`, `prog-1.0.0.py`); and
-        `released = "X.Y.Z"` is recorded in Part 1.  The caller then
-        stops without running the program (`T.abfd`).
+        `dependencies` has been reconciled already; then, with
+        `bootstrap = "update"`, an older bootstrap is replaced; the
+        program's `ezpkg` entry gets the range of this `ezpkg` (S5.1,
+        S5.1c); the imports are checked; bare entries get ranges
+        (S5.1b); the approvals (kept up to date by every developer run)
+        are frozen as they are; each of `exports` is built into
+        `prog_builds/1.0.0/`, named by version (`prog-1.0.0.py`,
+        `prog-1.0.0.pyz`, `prog-1.0.0-uv.py`), a `zipapp` that cannot
+        carry a compiled package being skipped with a line; `released =
+        "1.0.0"` is recorded in Part 1; and `prog.py.release` says what
+        was built.  The caller then runs the program as usual (Wayne,
+        2026-10-21).
+
+        A release that fails says why and writes no `prog.py.release`,
+        so the program still runs, and its next run tries again.
 
         Arguments:
         * `settings` (`Settings`):
-          The developer's settings, with `release` set.
+          The developer's settings.
         * `asking` (`list[str]`):
           The program's `dependencies`.
         * `providing` (`Sequence[str]`):
           What `provide` fetched for them, which `build_zipapp` bundles.
+        * `version` (`str`):
+          The version to release, from `release_due`.
 
-        Raises:
-        * `SystemExit`:
-          With the reason, when the release cannot be made.
+        Returns:
+        * (`bool`): Whether the release was made.
         """
         # The bootstrap and the `ezpkg` entry, kept current.
-        version: str = settings.release or ""
         program: Path | None = main_path()
         if program is None:
-            raise SystemExit("A release needs the program's file.")
+            return False
         if settings.bootstrap == "update":
             replaced: str = self.replace_bootstrap()
             if replaced:
                 self.say(1, replaced)
-        asking = self.range_ezpkg(asking)
+        folder: Path = (program.with_name(f"{program.stem}_builds")
+                        / version)
+        built: list[Path] = []
+        skipped: list[str] = []
         try:
+            asking = self.range_ezpkg(asking)
             self.check_imports(asking)
 
-            # Ranges, then what `exports` lists, named by version.
+            # Ranges, then what `exports` lists, into a folder of its
+            # own; a rebuilt version replaces what it had.  Every form
+            # takes the pasted bootstrap out or sends it, so a program
+            # that uses `ezpkg` some other way builds none.
             asking = self.give_ranges(asking)
-            built: list[Path] = []
+            shutil.rmtree(folder, ignore_errors=True)
+            folder.mkdir(parents=True)
+            forms: list[str] = sorted(settings.exports,
+                                      key=EXPORT_FORMS.index)
+            if forms and find_bootstrap(read_program(program)[0]) is None:
+                skipped.append("all: no pasted bootstrap")
+                self.say(1, f"`{program.name}` has no pasted bootstrap, "
+                         f"so its release builds no "
+                         f"{and_list(forms, 'or')}.")
+                forms = []
             form: str
-            for form in settings.exports:
-                target: Path = program.with_name(
+            for form in forms:
+                target: Path = folder / (
                     f"{program.stem}-{version}.pyz" if form == "zipapp"
                     else f"{program.stem}-{version}.py" if form == "email"
                     else f"{program.stem}-{version}-uv.py")
-                built.append(self.export(form, providing, target))
+                try:
+                    built.append(self.export(form, providing, target))
+                except RuntimeError as error:
+                    # A zip cannot carry compiled code; the rest can.
+                    if form != "zipapp" or "cannot bundle" not in str(error):
+                        raise
+                    skipped.append(f"zipapp: {error}")
+                    self.say(1, f"No `{target.name}`: {error}.")
 
                 # The lock `uv` wrote beside the script, if `uv` was there.
                 lock: Path = target.with_name(target.name + ".lock")
                 if form == "uv" and lock.is_file():
                     built.append(lock)
-        except (RuntimeError, ValueError) as error:
-            raise SystemExit(f"{program.name} {version} was not "
-                             f"released: {error}") from None
+        except (RuntimeError, ValueError, SystemExit, OSError) as error:
+            self.say(1, f"`{program.name}` {version} was not released: "
+                     f"{error}.  `{program.name}` runs as usual, and its "
+                     f"next run tries again.")
+            return False
 
-        # Recorded, then said.
+        # Recorded in Part 1 and in `prog.py.release`, then said.
         trouble: str = self.edit_part1(
             [("ezpkg", "released", f'"{version}"')])
         if trouble:
-            raise SystemExit(f"{program.name} {version} was built, but "
-                             f"{trouble}")
+            self.say(1, f"`{program.name}` {version} was built, but "
+                     f"{trouble}")
+            return False
+        record: Path = release_path(program)
+        where: str = f"{folder.parent.name}/{version}"
+        record.write_text(
+            f"# {record.name}: the last release of {program.name}, "
+            f"written by ezpkg.\n"
+            f"# Delete this file and run {program.name} to build the "
+            f"next release\n"
+            f"# ({next_release(version)}, unless `release` in "
+            f"{program.name}.toml names another).\n"
+            f'version = "{version}"\n'
+            f'date = "{time.strftime("%Y-%m-%d %H:%M UTC", time.gmtime())}"\n'
+            f'folder = "{where}"\n'
+            f"built = [{', '.join(json.dumps(one.name) for one in built)}]\n"
+            + (f"skipped = [{', '.join(json.dumps(one) for one in skipped)}]\n"
+               if skipped else ""),
+            encoding="utf-8")
         names: list[str] = [f"`{one.name}`" for one in built]
-        self.say(1, f"Released `{program.name}` {version}"
-                 + (f", building {and_list(names)}" if names else "")
-                 + f".  `{program.name}` itself did not run this time.")
+        self.say(1, f"Released `{program.name}` {version} into `{where}`"
+                 + (f": {and_list(names)}" if names else "")
+                 + f".  To build the next release, delete `{record.name}` "
+                 f"and run `{program.name}`.")
+        return True
 
     def range_ezpkg(self, asking: list[str]) -> list[str]:
         """Give the program's `ezpkg` entry the range of this `ezpkg`.
@@ -6804,15 +7182,16 @@ class EZPkg:
             asked = self.sync_dependencies(asked, argv)
             self.scan_imports(asked)
 
-        # A new `release` value is a build, not a run: the program
-        # starts again on the edited file first, then releases and stops
-        # before its own code (`release`).
-        if settings is not None and settings.release not in (
-                None, self.released()):
+        # A missing `prog.py.release`, or a new `release` value, builds
+        # a release on the edited file, which then starts again and runs
+        # as usual (`release`).
+        version: str = self.release_due(settings)
+        if version and settings is not None:
             if self.edited:
                 self.restart()
-            self.release(settings, asked, providing)
-            sys.exit(0)
+            built: bool = self.release(settings, asked, providing, version)
+            if self.edited:
+                self.restart(after_release=built)
         if settings is not None:
             self.newer_bootstrap(settings)
         if self.edited:

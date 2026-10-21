@@ -7,13 +7,19 @@ needs `colorama` on Windows, is refused there.  The `email` release
 adds those packages (`T.ee`).  This shows both halves:
 
 * `./email_check.py build DIR`: as a developer on this computer, writes
-  `prog.py` (the Quick Start's Parts 1-3, needing `tqdm`), runs it
-  twice with a `prog.py.toml`, then releases it with `exports =
-  ["email"]`, leaving `DIR/out/prog.py` and `DIR/out/prog-1.0.0.py`.
+  `prog.py` (the Quick Start's Parts 1-3, needing `tqdm`) and an empty
+  `prog.py.toml`, and runs it: that first developer run must build
+  release 1.0.0 into `prog_builds/1.0.0/`, write `prog.py.release` and
+  run the program; the next run must build nothing.  It leaves
+  `DIR/out/prog.py`, `DIR/out/prog-1.0.0.py` and
+  `DIR/out/prog-1.0.0.pyz`.  The runs pass over any installed `uv`
+  (`EZPKG_UV=fetch`), so `ezpkg` must fetch the `uv` wheel for this
+  computer, and both releases must carry `colorama`, which only
+  Windows needs.
 * `./email_check.py friend DIR OUT`: as a new end user, from a fresh
-  home each, runs both files from `OUT`.  On Windows `prog.py` must be
-  refused for `colorama` and `prog-1.0.0.py` must run; elsewhere both
-  must run.
+  home each, runs the three files from `OUT`.  On Windows `prog.py`
+  must be refused for `colorama` and the releases must run; elsewhere
+  all must run.
 
 Each run uses this tree's `ezpkg.py`, as `~/.ezpkg/ezpkg.whl` where the
 bootstrap keeps it, and everything else from pypi.org.  `CI` is set, so
@@ -46,7 +52,7 @@ def seed_home(home: pathlib.Path) -> None:
         archive.write(HERE / "ezpkg.py", "ezpkg.py")
 
 
-def run(program: pathlib.Path, home: pathlib.Path
+def run(program: pathlib.Path, home: pathlib.Path, **extra: str
         ) -> subprocess.CompletedProcess[str]:
     """Run a program as somebody whose home is `home`.
 
@@ -55,6 +61,8 @@ def run(program: pathlib.Path, home: pathlib.Path
       The program, run from its own directory.
     * `home` (`pathlib.Path`):
       The home, as `HOME` and `USERPROFILE`.
+    * `extra` (`str`):
+      More environment, such as `EZPKG_UV="fetch"`.
 
     Returns:
     * (`subprocess.CompletedProcess[str]`): The finished child.
@@ -64,7 +72,8 @@ def run(program: pathlib.Path, home: pathlib.Path
         key: value for key, value in os.environ.items()
         if not key.startswith(("PIP_", "EZPKG_"))
         and key not in ("PYTHONPATH", "VIRTUAL_ENV")}
-    environment.update(HOME=str(home), USERPROFILE=str(home), CI="1")
+    environment.update(HOME=str(home), USERPROFILE=str(home), CI="1",
+                       **extra)
     started: float = time.monotonic()
     done: subprocess.CompletedProcess[str] = subprocess.run(
         [sys.executable, program.name], cwd=program.parent,
@@ -100,31 +109,52 @@ def build(directory: pathlib.Path) -> int:
     home: pathlib.Path = directory / "home"
     seed_home(home)
 
-    # Two developer runs, then the release.
-    settings: pathlib.Path = work / "prog.py.toml"
-    settings.write_text("", encoding="utf-8")
-    for _ in range(2):
-        if run(program, home).returncode:
-            return 1
-    settings.write_text('release = "1.0.0"\nexports = ["email"]\n',
-                        encoding="utf-8")
-    if run(program, home).returncode:
+    # The first developer run releases and runs; the next only runs.
+    (work / "prog.py.toml").write_text("", encoding="utf-8")
+    first: subprocess.CompletedProcess[str] = run(program, home,
+                                                  EZPKG_UV="fetch")
+    if first.returncode or "tqdm " not in first.stdout:
+        print("FAIL: the first developer run did not run prog.py")
         return 1
-    copy: pathlib.Path = work / "prog-1.0.0.py"
-    if not copy.is_file():
-        print("FAIL: no prog-1.0.0.py")
+    folder: pathlib.Path = work / "prog_builds" / "1.0.0"
+    copy: pathlib.Path = folder / "prog-1.0.0.py"
+    archive: pathlib.Path = folder / "prog-1.0.0.pyz"
+    built: list[str] = sorted(one.name for one in folder.glob("*"))
+    print(f"built: {built}")
+    if not (copy.is_file() and archive.is_file()
+            and (work / "prog.py.release").is_file()):
+        print("FAIL: no prog-1.0.0.py, prog-1.0.0.pyz or prog.py.release")
+        return 1
+    second: subprocess.CompletedProcess[str] = run(program, home,
+                                                   EZPKG_UV="fetch")
+    if second.returncode or "Released" in second.stderr:
+        print("FAIL: the second developer run did not just run")
         return 1
 
-    # The developer's own approvals lack `colorama`; the copy's have it.
+    # `uv` came as a wheel, for this computer, into the cache.
+    fetched: list[str] = sorted(
+        tree.name for tree in (home / ".ezpkg" / "versions").glob("uv-*"))
+    print(f"uv fetched: {fetched}")
+    if not fetched:
+        print("FAIL: ezpkg did not fetch uv")
+        return 1
+
+    # The developer's own approvals have `colorama` only on Windows;
+    # both releases have it everywhere.
     out: pathlib.Path = directory / "out"
     out.mkdir()
     shutil.copy2(program, out / "prog.py")
     shutil.copy2(copy, out / "prog-1.0.0.py")
+    shutil.copy2(archive, out / "prog-1.0.0.pyz")
     own: bool = "colorama==" in program.read_text(encoding="utf-8")
     sent: bool = "colorama==" in copy.read_text(encoding="utf-8")
-    print(f"prog.py approves colorama: {own}; prog-1.0.0.py: {sent}")
-    if own or not sent:
-        print("FAIL: expected colorama in prog-1.0.0.py's checksums only")
+    with zipfile.ZipFile(archive) as opened:
+        zipped: bool = "colorama/__init__.py" in opened.namelist()
+    print(f"colorama approved by prog.py: {own}; by prog-1.0.0.py: "
+          f"{sent}; inside prog-1.0.0.pyz: {zipped}")
+    if own != (os.name == "nt") or not sent or not zipped:
+        print("FAIL: expected colorama in both releases, and in prog.py "
+              "on Windows only")
         return 1
     print("OK: built")
     return 0
@@ -146,11 +176,12 @@ def friend(directory: pathlib.Path, out: pathlib.Path) -> int:
     windows: bool = os.name == "nt"
     failures: list[str] = []
     name: str
-    for name in ("prog.py", "prog-1.0.0.py"):
-        sent: pathlib.Path = directory / name.removesuffix(".py") / name
+    for name in ("prog.py", "prog-1.0.0.py", "prog-1.0.0.pyz"):
+        stem: str = name.replace(".", "_")
+        sent: pathlib.Path = directory / stem / name
         sent.parent.mkdir(parents=True)
         shutil.copy2(out / name, sent)
-        home: pathlib.Path = directory / name.removesuffix(".py") / "home"
+        home: pathlib.Path = directory / stem / "home"
         seed_home(home)
         done: subprocess.CompletedProcess[str] = run(sent, home)
         failure: pathlib.Path = home / ".ezpkg" / "last_failure.txt"
@@ -172,8 +203,8 @@ def friend(directory: pathlib.Path, out: pathlib.Path) -> int:
     for line in failures:
         print(f"FAIL: {line}")
     if not failures:
-        print("OK: " + ("prog.py refused, prog-1.0.0.py ran" if windows
-                        else "both ran"))
+        print("OK: " + ("prog.py refused, the releases ran" if windows
+                        else "all three ran"))
     return 1 if failures else 0
 
 

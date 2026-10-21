@@ -78,3 +78,63 @@
    computer or Python that `requires-python` admits; an `email` step in
    `ux/drive.py`; whether `email_check.yml` joins `check.yml` or
    `release.yml`.
+
+## 2026-10-21: Cross-platform `zipapp`; README comments
+
+* Wayne: cross-platform resolution happens at release, and the
+  README's "just email it" claim gets toned down.  `exports` array vs
+  one line per form is a lower-level choice (Wayne: either is fine).
+* Built: with `uv` installed, a `zipapp` carries the pure packages
+  only other computers need (`elsewhere_trees`: fetched by the lock's
+  URL, SHA-256 checked, unpacked into the cache; a compiled one is
+  named in one line, not refused).  Without `uv`, one line says the
+  `.pyz` carries only this computer's packages (Wayne: no `uv`
+  requirement for `zipapp`).  `lock_everywhere` is shared with
+  `build_email`.  Test `test_export_zipapp_carries_what_other_computers_need`.
+* README `<!-- Claude: -->` comments (2026-10-21): intro "send the
+  release, not `prog.py`"; "What are packages" order and the new
+  computers-differ paragraph; Using `zipapp`; Conclusion rewording.
+
+## 2026-10-21: `ezpkg` fetches `uv` itself
+
+* Wayne: the developer never installs `uv`; an installed one recent
+  enough is used, else `ezpkg` downloads it, invisibly.
+* Built: `EZPkg.uv()`: `find_uv` (now also requires `UV_FLOOR`
+  0.6.0, measured: the export tests pass with 0.6.0 and 0.8.0), else
+  the newest `uv-*` tree in `versions/`, else `download(["uv>=0.6.0"],
+  ["--no-deps"])`: `pip` picks this computer's wheel, `unpack` keeps
+  it, the binary `uv-X.data/scripts/uv[.exe]` gets its execute bit.
+  `EZPKG_UV=fetch` (tests only) passes over an installed `uv`.  Used
+  by `build_uv`, `build_email`, `elsewhere_trees`.  Test
+  `test_uv_is_fetched_once_when_none_is_installed`.
+* Local end to end (`email_check.py build`/`friend`, real pypi.org):
+  fetched `uv` 0.13.4 (about 4 s), colorama in both releases, all three
+  ran.  `email_check.yml` widened to builds on 6 runner kinds plus
+  Alpine; needs Wayne's commit before it can run on GitHub.
+
+## 2026-10-21: Deleting `prog.py.release` builds a release
+
+* Wayne's design: no file to create (PowerShell has no `touch`), one
+  to delete.  A developer run with no `prog.py.release` builds every
+  form (default `exports` is all of `EXPORT_FORMS`, now ordered
+  email, zipapp, uv) into `prog_builds/X.Y.Z/`, writes
+  `prog.py.release` (TOML: version, date, folder, built, skipped), and
+  then the program runs (restart after the release's edits, allowed a
+  second time: `restart(after_release=True)`).  The first developer
+  run therefore builds 1.0.0.  Version: `release` if it differs from
+  Part 1's `released`, else `next_release` (last number + 1).  Wayne:
+  stress that versions can be reset any time; only PyPI needs care.
+* A failed release says why, writes no `.release`, and the program
+  runs; the next run tries again.  A `zipapp` refused for compiled
+  code is skipped with a line.  No `checksums` (nothing fetched) is no
+  longer an error for `email`/`zipapp`.  A program with no pasted
+  bootstrap builds no forms (one line), and the release still counts.
+* `release_due`, `release_path`, `next_release`; tests
+  `test_deleting_the_release_file_builds_the_next_release`,
+  `test_next_release_adds_one_to_the_last_number`; helper `no_release`.
+  `email_check.py build` now relies on the first developer run's
+  release.  README proposals in `<!-- Claude: -->` comments (Enabling
+  step 3, Settings bullets, Releasing).
+* Not yet changed: `T.abfd`'s `Details.md` "Release" bullets (Wayne's
+  file); `ux/drive.py` developer steps (2.x) will now see a release on
+  the first developer run.

@@ -3299,6 +3299,10 @@ class InstallTest(unittest.TestCase):
                     **extra: str) -> subprocess.CompletedProcess[str]:
         """Run one of those programs against the local index.
 
+        A developer's program (one with a `prog.py.toml`) is given a
+        `prog.py.release`, so that its run does not build a release,
+        unless the test sets `self.releasing` to see that it does.
+
         Arguments:
         * `program` (`Path`):
           What `program` returned.
@@ -3309,12 +3313,30 @@ class InstallTest(unittest.TestCase):
         * (`subprocess.CompletedProcess[str]`): The finished child.
         """
         # The index is local; everything else is inherited.
+        self.no_release(program)
         environment: dict[str, str] = {
             **os.environ, "PIP_INDEX_URL": self.index_url, **extra}
         environment.pop("VIRTUAL_ENV", None)
         return subprocess.run([sys.executable, str(program)],
                               env=environment, capture_output=True,
                               text=True, check=False)
+
+    def no_release(self, program: Path) -> None:
+        """Give a developer's program a `prog.py.release`, so none is built.
+
+        Unless the test sets `self.releasing` to see that a missing one
+        builds a release.
+
+        Arguments:
+        * `program` (`Path`):
+          The program about to run.
+        """
+        # Only beside a `prog.py.toml`, and never over a real one.
+        record: Path = ezpkg.release_path(program)
+        if (program.with_name(f"{program.name}.toml").exists()
+                and not getattr(self, "releasing", False)
+                and not record.exists()):
+            record.write_text("# No release here: the test suite.\n")
 
     def run_as_developer(self, program: Path,
                          **extra: str) -> subprocess.CompletedProcess[str]:
@@ -3366,7 +3388,8 @@ class InstallTest(unittest.TestCase):
         # A new version each time, and its file's name.
         self.releases: int = getattr(self, "releases", 0) + 1
         version: str = f"1.0.{self.releases}"
-        self.built: Path = program.with_name(
+        self.built: Path = (
+            program.with_name(f"{program.stem}_builds") / version) / (
             f"{program.stem}-{version}.pyz" if form == "zipapp"
             else f"{program.stem}-{version}.py" if form == "email"
             else f"{program.stem}-{version}-uv.py")
@@ -3744,6 +3767,7 @@ class InstallTest(unittest.TestCase):
         # `preexec_fn`, which runs between `fork` and `exec` and can
         # deadlock in a process that has threads -- and this one has a
         # server thread.
+        self.no_release(program)
         master: int
         slave: int
         master, slave = pty.openpty()
@@ -5070,7 +5094,7 @@ class InstallTest(unittest.TestCase):
                              ["needy", "widget"])
 
             # The release line names the lock as well as the script.
-            self.assertIn(f"building `{self.built.name}` and "
+            self.assertIn(f"`{self.built.name}` and "
                           f"`{self.built.name}.lock`.",
                           " ".join(locked.stderr.split()))
 
@@ -5151,7 +5175,7 @@ class InstallTest(unittest.TestCase):
         listens on: every package, `widget` that came along included,
         has to import from inside it, and nothing may be written.
         """
-        # Building is not running: the program's own line stays silent.
+        # A release, and then the program runs as usual.
         program: Path
         home: Path
         program, home = self.bootstrapped_program(
@@ -5162,7 +5186,7 @@ class InstallTest(unittest.TestCase):
             program, "zipapp", HOME=str(home))
         self.assertEqual(built.returncode, 0, built.stderr[-400:])
         archive: Path = self.built
-        self.assertEqual(built.stdout, "")
+        self.assertNotEqual(built.stdout, "")
         self.assertTrue(archive.is_file())
         with zipfile.ZipFile(archive) as opened:
             self.assertFalse([name for name in opened.namelist()
@@ -5226,7 +5250,7 @@ class InstallTest(unittest.TestCase):
         native: str = "fast-1.0-cp312-cp312-linux_x86_64.whl"
         cases: list[tuple[list[str], dict[str, str], bool, str]] = [
             ([native], {"fast==1.0": "0" * 16}, False, "compiled"),
-            ([pure], {}, False, "no approvals"),
+            ([pure], {}, False, "not in the `checksums`"),
             ([pure], {"other==1.0": "0" * 16}, False, "not in the `checksums`"),
             ([pure], {"hooked==1.0": "0" * 16}, True, ".pth file"),
         ]
@@ -5270,7 +5294,7 @@ class InstallTest(unittest.TestCase):
         `uv run` and an empty HOME, every package comes from `uv`, and
         nothing of `ezpkg` is made.
         """
-        # Building is not running: the program's own line stays silent.
+        # A release, and then the program runs as usual.
         program: Path
         home: Path
         program, home = self.bootstrapped_program(
@@ -5282,7 +5306,7 @@ class InstallTest(unittest.TestCase):
         self.assertEqual(built.returncode, 0, built.stderr[-400:])
         script: Path = self.built
         lock: Path = self.built.with_name(self.built.name + ".lock")
-        self.assertEqual(built.stdout, "")
+        self.assertNotEqual(built.stdout, "")
         self.assertTrue(script.is_file() and lock.is_file())
         self.assertFalse(self.built.with_name(
             f"pylock.{self.built.stem}.toml").exists())
@@ -5342,7 +5366,7 @@ class InstallTest(unittest.TestCase):
         built: subprocess.CompletedProcess[str] = self.release_as_developer(
             program, "email", HOME=str(home))
         self.assertEqual(built.returncode, 0, built.stderr[-400:])
-        self.assertIn(f"building `{self.built.name}`",
+        self.assertIn(f": `{self.built.name}`.",
                       " ".join(built.stderr.split()))
         text: str = self.built.read_text()
         self.assertIsNotNone(ezpkg.find_bootstrap(text))
@@ -5361,6 +5385,103 @@ class InstallTest(unittest.TestCase):
             self.built, HOME=str(home))
         self.assertEqual(friend.returncode, 0, friend.stderr[-400:])
         self.assertEqual(friend.stdout.strip(), "1.0.0")
+
+    def test_export_zipapp_carries_what_other_computers_need(self) -> None:
+        """With `uv`, a `zipapp` carries pure packages only others fetch.
+
+        `paned` needs `shutter` on Windows alone, so a run here fetches
+        `paned` only; the `.pyz` carries `shutter` as well, from the
+        wheel `uv`'s lock names, so it runs on Windows too.
+        """
+        # `uv` does the resolving for every computer.
+        if ezpkg.find_uv() is None:
+            self.skipTest("uv is not installed")
+        program: Path
+        home: Path
+        program, home = self.bootstrapped_program(
+            "zipped_everywhere", 'dependencies = ["paned"]',
+            "import paned\nprint(paned.__version__)")
+        built: subprocess.CompletedProcess[str] = self.release_as_developer(
+            program, "zipapp", HOME=str(home))
+        self.assertEqual(built.returncode, 0, built.stderr[-400:])
+        with zipfile.ZipFile(self.built) as opened:
+            names: list[str] = opened.namelist()
+        self.assertIn("paned.py", names)
+        self.assertIn("shutter.py", names)
+
+        # It still runs here.
+        done: subprocess.CompletedProcess[str] = subprocess.run(
+            [sys.executable, str(self.built)], capture_output=True,
+            text=True, check=False)
+        self.assertEqual(done.returncode, 0, done.stderr[-400:])
+        self.assertEqual(done.stdout.strip(), "1.0.0")
+
+    def test_deleting_the_release_file_builds_the_next_release(self) -> None:
+        """No `prog.py.release` means a release, and the program runs.
+
+        The first developer run builds 1.0.0, every form, into
+        `prog_builds/1.0.0/`, writes `prog.py.release` and runs the
+        program; the next run builds nothing; deleting the file builds
+        1.0.1; and `release` chooses a version, even an older one
+        (Wayne, 2026-10-21).
+        """
+        # `uv` does the resolving for every computer.
+        if ezpkg.find_uv() is None:
+            self.skipTest("uv is not installed")
+        self.releasing: bool = True
+        program: Path
+        home: Path
+        program, home = self.bootstrapped_program(
+            "trigger", 'dependencies = ["paned"]',
+            "import paned\nprint(paned.__version__)")
+        settings: Path = self.developer_settings(
+            program, "auto-dependencies = false\n")
+        record: Path = ezpkg.release_path(program)
+        builds: Path = program.with_name("prog_builds")
+
+        def run() -> str:
+            # One developer run, which must run the program too.
+            done: subprocess.CompletedProcess[str] = self.run_program(
+                program, HOME=str(home))
+            self.assertEqual(done.returncode, 0, done.stderr[-400:])
+            self.assertEqual(done.stdout.strip(), "1.0.0")
+            return " ".join(done.stderr.split())
+
+        # The first run: everything, then the program.
+        said: str = run()
+        self.assertIn("Released `prog.py` 1.0.0 into "
+                      "`prog_builds/1.0.0`", said)
+        self.assertEqual(
+            sorted(one.name for one in (builds / "1.0.0").iterdir()),
+            ["prog-1.0.0-uv.py", "prog-1.0.0-uv.py.lock",
+             "prog-1.0.0.py", "prog-1.0.0.pyz"])
+        text: str = record.read_text()
+        self.assertIn('version = "1.0.0"', text)
+        self.assertIn("(1.0.1, unless", text)
+
+        # Then nothing, until the file goes.
+        self.assertNotIn("Released", run())
+        record.unlink()
+        self.assertIn("Released `prog.py` 1.0.1", run())
+        self.assertTrue((builds / "1.0.1" / "prog-1.0.1.py").is_file())
+
+        # `release` goes back to 1.0.0, which is built again.
+        settings.write_text('auto-dependencies = false\nrelease = "1.0.0"\n'
+                            'exports = ["email"]\n')
+        self.assertIn("Released `prog.py` 1.0.0", run())
+        self.assertEqual(
+            [one.name for one in (builds / "1.0.0").iterdir()],
+            ["prog-1.0.0.py"])
+        self.assertIn('version = "1.0.0"', record.read_text())
+
+    def test_next_release_adds_one_to_the_last_number(self) -> None:
+        """1.0.0 when there was none; padded; `.devN` dropped."""
+        # One of each.
+        for last, expected in (("", "1.0.0"), ("1.0.0", "1.0.1"),
+                               ("2.1", "2.1.1"), ("1.2.3.4", "1.2.3.5"),
+                               ("0.1.0.dev3", "0.1.1"), ("x", "1.0.0")):
+            with self.subTest(last=last):
+                self.assertEqual(ezpkg.next_release(last), expected)
 
     def test_everywhere_approvals_adds_what_other_computers_need(
             self) -> None:
@@ -5715,22 +5836,22 @@ class InstallTest(unittest.TestCase):
         self.assertEqual(program.read_text(), before)
 
     def test_a_release_happens_once_per_value(self) -> None:
-        """A new `release` value releases, once, and the program stops.
+        """A new `release` value releases, once, and the program runs.
 
         Every release gives bare entries ranges (S5.1b); Part 1 records
         `released`; the next run with the same value just runs
         (`T.abfd`).
         """
-        # Released: ranged, recorded, not run.
+        # Released: ranged, recorded, and run.
         program: Path = self.declaring_program(
             "released", 'dependencies = ["widget", "sprocket>=1"]',
             "import widget\nimport sprocket\nprint('ran')")
         self.developer_settings(program, 'release = "1.0.0"\n')
         done: subprocess.CompletedProcess[str] = self.run_program(program)
         self.assertEqual(done.returncode, 0, done.stderr[-400:])
-        self.assertEqual(done.stdout, "")
-        self.assertIn("Released `prog.py` 1.0.0.  `prog.py` itself did not "
-                      "run this time.", done.stderr)
+        self.assertEqual(done.stdout, "ran\n")
+        self.assertIn("Released `prog.py` 1.0.0 into `prog_builds/1.0.0`",
+                      " ".join(done.stderr.split()))
         self.assertEqual(self.declared_now(program),
                          ["widget>=1.2.3,<2", "sprocket>=1"])
         metadata: dict[str, Any] | None = ezpkg.script_metadata(
@@ -5777,7 +5898,8 @@ class InstallTest(unittest.TestCase):
         self.assertIn("`prog.py.toml` was empty, so `ezpkg` filled it",
                       done.stderr)
         self.assertEqual(settings.read_text(encoding="utf-8"),
-                         ezpkg.SETTINGS_TEMPLATE.format(name="prog.py"))
+                         ezpkg.SETTINGS_TEMPLATE.format(name="prog.py",
+                                                       stem="prog"))
 
         # Filled, it is every default, and left alone.
         self.assertEqual(ezpkg.read_settings(settings), ezpkg.Settings())
@@ -6161,10 +6283,11 @@ class InstallTest(unittest.TestCase):
         program.write_text(program.read_text().replace(
             "import importlib\n", "import os\nimport importlib\n", 1))
 
-        # Nothing written, and the import named.
+        # Nothing written, the import named, and the program run.
         done: subprocess.CompletedProcess[str] = self.release_as_developer(
             program, "zipapp", HOME=str(home))
-        self.assertNotEqual(done.returncode, 0)
+        self.assertEqual(done.stdout, "ran\n", done.stderr)
+        self.assertIn("was not released", done.stderr)
         line: int = program.read_text().splitlines().index("import os") + 1
         self.assertIn(f"line {line}: `os` is imported above the "
                       "bootstrap", done.stderr)
@@ -6177,7 +6300,7 @@ class InstallTest(unittest.TestCase):
         venv: ezpkg.EZPkg = ezpkg.EZPkg(self.root / "form")
         with self.assertRaises(ValueError) as caught:
             venv.export("zipap")
-        self.assertIn("use zipapp, uv or email", str(caught.exception))
+        self.assertIn("use email, zipapp or uv", str(caught.exception))
 
         # `pins` is gone; the date in Part 1 does its job.
         with self.assertRaises(ValueError):
@@ -6638,6 +6761,7 @@ class BootstrapCheckTest(unittest.TestCase):
             "print('ran')\n")
         settings: Path = self.root / "prog.py.toml"
         settings.write_text("auto-dependencies = false\n")
+        (self.root / "prog.py.release").write_text("# Not yet.\n")
         environment: dict[str, str] = dict(os.environ)
         environment.pop("EZPKG_BOOTSTRAP", None)
 
@@ -6669,15 +6793,18 @@ class BootstrapCheckTest(unittest.TestCase):
                       "`prog.py` carries `nopip6`.",
                       " ".join(wrong.stderr.split()))
 
-        # A release replaces it, indented as it was, and stops.
-        settings.write_text('auto-dependencies = false\nrelease = "1.0.0"\n')
+        # A release replaces it, indented as it was, and runs.  Nothing
+        # is exported: this `ezpkg` is not a wheel any export could pin.
+        settings.write_text('auto-dependencies = false\nrelease = "1.0.0"\n'
+                            'exports = []\n')
         released: subprocess.CompletedProcess[str] = run()
-        self.assertEqual((released.returncode, released.stdout), (0, ""),
-                         released.stderr)
+        self.assertEqual((released.returncode, released.stdout),
+                         (0, "ran\n"), released.stderr)
         flat: str = " ".join(released.stderr.split())
         self.assertRegex(flat, r"Replaced the bootstrap `nopip6` \(lines "
                          r"6-\d+ of `prog\.py`\) with `nopip8`\.")
-        self.assertIn("Released `prog.py` 1.0.0.", flat)
+        self.assertIn("Released `prog.py` 1.0.0 into `prog_builds/1.0.0`.",
+                      flat)
         text: str = program.read_text()
         self.assertIn("if False:\n    try:", text)
         self.assertEqual(ezpkg.bootstrap_name(
@@ -7903,10 +8030,10 @@ class MetadataTest(unittest.TestCase):
                  'quotes, such as "1.0.0"')),
                 ('exports = ["zip"]\n',
                  ('prog.py.toml line 1: `exports` must be a list of '
-                 '"zipapp", "uv" or "email", each at most once')),
+                 '"email", "zipapp" or "uv", each at most once')),
                 ('exports = ["uv", "uv"]\n',
                  ('prog.py.toml line 1: `exports` must be a list of '
-                 '"zipapp", "uv" or "email", each at most once')),
+                 '"email", "zipapp" or "uv", each at most once')),
                 ("verbosity = \n", ("prog.py.toml: Invalid value (at line 1, "
                  "column 13)")),
             ]
@@ -8009,6 +8136,39 @@ class MetadataTest(unittest.TestCase):
             venv: ezpkg.EZPkg = ezpkg.EZPkg(Path(scratch) / "named")
             venv.own_pip()
             self.assertFalse((Path(scratch) / "named" / "pip.whl").exists())
+
+    @unittest.skipIf(os.name == "nt", "the fake uv is a shell script")
+    def test_uv_is_fetched_once_when_none_is_installed(self) -> None:
+        """`EZPkg.uv` fetches the `uv` wheel, makes it runnable, keeps it.
+
+        `pip` choosing the wheel for each kind of computer is checked on
+        GitHub's runners (`email_check.yml`); here `download` hands back
+        a wheel laid out as `uv`'s are, with the program under
+        `uv-X.data/scripts/`, which a zip leaves unrunnable.
+        """
+        # A `uv` wheel whose program only says its version.
+        with tempfile.TemporaryDirectory() as scratch:
+            venv: ezpkg.EZPkg = ezpkg.EZPkg(Path(scratch) / "cache")
+            holding: Path = Path(tempfile.mkdtemp(dir=venv.paths()[0]))
+            wheel: Path = holding / "uv-0.9.0-py3-none-manylinux_2_17_x86_64.whl"
+            with zipfile.ZipFile(wheel, "w") as archive:
+                archive.writestr("uv-0.9.0.data/scripts/uv",
+                                 "#!/bin/sh\necho uv 0.9.0\n")
+            fetches: unittest.mock.MagicMock = unittest.mock.MagicMock(
+                return_value=[wheel])
+            with (unittest.mock.patch.dict(os.environ, {"EZPKG_UV": "fetch"}),
+                  unittest.mock.patch.object(venv, "download", fetches),
+                  contextlib.redirect_stderr(io.StringIO())):
+                first: str | None = venv.uv()
+                second: str | None = venv.uv()
+
+            # Fetched once, runnable, and found again in the cache.
+            assert first is not None
+            self.assertEqual(first, second)
+            self.assertEqual(fetches.call_count, 1)
+            self.assertEqual(fetches.call_args[0][0], ["uv>=0.6.0"])
+            self.assertEqual(ezpkg.uv_version(first), (0, 9, 0))
+            self.assertFalse(holding.exists())
 
     def test_the_quick_start_ships_without_approvals(self) -> None:
         """`quick_start.py` carries no approvals: shorter is better (S2.4e)."""

@@ -1,7 +1,9 @@
-# Check the `email` export on other computers (`T.ee`): a program
-# developed and released on Linux, needing `tqdm`, whose own `prog.py`
-# should be refused on Windows (its `colorama` was never approved) and
-# whose `email` copy, `prog-1.0.0.py`, should run everywhere.
+# Check the `email` and `zipapp` releases on other computers (`T.ee`):
+# a program needing `tqdm`, developed and released on each kind of
+# computer, whose own `prog.py` should be refused on Windows (its
+# `colorama` was never approved) and whose releases, `prog-1.0.0.py` and
+# `prog-1.0.0.pyz`, should run everywhere.  No `uv` is installed: each
+# release must fetch the `uv` wheel for its own computer.
 #
 # Started by hand, from the Actions tab or with
 #     gh workflow run email_check.yml
@@ -18,24 +20,49 @@ permissions:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    # Every kind of computer GitHub offers, so `uv`'s wheel is fetched
+    # for each: Linux and Windows on x86_64 and ARM, macOS on Apple
+    # Silicon and Intel.
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - ubuntu-24.04-arm
+          - windows-latest
+          - windows-11-arm
+          - macos-latest
+          - macos-15-intel
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: Install uv, which the email export needs
-        run: python -m pip install uv
       - name: Develop and release prog.py
+        shell: bash
         run: python email_check.py build "$RUNNER_TEMP/email"
       - uses: actions/upload-artifact@v4
         with:
-          name: released
+          name: released-${{ matrix.os }}
           path: ${{ runner.temp }}/email/out/
 
+  build-musl:
+    # Alpine Linux, whose musl C library needs `uv`'s musllinux wheel.
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Develop and release prog.py on Alpine
+        run: >-
+          docker run --rm -v "$PWD:/work" -w /work python:3.12-alpine
+          python email_check.py build /tmp/email
+
   friend:
+    # Runs what Linux x86_64 built, even when another build failed.
     needs: build
+    if: ${{ !cancelled() }}
     strategy:
       fail-fast: false
       matrix:
@@ -55,9 +82,9 @@ jobs:
           python-version: ${{ matrix.python }}
       - uses: actions/download-artifact@v4
         with:
-          name: released
+          name: released-ubuntu-latest
           path: ${{ runner.temp }}/released
-      - name: Run both as a new end user
+      - name: Run all three as a new end user
         shell: bash
         run: >-
           python email_check.py friend "$RUNNER_TEMP/friend"

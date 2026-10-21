@@ -38,9 +38,11 @@ needs live here instead.
   target=testpypi -f version=V` (25 jobs, about 3 minutes; Claude
   starts it).  Started by hand, not yet by `release.yml` (`T.gar`).
 * `email_check.py build DIR` / `friend DIR OUT` and
-  `.github/workflows/email_check.yml`: an `email` release (`T.ee`)
-  built on Linux, then run as a friend's on Windows, macOS and Linux
-  (`gh workflow run email_check.yml`, 7 jobs, about a minute; Claude
+  `.github/workflows/email_check.yml`: `email` and `zipapp` releases
+  (`T.ee`) built on every runner kind (Linux and Windows x86_64/ARM,
+  macOS ARM/Intel, Alpine in Docker), each fetching `uv` itself
+  (`EZPKG_UV=fetch`), then Linux's run as a friend's on Windows, macOS
+  and Linux (`gh workflow run email_check.yml`, 13 jobs; Claude
   starts it).
 * `ux/drive.py [--keep] [--until STEP | --only STEP...] [--ux-dir
   DIR]`: Runs the scripted UX steps (end user 1.1-1.12, developer
@@ -100,8 +102,14 @@ entry chooses which `ezpkg` runs it (`T.eui`).
 A `prog.py.toml` beside `prog.py` makes it its developer's: no
 questions, `dependencies` kept in step with the imports silently, the
 versions frozen by `exclude-newer` and the `[tool.ezpkg] checksums`
-`ezpkg` writes into Part 1, and `release = "X.Y.Z"` builds a
-release.  An entry nothing imports goes once the latest recorded run
+`ezpkg` writes into Part 1.  A developer's run with no
+`prog.py.release` beside it builds a release (all of `email`,
+`zipapp`, `uv` by default) into `prog_builds/X.Y.Z/`, writes
+`prog.py.release`, and then runs the program; so the first developer
+run builds 1.0.0, and deleting the file builds the next patch number.
+`release = "X.Y.Z"` chooses a version (any time, even an older one).
+The test suite gives developer programs a placeholder
+`prog.py.release` (`no_release`) unless a test sets `self.releasing`.  An entry nothing imports goes once the latest recorded run
 declared it and none of the last 10 loaded it (`unused_lately`,
 `note_loaded`); a comment keeps it.  Without one, `prog.py` is an end user's: one question per
 program, ever, and the program is never edited.  `prog.ezpkg`,
