@@ -15,6 +15,14 @@ privileges to install packages.  Once everything is working with `EZPkg`,
 either email the single `.py` file to a friend or let `EZPkg` package it
 up in either `zipapp` or `uv` format.  Done!
 
+<!-- Claude: Proposed replacement for the paragraph's last sentence
+(`email` export, `T.ee`):
+
+Once everything is working with `EZPkg`, let `EZPkg` make a release:
+a `.py` file to email to a friend, or a `zipapp` or `uv` package.
+Done!
+-->
+
 <!--Cluade: Keep this table of contents in sync. with all `##` headers. -->
 Table of Contents:
 * [Quick Start](#quick-start)
@@ -274,6 +282,14 @@ the file shows them, are:
   The extra files a release builds beside `prog.py`; see [Using
   `zipapp`](#using-zipapp) and [Using `uv`](#using-uv).  While it is
   commented out, a release builds neither.
+  <!-- Claude: Proposed replacement for this bullet:
+
+* `exports = ["zipapp", "uv", "email"]`:
+  The extra files a release builds beside `prog.py`; see [Using
+  `email`](#using-email), [Using `zipapp`](#using-zipapp) and [Using
+  `uv`](#using-uv).  While it is commented out, a release builds none
+  of them.
+  -->
 * `bootstrap = "update"`:
   At a release, replace an older bootstrap with the current one.  A
   bootstrap's name, such as `"nopip8"`, keeps exactly that one.
@@ -307,6 +323,48 @@ Then run the program once.  That run does not run your program; instead,
 `YOUR_PROG-1.0.0-uv.py.lock` appear beside it, and `EZPkg` says so.  This
 happens once per version: later runs run your program as usual.  To make
 the next release, change `release` to the next number.
+
+<!-- Claude: Proposed replacement for lines from "Once you are satisfied"
+to here:
+
+Once you are satisfied with your program, you may choose to release it.
+Currently three formats are supported:
+* *`email`*:
+  Your program itself, as `YOUR_PROG-X.Y.Z.py`, ready to email.  Your
+  own runs approve only the packages your computer needs; this copy also
+  approves the ones other computers need, such as the `colorama` that
+  `tqdm` uses on Windows only.  Building it needs `uv` on your computer;
+  the recipient needs only Python.
+* *`zipapp`*:
+  (as now)
+* *`uv`*:
+  (as now)
+
+To build all three, ensure that `YOUR_PROG.py.toml` has both `release =`
+and `exports =` enabled:
+
+```toml
+release = "1.0.0"
+exports = ["email", "zipapp", "uv"]
+```
+
+Then run the program once.  That run does not run your program; instead,
+`YOUR_PROG-1.0.0.py`, `YOUR_PROG-1.0.0.pyz`, `YOUR_PROG-1.0.0-uv.py` and
+`YOUR_PROG-1.0.0-uv.py.lock` appear beside it, and `EZPkg` says so.  This
+happens once per version: later runs run your program as usual.  To make
+the next release, change `release` to the next number.
+
+### Using `email`
+
+Send `prog-1.0.0.py` to your friend, who runs it as [Running a Program
+That Uses `EZPkg`](#running-a-program-that-uses-ezpkg) shows:
+* Linux/macOS: `python3 prog-1.0.0.py`
+* Windows: `py prog-1.0.0.py`
+
+Send this copy rather than `prog.py`: on another kind of computer,
+`prog.py` can need a package yours never fetched, and `EZPkg` refuses
+any package its author did not approve.
+-->
 
 ### Using `zipapp`
 
@@ -463,4 +521,7 @@ its imports.  What you are left with is a single file you can email to
 somebody who has nothing but Python 3.11 (or greater), and it will just
 work.  You can also trivially package it up in either `zipapp` (pure Python
 only) or `uv` (includes compiled packages like `numpy`).
+
+<!-- Claude: Proposed: "What you are left with is a single file (the
+`email` release) you can email to ..." -->
 

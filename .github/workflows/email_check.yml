@@ -1,0 +1,64 @@
+# Check the `email` export on other computers (`T.ee`): a program
+# developed and released on Linux, needing `tqdm`, whose own `prog.py`
+# should be refused on Windows (its `colorama` was never approved) and
+# whose `email` copy, `prog-1.0.0.py`, should run everywhere.
+#
+# Started by hand, from the Actions tab or with
+#     gh workflow run email_check.yml
+# Uses this checkout's `ezpkg.py` and pypi.org; uploads nothing to any
+# index, so it needs no environment and no approval.
+
+name: email-check
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install uv, which the email export needs
+        run: python -m pip install uv
+      - name: Develop and release prog.py
+        run: python email_check.py build "$RUNNER_TEMP/email"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: released
+          path: ${{ runner.temp }}/email/out/
+
+  friend:
+    needs: build
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - windows-latest
+          - macos-latest
+          - ubuntu-latest
+        python:
+          - "3.11"
+          - "3.14"
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: released
+          path: ${{ runner.temp }}/released
+      - name: Run both as a new end user
+        shell: bash
+        run: >-
+          python email_check.py friend "$RUNNER_TEMP/friend"
+          "$RUNNER_TEMP/released"

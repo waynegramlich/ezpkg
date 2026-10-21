@@ -2365,6 +2365,20 @@ class InstallTest(unittest.TestCase):
                                       cls.root / "dist",
                                       requires=["widget"])
 
+        # A package that needs another on Windows alone, as `tqdm`
+        # needs `colorama`, which only `uv` sees from elsewhere (`T.ee`).
+        shutter: Path = cls.root / "shutter.py"
+        shutter.write_text('"""Needed on Windows."""\n'
+                           '__version__ = "1.0.0"\n')
+        shutting: Path = build_wheel(shutter, "shutter", "1.0.0",
+                                     "Needed on Windows.", cls.root / "dist")
+        paned: Path = cls.root / "paned.py"
+        paned.write_text('"""Needs a shutter on Windows."""\n'
+                         '__version__ = "1.0.0"\n')
+        paning: Path = build_wheel(
+            paned, "paned", "1.0.0", "Needs a shutter on Windows.",
+            cls.root / "dist", requires=['shutter; sys_platform == "win32"'])
+
         # A package that ships a `.pth`, which `sys.path.insert` alone
         # never runs.  One line imports and one names a directory, which
         # are the two things a `.pth` can do; see `T.pf`.
@@ -2401,8 +2415,8 @@ class InstallTest(unittest.TestCase):
             DISTRIBUTION, VERSION, SUMMARY, cls.root / "dist", floor=FLOOR)
 
         cls.index = build_index([wheel, two_named, depending, shipping,
-                                 decoy, source_only, project, *versions],
-                                cls.root / "index")
+                                 decoy, source_only, project, shutting,
+                                 paning, *versions], cls.root / "index")
         cls.cache = cls.root / "cache"
 
         # Start the server last, so nothing can fail after it is up.
@@ -3342,7 +3356,7 @@ class InstallTest(unittest.TestCase):
         * `program` (`Path`):
           What `program` returned.
         * `form` (`str`):
-          `zipapp` or `uv`.
+          `zipapp`, `uv` or `email`.
         * `extra` (`str`):
           More environment, as `run_program` takes.
 
@@ -3354,6 +3368,7 @@ class InstallTest(unittest.TestCase):
         version: str = f"1.0.{self.releases}"
         self.built: Path = program.with_name(
             f"{program.stem}-{version}.pyz" if form == "zipapp"
+            else f"{program.stem}-{version}.py" if form == "email"
             else f"{program.stem}-{version}-uv.py")
         settings: Path = program.with_name(f"{program.name}.toml")
         settings.write_text(f'auto-dependencies = false\nrelease = '
@@ -5298,6 +5313,88 @@ class InstallTest(unittest.TestCase):
         self.assertFalse([line for line in lines if ".ezpkg" in line])
         self.assertFalse((empty / ".ezpkg").exists())
 
+    def test_export_email_approves_what_other_computers_need(self) -> None:
+        """An `email` release approves what only other computers fetch.
+
+        `paned` needs `shutter` on Windows alone, so a run here approves
+        `paned` only, and a Windows friend's `shutter` would be refused.
+        The release's copy keeps the bootstrap and adds `shutter`, with
+        the id of its wheel, while the program's own `checksums` stay as
+        its runs left them; and the copy runs as an end user's program
+        (`T.ee`).
+        """
+        # `uv` does the resolving for every computer.
+        if ezpkg.find_uv() is None:
+            self.skipTest("uv is not installed")
+        program: Path
+        home: Path
+        program, home = self.bootstrapped_program(
+            "emailed", 'dependencies = ["paned"]',
+            "import paned\nprint(paned.__version__)")
+        done: subprocess.CompletedProcess[str] = self.run_as_developer(
+            program, HOME=str(home))
+        self.assertEqual(done.returncode, 0, done.stderr[-400:])
+        self.assertEqual(sorted(self.approvals_of(program) or {}),
+                         ["paned==1.0.0"])
+
+        # The copy: bootstrap kept, `shutter` approved, named in the
+        # release line.
+        built: subprocess.CompletedProcess[str] = self.release_as_developer(
+            program, "email", HOME=str(home))
+        self.assertEqual(built.returncode, 0, built.stderr[-400:])
+        self.assertIn(f"building `{self.built.name}`",
+                      " ".join(built.stderr.split()))
+        text: str = self.built.read_text()
+        self.assertIsNotNone(ezpkg.find_bootstrap(text))
+        wheel: Path = next((self.root / "dist").glob("shutter-*.whl"))
+        self.assertEqual(
+            ezpkg.approvals_in(text),
+            {"paned==1.0.0": (self.approvals_of(program) or {})
+             ["paned==1.0.0"],
+             "shutter==1.0.0": hashlib.sha256(
+                 wheel.read_bytes()).hexdigest()[:ezpkg.ID_DIGITS]})
+        self.assertEqual(sorted(self.approvals_of(program) or {}),
+                         ["paned==1.0.0"])
+
+        # A friend here runs it, asked nothing with no terminal.
+        friend: subprocess.CompletedProcess[str] = self.run_program(
+            self.built, HOME=str(home))
+        self.assertEqual(friend.returncode, 0, friend.stderr[-400:])
+        self.assertEqual(friend.stdout.strip(), "1.0.0")
+
+    def test_everywhere_approvals_adds_what_other_computers_need(
+            self) -> None:
+        """Only packages the approvals lack are added, one row each.
+
+        A pure-Python wheel speaks for its package; a package with only
+        compiled wheels gets its first, with its `tag:`; one with no
+        wheel is left out; and what was approved stays as it was, even
+        where the lock lists another computer's wheel for it (`T.ee`).
+        """
+        # A lock as `tomllib` reads one, with full digests.
+        def wheel(name: str, digit: str) -> dict[str, str]:
+            return {"url": f"https://files.example/{name}",
+                    "hash": "sha256:" + digit * 64}
+        lock: dict[str, Any] = {"package": [
+            {"name": "numpy", "wheels": [
+                wheel("numpy-2.1.0-cp312-cp312-manylinux_2_17_x86_64.whl",
+                      "1"),
+                wheel("numpy-2.1.0-cp312-cp312-win_amd64.whl", "2")]},
+            {"name": "colorama", "wheels": [
+                wheel("colorama-0.4.6-py2.py3-none-any.whl", "3")]},
+            {"name": "pywin32", "wheels": [
+                wheel("pywin32-311-cp312-cp312-win_amd64.whl", "4"),
+                wheel("pywin32-311-cp311-cp311-win_amd64.whl", "5")]},
+            {"name": "onlysource", "sdist": {"url": "x.tar.gz"}}]}
+        approved: dict[str, str] = {"numpy==2.1.0": "1" * 16}
+        tags: dict[str, str] = {
+            "numpy==2.1.0": "cp312-cp312-manylinux_2_17_x86_64"}
+        self.assertEqual(
+            ezpkg.everywhere_approvals(lock, approved, tags),
+            ({"numpy==2.1.0": "1" * 16, "colorama==0.4.6": "3" * 16,
+              "pywin32==311": "5" * 16},
+             {**tags, "pywin32==311": "cp311-cp311-win_amd64"}))
+
     def test_export_refuses_an_undeclared_import(self) -> None:
         """An import that works only on the author's machine fails export.
 
@@ -6080,7 +6177,7 @@ class InstallTest(unittest.TestCase):
         venv: ezpkg.EZPkg = ezpkg.EZPkg(self.root / "form")
         with self.assertRaises(ValueError) as caught:
             venv.export("zipap")
-        self.assertIn("use zipapp or uv", str(caught.exception))
+        self.assertIn("use zipapp, uv or email", str(caught.exception))
 
         # `pins` is gone; the date in Part 1 does its job.
         with self.assertRaises(ValueError):
@@ -7806,10 +7903,10 @@ class MetadataTest(unittest.TestCase):
                  'quotes, such as "1.0.0"')),
                 ('exports = ["zip"]\n',
                  ('prog.py.toml line 1: `exports` must be a list of '
-                 '"zipapp" or "uv", each at most once')),
+                 '"zipapp", "uv" or "email", each at most once')),
                 ('exports = ["uv", "uv"]\n',
                  ('prog.py.toml line 1: `exports` must be a list of '
-                 '"zipapp" or "uv", each at most once')),
+                 '"zipapp", "uv" or "email", each at most once')),
                 ("verbosity = \n", ("prog.py.toml: Invalid value (at line 1, "
                  "column 13)")),
             ]

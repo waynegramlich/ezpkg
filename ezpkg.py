@@ -877,8 +877,9 @@ SETTINGS_TEMPLATE: str = """\
 # release = "1.0.0"
 
 # What a release builds beside {name}: "zipapp" (a `.pyz` that needs
-# no network) and "uv" (a `-uv.py` for `uv run`), named by version.
-# exports = ["zipapp", "uv"]
+# no network), "uv" (a `-uv.py` for `uv run`) and "email" (a `.py` to
+# send, ready for every computer), named by version.
+# exports = ["zipapp", "uv", "email"]
 
 # The bootstrap {name} carries: "update" replaces an older one at the
 # next release; a name, such as "nopip8", keeps exactly that one.
@@ -895,7 +896,7 @@ SETTINGS_TEMPLATE: str = """\
 RUNS_KEPT: int = 10
 
 # What a release can build, in the order `exports` documents them.
-EXPORT_FORMS: tuple[str, ...] = ("zipapp", "uv")
+EXPORT_FORMS: tuple[str, ...] = ("zipapp", "uv", "email")
 
 # The values of `verbosity`, quietest first, so that each one's index is
 # its level for `EZPkg.say` (`T.abfd`, S1.5).
@@ -2818,6 +2819,68 @@ def lock_mismatches(lock: dict[str, Any],
     return problems
 
 
+def everywhere_approvals(lock: dict[str, Any], approved: Mapping[str, str],
+                         tags: Mapping[str, str]
+                         ) -> tuple[dict[str, str], dict[str, str]]:
+    """Return approvals that cover every computer a `uv` lock covers.
+
+    A developer's run approves what arrived on the developer's own
+    computer, but a package can need others only elsewhere, as `tqdm`
+    needs `colorama` on Windows alone, and `verify` refuses anything
+    unapproved.  `pip` judges such markers by the computer it runs on
+    even when told another platform (measured 2026-10-20, `pip`
+    26.2.2), while `uv` resolves for every computer at once, so its
+    lock names them all, with each wheel's SHA-256 (`T.ee`).
+
+    What was approved stays as it was.  Each package the lock adds gets
+    one row: its pure-Python wheel if it has one, which serves every
+    computer, or else its first compiled wheel, with that wheel's
+    `tag:`, so that elsewhere only its version is checked, as for the
+    developer's own compiled packages (S2.4d).  A package with no wheel
+    in the lock is left out: `ezpkg` installs only wheels anyway.
+
+    Arguments:
+    * `lock` (`dict[str, Any]`):
+      A `prog.py.lock`, as `tomllib` reads it.
+    * `approved` (`Mapping[str, str]`):
+      Pins to ids, as `EZPkg.approved` returns them.
+    * `tags` (`Mapping[str, str]`):
+      The platform of each compiled pin, as `approval_tags` returns
+      them.
+
+    Returns:
+    * (`tuple[dict[str, str], dict[str, str]]`): The pins to ids, and
+      the pins to tags, as `approvals_array` takes them.
+    """
+    # The approvals as they were, then what only other computers need.
+    rows: dict[str, str] = dict(approved)
+    platforms: dict[str, str] = dict(tags)
+    known: set[str] = {normal_pin(pin) for pin in approved}
+    package: dict[str, Any]
+    for package in lock.get("package", []):
+        files: list[tuple[str, str]] = []
+        wheel: dict[str, Any]
+        for wheel in package.get("wheels", []):
+            where: str = wheel.get("url") or wheel.get("path") or ""
+            name: str = where.rsplit("/", 1)[-1]
+            digest: str = str(wheel.get("hash", ""))
+            if name.endswith(".whl") and digest.startswith("sha256:"):
+                files.append((name, digest.removeprefix("sha256:")))
+        if not files or normal_pin(wheel_pin(files[0][0])) in known:
+            continue
+
+        # One wheel speaks for the package, pure Python first.
+        chosen: str
+        chosen, digest = min(files, key=lambda one: (
+            wheel_tag(one[0]) != "", one[0]))
+        pin: str = wheel_pin(chosen)
+        rows[pin] = digest[:ID_DIGITS]
+        if wheel_tag(chosen):
+            platforms[pin] = wheel_tag(chosen)
+        known.add(normal_pin(pin))
+    return rows, platforms
+
+
 def find_uv() -> str | None:
     """Return the `uv` command, or `None` when it is not installed.
 
@@ -3745,7 +3808,8 @@ class EZPkg:
         Called by `release` for each of `exports`, after the packages
         have been provided and the imports checked (`check_imports`).
         `zipapp` writes a `.pyz` (`build_zipapp`); `uv` writes a script
-        and its lock file (`build_uv`).
+        and its lock file (`build_uv`); `email` writes the program to
+        send, approved for every computer (`build_email`, `T.ee`).
 
         There was once a `pins` form, printing Part 1 with every package
         pinned, for a `.py` sent on its own.  The `exclude-newer` date
@@ -3754,12 +3818,12 @@ class EZPkg:
 
         Arguments:
         * `form` (`str`):
-          What to write: `zipapp` or `uv`, in any case.
+          What to write: `zipapp`, `uv` or `email`, in any case.
         * `asking` (`Sequence[str]`):
           The requirements just provided, which `build_zipapp` bundles.
         * `target` (`Path | None`):
           Where to write it; `None` means beside the program, named as
-          `build_zipapp` and `build_uv` name it.
+          `build_zipapp`, `build_uv` and `build_email` name it.
 
         Returns:
         * (`Path`): What was written (for `uv`, the script).
@@ -3768,18 +3832,21 @@ class EZPkg:
         * `ValueError`:
           If `form` is not one this knows.
         * `RuntimeError`:
-          If `check_imports`, `build_zipapp` or `build_uv` does;
-          see there.
+          If `check_imports`, `build_zipapp`, `build_uv` or
+          `build_email` does; see there.
         """
         # A misspelt form is refused before anything is read.
         kind: str = form.lower()
         if kind not in EXPORT_FORMS:
-            raise ValueError(f"cannot export as {form!r}; use zipapp or uv")
+            raise ValueError(f"cannot export as {form!r}; use "
+                             + and_list(list(EXPORT_FORMS), "or"))
 
         # Whatever leaves this machine must not lean on what is on it.
         self.check_imports(asking)
         if kind == "zipapp":
             return self.build_zipapp(asking, target)
+        if kind == "email":
+            return self.build_email(target)
         return self.build_uv(target)
 
     def sync_dependencies(self, asking: Sequence[str],
@@ -4992,32 +5059,17 @@ class EZPkg:
         self.say(3, f"ezpkg: wrote {target}")
 
         # `uv` locks it; without `uv`, say how to finish elsewhere.
-        commands: list[list[str]] = [["lock", "--script", str(target)]]
         uv: str | None = find_uv()
         if uv is None:
             print("uv is not installed; to finish, run:")
-            command: list[str]
-            for command in commands:
-                print("    uv " + " ".join(command))
+            print(f"    uv lock --script {target}")
             return target
-        environment: dict[str, str] = dict(os.environ)
-        index: str = environment.get("PIP_INDEX_URL", "")
-        if index and not (environment.get("UV_DEFAULT_INDEX")
-                          or environment.get("UV_INDEX_URL")):
-            environment["UV_DEFAULT_INDEX"] = index
-        for command in commands:
-            done: subprocess.CompletedProcess[str] = subprocess.run(
-                [uv, *command], env=environment, capture_output=True,
-                text=True, check=False)
-            if done.returncode:
-                raise RuntimeError(
-                    f"uv {command[0]} failed: {done.stderr.strip()}")
 
         # The lock must list the very wheels that were approved.
         lock: Path = target.with_name(target.name + ".lock")
         approved: dict[str, str] = self.approved() or {}
         problems: list[str] = lock_mismatches(
-            tomllib.loads(lock.read_text(encoding="utf-8")),
+            self.lock_script(uv, target),
             {pin: approved[pin]
              for pin in for_export(approved, stripped)})
         if problems:
@@ -5025,6 +5077,145 @@ class EZPkg:
                 "uv's lock disagrees with the approvals: "
                 + "; ".join(problems))
         self.say(3, f"ezpkg: wrote {lock}")
+        return target
+
+    def lock_script(self, uv: str, script: Path,
+                    before: str = "") -> dict[str, Any]:
+        """Have `uv` lock a script for every computer, and read the lock.
+
+        `uv lock --script` writes `prog.py.lock` beside `prog.py`.  A
+        `PIP_INDEX_URL` is handed on as `uv`'s default index, so both
+        resolve against the same one.
+
+        Arguments:
+        * `uv` (`str`):
+          The `uv` command, from `find_uv`.
+        * `script` (`Path`):
+          The script, with Part 1 as it should be locked.
+        * `before` (`str`):
+          Lock only what was uploaded before this date, the program's
+          `exclude-newer`; empty means no date.  An index without
+          upload times cannot apply it, so a failure with a date tries
+          once more without, as `download` does.
+
+        Returns:
+        * (`dict[str, Any]`): The lock, as `tomllib` reads it.
+
+        Raises:
+        * `RuntimeError`:
+          If `uv` fails.
+        """
+        # The same index as `pip`, unless `uv` was told one itself.
+        environment: dict[str, str] = dict(os.environ)
+        index: str = environment.get("PIP_INDEX_URL", "")
+        if index and not (environment.get("UV_DEFAULT_INDEX")
+                          or environment.get("UV_INDEX_URL")):
+            environment["UV_DEFAULT_INDEX"] = index
+        dated: list[str] = ["--exclude-newer", before] if before else []
+        done: subprocess.CompletedProcess[str] = subprocess.run(
+            [uv, "lock", "--script", str(script), *dated], env=environment,
+            capture_output=True, text=True, check=False)
+        if done.returncode and before:
+            self.say(2, f"Locking without the program's exclude-newer "
+                     f"date {before}, which uv could not apply")
+            return self.lock_script(uv, script)
+        if done.returncode:
+            raise RuntimeError(f"uv lock failed: {done.stderr.strip()}")
+        lock: Path = script.with_name(script.name + ".lock")
+        return tomllib.loads(lock.read_text(encoding="utf-8"))
+
+    def build_email(self, target: Path | None = None) -> Path:
+        """Write the program to send, approved for every computer.
+
+        The program itself, bootstrap and all, with its `checksums`
+        completed for every computer and Python its `requires-python`
+        admits (`T.ee`).  A developer's runs approve only what arrived
+        on the developer's own computer, so a package that another
+        computer alone needs, as `tqdm` needs `colorama` on Windows, would
+        be refused there.  `uv` resolves for every computer at once, so
+        a copy of the program, pinned to what was approved and without
+        its bootstrap as for `build_uv`, is locked in a scratch
+        directory, and `everywhere_approvals` adds what the lock needs
+        beyond the approvals.  The program's own `checksums` are left
+        alone: the developer's next run would put them back.
+
+        Arguments:
+        * `target` (`Path | None`):
+          The file to write; `None` means `prog-email.py` beside the
+          program.  A release names it by version (`prog-1.0.0.py`).
+
+        Returns:
+        * (`Path`): The file written.
+
+        Raises:
+        * `RuntimeError`:
+          If the program has no file, bootstrap, readable Part 1 or
+          approvals, if `uv` is not installed or fails, or if its lock
+          disagrees with the approvals.
+        """
+        # The program as it is, and what was approved.
+        program: Path | None = main_path()
+        if program is None:
+            raise RuntimeError("an email release needs the program's "
+                               "own file")
+        target = target or program.with_name(f"{program.stem}-email.py")
+        uv: str | None = find_uv()
+        if uv is None:
+            raise RuntimeError(
+                "an email release needs `uv` (https://docs.astral.sh/uv/) "
+                "to find the packages other computers need; install it, "
+                "or take \"email\" out of `exports`")
+        text: str
+        encoding: str
+        crlf: bool
+        text, encoding, crlf = read_program(program)
+        approved: dict[str, str] | None = self.approved()
+        if not approved:
+            raise RuntimeError("an email release needs the `checksums` a "
+                               "developer's run writes into Part 1")
+
+        # Locked for every computer, from a pinned copy without the
+        # bootstrap, which `uv` has no use for.
+        stripped: str | None = strip_bootstrap(text, "uv installs the "
+                                               "packages.")
+        if stripped is None:
+            raise RuntimeError("an email release sends the program with "
+                               "its bootstrap, and it has none")
+        pinned: str | None = pin_dependencies(
+            stripped, for_export(self.pins(), stripped))
+        if pinned is None:
+            raise RuntimeError(
+                "cannot find the dependencies in Part 1 to pin")
+        folder: str
+        with tempfile.TemporaryDirectory() as folder:
+            script: Path = Path(folder) / program.name
+            script.write_bytes(pinned.encode(encoding))
+            lock: dict[str, Any] = self.lock_script(
+                uv, script, self.declared_date())
+        problems: list[str] = lock_mismatches(
+            lock, {pin: approved[pin]
+                   for pin in for_export(approved, stripped)})
+        if problems:
+            raise RuntimeError("uv's lock disagrees with the approvals: "
+                               + "; ".join(problems))
+
+        # The copy, with every computer's approvals in its Part 1.
+        rows: dict[str, str]
+        tags: dict[str, str]
+        rows, tags = everywhere_approvals(lock, approved,
+                                          approval_tags(text))
+        block: tuple[re.Match[str], str] | None = script_toml(text)
+        toml: str | None = (uv_setting(block[1], "checksums",
+                                       approvals_array(rows, tags), "ezpkg")
+                            if block else None)
+        if block is None or toml is None:
+            raise RuntimeError("cannot write the checksums into Part 1 "
+                               "of the email copy")
+        write_program(target, with_script_toml(text, block[0], toml),
+                      encoding, crlf)
+        self.say(3, f"ezpkg: wrote {target}, with "
+                 f"{len(rows) - len(approved)} more package(s) that "
+                 f"other computers need")
         return target
 
     def summary(self, wheel: Path) -> str:
@@ -6304,9 +6495,9 @@ class EZPkg:
         entries get ranges (S5.1b); the approvals (kept up to date
         by every developer run) are frozen as they are; each of
         `exports` is built beside the program, named by version
-        (`prog-1.0.0.pyz`, `prog-1.0.0-uv.py`); and `released =
-        "X.Y.Z"` is recorded in Part 1.  The caller then stops without
-        running the program (`T.abfd`).
+        (`prog-1.0.0.pyz`, `prog-1.0.0-uv.py`, `prog-1.0.0.py`); and
+        `released = "X.Y.Z"` is recorded in Part 1.  The caller then
+        stops without running the program (`T.abfd`).
 
         Arguments:
         * `settings` (`Settings`):
@@ -6340,6 +6531,7 @@ class EZPkg:
             for form in settings.exports:
                 target: Path = program.with_name(
                     f"{program.stem}-{version}.pyz" if form == "zipapp"
+                    else f"{program.stem}-{version}.py" if form == "email"
                     else f"{program.stem}-{version}-uv.py")
                 built.append(self.export(form, providing, target))
 
