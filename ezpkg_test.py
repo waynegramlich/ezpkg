@@ -145,13 +145,13 @@ FLOOR: str = floor()
 # `ezpkg.py` fails in one obvious place rather than in six.
 PROMPT: str = "[y=>Yes|n=>No|?=>Explain]:"
 
-# The case that ships: `nopip7` uses an `ezpkg` that is already
-# importable, and otherwise fetches a `pip` of its own and runs it as a
-# subprocess, its output captured for `EZPkg`, so it needs no `pip`
-# on the machine and leaves none of `pip`'s state in the program.  It
-# fetches `pip` with `curl` when this Python has no certificates.  See
-# `T.npp`, `T.ewar`, `T.rp` and `I.btosc`.
-SHIPPING: str = "nopip7"
+# The case that ships: `nopip8` uses an `ezpkg` that is already
+# importable, and otherwise fetches `ezpkg`'s wheel through the JSON API
+# and imports straight from it, so it needs no `pip` on the machine;
+# `EZPkg.own_pip` fetches one later.  It fetches with `curl` when this
+# Python has no certificates.  See `T.npp`, `T.ewar`, `T.rp`, `I.btosc`
+# and `T.abfd`.
+SHIPPING: str = "nopip8"
 
 # Which cases the all-case tests exercise by default.  The first cull
 # found that only the four needing no `pip` add anything to coverage
@@ -161,11 +161,12 @@ SHIPPING: str = "nopip7"
 # rename, being the same code with `pip`'s output on standard error.
 # `nopip6` took `nopip5`'s place on 2026-10-16, adding the `curl`
 # fallback for a Python without certificates (`I.btosc`), and `nopip7`
-# took `nopip6`'s on 2026-10-17, capturing `pip`'s output (`T.abfd`).
+# took `nopip6`'s on 2026-10-17, capturing `pip`'s output (`T.abfd`),
+# and `nopip8` took `nopip7`'s on 2026-10-20, fetching no `pip` at all.
 # The others are kept, because keeping them costs nothing, and run
 # under `EZPKG_TEST=COMPLETE`; a test that names a case of its own
 # still runs it.
-FAST_CASES: tuple[str, ...] = ("nopip1", "nopip7")
+FAST_CASES: tuple[str, ...] = ("nopip1", "nopip8")
 
 def platform_tag() -> str:
     """Return a compatibility tag this interpreter would accept.
@@ -1747,14 +1748,14 @@ class EZPkgTest(unittest.TestCase):
         `cannot fetch ezpkg: ` with nothing after it whenever the
         exception had no text.  See issue `I.fpfipe`.
         """
-        # A 404 for `pip`'s own page fails the very first stage.
+        # A 404 for `ezpkg`'s own page fails the very first fetch.
         if not selected(SHIPPING):
             self.skipTest(f"{SHIPPING} is not selected")
-        self.inject("/pip/json", "missing")
+        self.inject(f"/{MODULE}/json", "missing")
         done: subprocess.CompletedProcess[str] = self.run_case(SHIPPING)
         self.assertNotEqual(done.returncode, 0)
         self.assertNotIn("Traceback", done.stderr)
-        self.assertIn(f"{MODULE}: choose pip failed: <HTTPError 404",
+        self.assertIn(f"{MODULE}: download {MODULE} failed: <HTTPError 404",
                       done.stderr)
 
     @runs_cases
@@ -1777,15 +1778,16 @@ class EZPkgTest(unittest.TestCase):
         self.assertEqual(done.returncode, 0, done.stderr[-400:])
         here: Path = Path(__file__).resolve().parent
         self.assertIn(f"from {here / 'ezpkg.py'}", done.stdout)
-        self.assertFalse((home / ".ezpkg" / "pip.whl").exists())
+        self.assertFalse((home / ".ezpkg" / f"{MODULE}.whl").exists())
 
     @runs_cases
-    def test_the_shipping_case_refuses_a_damaged_pip(self) -> None:
-        """A `pip` wheel that fails its SHA-256 is refused, and not kept.
+    def test_the_shipping_case_refuses_a_damaged_wheel(self) -> None:
+        """An `ezpkg` wheel that fails its SHA-256 is refused, not kept.
 
         Without the check a truncated download became `pip.whl`, and the
         failure surfaced one stage later as a zip error from running it,
-        which said nothing about the download.  See issue `I.fpfipe`.
+        which said nothing about the download.  `nopip8` keeps `ezpkg`'s
+        wheel the same way.  See issue `I.fpfipe`.
         """
         # Half of every wheel, so the digest PyPI lists cannot match.
         if not selected(SHIPPING):
@@ -1794,25 +1796,22 @@ class EZPkgTest(unittest.TestCase):
         home: Path = Path(tempfile.mkdtemp(prefix="damaged-", dir=self.root))
         done: subprocess.CompletedProcess[str] = self.run_case(SHIPPING, home)
         self.assertNotEqual(done.returncode, 0)
-        self.assertIn("download pip failed: ValueError(", done.stderr)
+        self.assertIn(f"download {MODULE} failed: ValueError(", done.stderr)
         self.assertIn("fails its SHA-256 check", done.stderr)
-        self.assertFalse((home / ".ezpkg" / "pip.whl").exists())
+        self.assertFalse((home / ".ezpkg" / f"{MODULE}.whl").exists())
 
-    @runs_cases
-    def test_the_shipping_case_chooses_a_pip_this_python_runs(self) -> None:
+    def test_own_pip_chooses_a_pip_this_python_runs(self) -> None:
         """The newest `pip` whose floor this Python meets, not the newest.
 
         Three `pip` releases: an old one for any Python 3, one whose
         floor is exactly this Python, and the newest, which wants a
         Python that does not exist yet.  The middle one is right.  When
         `pip` drops a Python, this is what keeps every pasted bootstrap
-        on that Python working; see issue `I.bfnprp`.  The releases are
-        stand-ins that cannot install anything, so the case fails at the
-        next stage, and the wheel it kept says which one it chose.
+        on that Python working; see issue `I.bfnprp`.  `nopip7` chose
+        here; since `nopip8`, `EZPkg.own_pip` does, from the index
+        `PIP_INDEX_URL` names (`json_api`).
         """
         # Stand-in `pip` wheels, uploaded oldest to newest.
-        if not selected(SHIPPING):
-            self.skipTest(f"{SHIPPING} is not selected")
         minor: int = sys.version_info[1]
         offered: list[tuple[str, str]] = [("97.0", ">=3.0"),
                                           ("98.0", f">=3.{minor}"),
@@ -1836,11 +1835,12 @@ class EZPkgTest(unittest.TestCase):
         self.addCleanup(server.server_close)
         self.addCleanup(server.shutdown)
 
-        # It gets past choosing and downloading, then cannot install.
+        # Only the real `~/.ezpkg` gets one, so a fresh home stands in.
         home: Path = Path(tempfile.mkdtemp(prefix="choose-", dir=self.root))
-        done: subprocess.CompletedProcess[str] = run_bootstrap_case(
-            SHIPPING, home, url)
-        self.assertIn(f"install {MODULE} failed", done.stderr)
+        with unittest.mock.patch.dict(os.environ, {
+                "HOME": str(home), "USERPROFILE": str(home),
+                "PIP_INDEX_URL": url}):
+            ezpkg.EZPkg(home / ".ezpkg").own_pip()
         with zipfile.ZipFile(home / ".ezpkg" / "pip.whl") as kept:
             self.assertIn("pip-98.0.dist-info/METADATA", kept.namelist())
 
@@ -2670,10 +2670,10 @@ class InstallTest(unittest.TestCase):
 
         This is the claim `README.md` makes: Python and the pasted
         bootstrap are all that is needed.  An interpreter that has never
-        had `pip` stands in for such a machine.  `nopip4` fetches `pip`'s
-        wheel, keeps it as `pip.whl`, installs this project with it, and
-        `EZPkg` then uses that same copy to fetch what the program
-        declares.
+        had `pip` stands in for such a machine.  `nopip8` fetches this
+        project's wheel and imports from it, and `EZPkg` then fetches
+        `pip`'s wheel, keeps it as `pip.whl`, and uses it to fetch what
+        the program declares.
         """
         # Only when the shipping case is wanted; see `selected`.
         if not selected(SHIPPING):
@@ -2698,13 +2698,13 @@ class InstallTest(unittest.TestCase):
             text=True, check=False)
         self.assertNotEqual(missing.returncode, 0, "pip is not missing")
 
-        # The bootstrap installs this project and leaves `pip` behind.
+        # The bootstrap fetches this project's wheel.
         home: Path = self.root / "bare-home"
         done: subprocess.CompletedProcess[str] = run_bootstrap_case(
             SHIPPING, home, self.index_url, python=str(python))
         self.assertEqual(done.returncode, 0, done.stderr[-400:])
         cache: Path = home / ".ezpkg"
-        self.assertTrue((cache / "pip.whl").is_file())
+        self.assertTrue((cache / f"{MODULE}.whl").is_file())
 
         # The program's own declaration is fetched with that same copy.
         program: Path = self.root / "bare-program" / "prog.py"
@@ -2714,7 +2714,7 @@ class InstallTest(unittest.TestCase):
             '# dependencies = ["widget"]\n'
             "# ///\n"
             "import sys\n"
-            f"sys.path.insert(0, {str(cache)!r})\n"
+            f"sys.path.insert(0, {str(cache / f'{MODULE}.whl')!r})\n"
             "import ezpkg\n"
             "ezpkg.EZPkg().install()\n"
             "import widget\n"
@@ -2727,6 +2727,7 @@ class InstallTest(unittest.TestCase):
             capture_output=True, text=True, check=False)
         self.assertEqual(ran.returncode, 0, ran.stderr[-400:])
         self.assertEqual(ran.stdout.strip(), "1.2.3")
+        self.assertTrue((cache / "pip.whl").is_file())
 
     def test_install_passes_argv_to_pip(self) -> None:
         """Extra arguments reach `pip install`."""
@@ -3410,7 +3411,7 @@ class InstallTest(unittest.TestCase):
         done: subprocess.CompletedProcess[str] = self.run_program(program)
         self.assertEqual(done.returncode, 0, done.stderr[-300:])
         self.assertEqual(done.stdout.strip(), "1.2.3")
-        self.assertNotIn("not approved", done.stderr)
+        self.assertNotIn("is not in the `checksums`", done.stderr)
 
     def test_an_unapproved_wheel_is_refused(self) -> None:
         """A dependency changed without reapproval stops the program.
@@ -3429,7 +3430,7 @@ class InstallTest(unittest.TestCase):
             "install('widget')", "install('sprocket')"))
         done: subprocess.CompletedProcess[str] = self.run_program(program)
         self.assertNotEqual(done.returncode, 0)
-        self.assertIn("is not approved", done.stderr)
+        self.assertIn("is not in the `checksums`", done.stderr)
         self.assertIn("sprocket-2.0.0", done.stderr)
 
         # And nothing was unpacked, because the refusal comes first.
@@ -3518,7 +3519,7 @@ class InstallTest(unittest.TestCase):
             program.read_text())
         assert metadata is not None
         when: str = metadata["tool"]["uv"]["exclude-newer"]
-        self.assertEqual(list(metadata["tool"]["ezpkg"]["approved"][0]
+        self.assertEqual(list(metadata["tool"]["ezpkg"]["checksums"][0]
                               .split()[:1]), ["widget==1.2.3"])
         self.assertEqual(metadata["dependencies"], ["widget"])
 
@@ -3972,6 +3973,23 @@ class InstallTest(unittest.TestCase):
         self.assertEqual(ezpkg.EZPkg(root).details([wheel]),
                          ["1. cowsay 6.1: Moo."])
 
+        # `nopip8` passes nothing: its `ezpkg.whl`, in a cache with
+        # nothing installed yet, is what says a first run.
+        fetched: Path = self.root / "fetched-cache"
+        fetched.mkdir()
+        shutil.copyfile(root / "pip.whl", fetched / "pip.whl")
+        with zipfile.ZipFile(fetched / "ezpkg.whl", "w") as archive:
+            archive.writestr("ezpkg-0.0.2.dist-info/METADATA",
+                             "Metadata-Version: 2.1\nName: ezpkg\n"
+                             "Version: 0.0.2\nSummary: Easier.\n")
+        first: ezpkg.EZPkg = ezpkg.EZPkg(fetched)
+        self.assertTrue(first.newly_filled())
+        self.assertEqual(first.details([wheel]), [
+            "1. pip 26.2.1 (used by `ezpkg`): The tool.",
+            "2. ezpkg 0.0.2: Easier.", "3. cowsay 6.1: Moo."])
+        (fetched / "versions").mkdir()
+        self.assertFalse(ezpkg.EZPkg(fetched).newly_filled())
+
     def test_asking_for_detail_is_not_a_typo(self) -> None:
         """`?` does not spend the patience meant for mistakes.
 
@@ -4061,21 +4079,22 @@ class InstallTest(unittest.TestCase):
         self.assertEqual(seen.count(PROMPT), ezpkg.ATTEMPTS)
         self.assertIn("declined", seen)
 
-    def test_approvals_replace_the_question(self) -> None:
-        """An approved set is verified in silence, not asked about.
+    def test_checksums_do_not_replace_the_question(self) -> None:
+        """A program carrying its author's `checksums` still asks.
 
-        The author's judgement replaces the recipient's prompt rather
-        than being added to it: the recipient cannot judge a package
-        name, and somebody who could already did.
+        The checksums say which files; only the person running the
+        program can say whether they trust its author, so an emailed
+        program asks its new user like any other (Wayne, 2026-10-20).
         """
-        # Record approvals, empty the cache, then run with a terminal.
-        program: Path = self.program("no_question", "widget")
+        # Record checksums, empty the cache, then run with a terminal.
+        program: Path = self.program("still_asked", "widget")
         self.assertEqual(
             self.run_as_developer(program).returncode, 0)
+        self.assertIsNotNone(self.approvals_of(program))
         shutil.rmtree(program.parent / "cache")
         seen: str = self.answer_on_a_terminal(program, b"n\n")
-        self.assertNotIn(PROMPT, seen)
-        self.assertIn("1.2.3", seen)
+        self.assertIn(PROMPT, seen)
+        self.assertNotIn("1.2.3", seen)
 
     def test_without_a_terminal_nothing_is_asked(self) -> None:
         """No terminal means nobody to ask, so the fetch goes ahead.
@@ -4920,7 +4939,9 @@ class InstallTest(unittest.TestCase):
         from this tree; a `zipapp` needs the real thing, because the
         build takes it out.  `ezpkg` cannot be fetched from the local
         index the way the bootstrap fetches it from PyPI, so the HOME
-        already holds it where the bootstrap looks, as a package.
+        already holds it where `nopip8` keeps it, `ezpkg.whl`, holding
+        this tree's `ezpkg.py` and no `.dist-info`, as a source copy
+        would (`from_wheel`); `stamp_wheel` adds one.
 
         Arguments:
         * `name` (`str`):
@@ -4936,16 +4957,29 @@ class InstallTest(unittest.TestCase):
         # Part 1, Part 2's three shared imports, Part 3, then the rest.
         where: Path = self.root / name
         home: Path = where / "home"
-        installed: Path = home / ".ezpkg" / MODULE
-        installed.mkdir(parents=True)
-        shutil.copyfile(Path(__file__).resolve().parent / f"{MODULE}.py",
-                        installed / "__init__.py")
+        (home / ".ezpkg").mkdir(parents=True)
+        with zipfile.ZipFile(home / ".ezpkg" / f"{MODULE}.whl", "w") as kept:
+            kept.write(Path(__file__).resolve().parent / f"{MODULE}.py",
+                       f"{MODULE}.py")
         program: Path = where / "prog.py"
         program.write_text(
             f"# /// script\n# {block}\n# ///\n"
             "import importlib\nimport pathlib\nimport sys\n"
             + bootstrap.pasted(SHIPPING) + tail + "\n")
         return program, home
+
+    def stamp_wheel(self, home: Path) -> None:
+        """Make `bootstrapped_program`'s `ezpkg.whl` a wheel's, metadata and all.
+
+        Arguments:
+        * `home` (`Path`):
+          The HOME it returned.
+        """
+        # The `.dist-info` is what says the copy came from a wheel.
+        with zipfile.ZipFile(home / ".ezpkg" / f"{MODULE}.whl", "a") as kept:
+            kept.writestr(f"{DISTRIBUTION}-{VERSION}.dist-info/METADATA",
+                          f"Metadata-Version: 2.1\nName: {DISTRIBUTION}\n"
+                          f"Version: {VERSION}\n")
 
     def test_export_zipapp_after_approving_in_another_run(self) -> None:
         """An export finds what an ordinary, locked run fetched.
@@ -4989,11 +5023,7 @@ class InstallTest(unittest.TestCase):
         program, home = self.bootstrapped_program(
             "pinned", 'dependencies = ["ezpkg>=0.0.1.dev0", "needy"]',
             "import needy\nprint(needy.__version__)")
-        info: Path = home / ".ezpkg" / f"{DISTRIBUTION}-{VERSION}.dist-info"
-        info.mkdir()
-        (info / "METADATA").write_text(
-            f"Metadata-Version: 2.1\nName: {DISTRIBUTION}\n"
-            f"Version: {VERSION}\n")
+        self.stamp_wheel(home)
         done: subprocess.CompletedProcess[str] = self.run_as_developer(
             program, HOME=str(home))
         self.assertEqual(done.returncode, 0, done.stderr[-400:])
@@ -5060,11 +5090,7 @@ class InstallTest(unittest.TestCase):
             "imports_ezpkg",
             'dependencies = ["ezpkg>=0.0.1.dev0", "needy"]',
             f"import needy\nimport {MODULE}\nprint({MODULE}.__version__)")
-        info: Path = home / ".ezpkg" / f"{DISTRIBUTION}-{VERSION}.dist-info"
-        info.mkdir()
-        (info / "METADATA").write_text(
-            f"Metadata-Version: 2.1\nName: {DISTRIBUTION}\n"
-            f"Version: {VERSION}\n")
+        self.stamp_wheel(home)
         done: subprocess.CompletedProcess[str] = self.run_as_developer(
             program, HOME=str(home))
         self.assertEqual(done.returncode, 0, done.stderr[-400:])
@@ -5181,7 +5207,7 @@ class InstallTest(unittest.TestCase):
         cases: list[tuple[list[str], dict[str, str], bool, str]] = [
             ([native], {"fast==1.0": "0" * 16}, False, "compiled"),
             ([pure], {}, False, "no approvals"),
-            ([pure], {"other==1.0": "0" * 16}, False, "not approved"),
+            ([pure], {"other==1.0": "0" * 16}, False, "not in the `checksums`"),
             ([pure], {"hooked==1.0": "0" * 16}, True, ".pth file"),
         ]
         wheels: list[str]
@@ -5723,50 +5749,53 @@ class InstallTest(unittest.TestCase):
         self.assertEqual(self.declared_now(program),
                          ["widget", "sprocket>=2.0.0,<3"])
 
-    def test_an_entry_added_by_hand_is_marked(self) -> None:
-        """An entry no import ever explained is kept, and marked.
+    def test_an_entry_nothing_loads_goes_after_a_run(self) -> None:
+        """An entry nothing imports goes once a recorded run shows it unused.
 
-        Any comment on an entry keeps it for good, so the developer can
-        reword the mark in their own words (`T.abfd`, S3.4).
+        As the Quick Start's `cowsay` does, pasted in with the bootstrap:
+        kept until a run that declared it has been recorded, then removed,
+        since that run never loaded it.  A comment keeps an entry for good
+        (Wayne, 2026-10-20; `T.abfd`).
         """
-        # Never imported: marked, not removed.
+        # Declared on this run for the first time: kept, with no mark.
         program: Path = self.synced_program(
-            "kept", '["widget", "sprocket"]', "")
+            "unloaded", '["widget", "sprocket"]', "")
         done: subprocess.CompletedProcess[str] = self.run_program(program)
         self.assertEqual((done.returncode, done.stderr), (0, ""))
-        self.assertIn('#   "sprocket",  # not imported: say why it is '
-                      'needed\n', program.read_text())
+        self.assertEqual(self.declared_now(program), ["widget", "sprocket"])
+        self.assertNotIn("#   \"sprocket\",  #", program.read_text())
+
+        # That run declared it and never loaded it: gone, silently.
+        done = self.run_program(program)
+        self.assertEqual((done.returncode, done.stdout, done.stderr),
+                         (0, "ran\n", ""))
+        self.assertEqual(self.declared_now(program), ["widget"])
+
+        # Added back with a comment, it stays, run after run.
+        program.write_text(program.read_text().replace(
+            'dependencies = ["widget"]',
+            'dependencies = [\n#   "widget",\n#   "sprocket",  # for the build\n# ]'))
+        for _ in range(2):
+            done = self.run_program(program)
+            self.assertEqual((done.returncode, done.stderr), (0, ""))
         self.assertEqual(self.declared_now(program), ["widget", "sprocket"])
 
-        # Reworded, and still kept, through other changes too.
-        program.write_text(program.read_text().replace(
-            "# not imported: say why it is needed", "# for the build").replace(
-            "import widget\n", "import widget\nimport needy\n"))
-        done = self.run_program(program)
-        self.assertEqual((done.returncode, done.stderr), (0, ""))
-        self.assertEqual(self.declared_now(program),
-                         ["widget", "sprocket", "needy>=1.0.0,<2"])
-        self.assertIn('#   "sprocket",  # for the build\n',
-                      program.read_text())
+    def test_an_entry_a_run_loads_stays(self) -> None:
+        """An entry nothing imports stays while recent runs load it.
 
-    def test_a_mark_goes_once_an_import_explains_it(self) -> None:
-        """A mark `ezpkg` wrote goes when an import comes to explain it.
-
-        Only a comment that is exactly one of `ezpkg`'s marks; the
-        developer's own words stay (Wayne, S3.1e).
+        As `matplotlib` loads its backend: the import is nowhere in the
+        source, but the package is in `sys.modules` when the run ends
+        (`note_loaded`).
         """
-        # Marked, then imported: the mark goes, the entry stays.
+        # Loaded by a name the source scan cannot see.
         program: Path = self.synced_program(
-            "unmarked", '["widget", "sprocket"]', "")
-        done: subprocess.CompletedProcess[str] = self.run_program(program)
-        self.assertEqual((done.returncode, done.stderr), (0, ""))
-        self.assertIn("# not imported: say why it is needed",
-                      program.read_text())
-        program.write_text(program.read_text().replace(
-            "import widget\n", "import widget\nimport sprocket\n"))
-        done = self.run_program(program)
-        self.assertEqual((done.returncode, done.stderr), (0, ""))
-        self.assertNotIn("# not imported", program.read_text())
+            "loaded", '["widget", "sprocket"]',
+            'import importlib\nimportlib.import_module("".join(["spr", '
+            '"ocket"]))')
+        for _ in range(3):
+            done: subprocess.CompletedProcess[str] = self.run_program(
+                program)
+            self.assertEqual((done.returncode, done.stderr), (0, ""))
         self.assertEqual(self.declared_now(program), ["widget", "sprocket"])
 
     def test_a_developers_failed_fetch_is_one_line(self) -> None:
@@ -5827,7 +5856,7 @@ class InstallTest(unittest.TestCase):
 
     def test_report_prints_a_line_per_change(self) -> None:
         """`verbosity = "medium"` names each change to `dependencies`."""
-        # Two additions, a misspelt one, and a mark.
+        # Two additions and a misspelt one.
         program: Path = self.synced_program(
             "reported", '["widget", "sprocket"]',
             "import needy\nimport bogus_package",
@@ -5838,9 +5867,6 @@ class InstallTest(unittest.TestCase):
                       "`bogus_package`", flat)
         self.assertRegex(flat, r'Added "needy>=1\.0\.0,<2" to '
                          r"`prog\.py`'s `dependencies` \(line \d+\)\.")
-        self.assertRegex(flat, r'Marked "sprocket" in `prog\.py`\'s '
-                         r"`dependencies` \(line \d+\) `# not imported: say "
-                         r"why it is needed`\.")
         self.assertNotIn("ezpkg: ", done.stderr)
         self.assertIn("No module named 'bogus_package'", done.stderr)
         self.assertEqual(self.declared_now(program),
@@ -6410,44 +6436,6 @@ class BootstrapCheckTest(unittest.TestCase):
         self.assertEqual(ezpkg.bootstrap_fingerprint(block),
                          list(ezpkg.BOOTSTRAPS)[-1])
 
-    def test_the_enabling_copy_is_current(self) -> None:
-        """`README.md`'s copy-from bootstrap matches `quick_start.py`.
-
-        "Enabling `EZPkg` for Your Program" shows the bootstrap on its
-        own, and that is the copy readers paste into their programs.
-        Its Part 1 and docstring are placeholders, so only Part 2's
-        imports and Part 3's code are compared, the code by fingerprint.
-        See `T.trcb`.
-        """
-        # The section's first Python block is the copy readers take.
-        here: Path = Path(__file__).resolve().parent
-        program: str = (here / "quick_start.py").read_text(encoding="utf-8")
-        readme: str = (here / "README.md").read_text(encoding="utf-8")
-        heading: str = "\n## Enabling `EZPkg` for Your Program\n"
-        self.assertIn(heading, readme)
-        section: str = readme.split(heading, 1)[1].split("\n## ", 1)[0]
-        self.assertIn("```python\n", section)
-        enabling: str = section.split("```python\n", 1)[1].split("```", 1)[0]
-
-        # Part 2 is the import lines between the Part 2 and Part 3
-        # comments, which must be the same lines in the same order.
-        def imports(text: str) -> list[str]:
-            part2: str = text.split("# Part 2:", 1)[1].split("# Part 3:")[0]
-            return [line for line in part2.splitlines()
-                    if line.startswith("import ")]
-
-        self.assertTrue(imports(program))
-        self.assertEqual(imports(enabling), imports(program))
-
-        # Part 3 is found the way a running program's would be.
-        ours: str | None = ezpkg.find_bootstrap(enabling)
-        theirs: str | None = ezpkg.find_bootstrap(program)
-        assert ours is not None and theirs is not None
-        self.assertEqual(ezpkg.bootstrap_fingerprint(ours),
-                         ezpkg.bootstrap_fingerprint(theirs),
-                         "the bootstrap in README.md's \"Enabling\" section "
-                         "is not the one in quick_start.py")
-
     def test_layout_and_comments_do_not_change_the_fingerprint(self) -> None:
         """Re-indenting, re-wrapping and commenting leave it the same."""
         # Three cosmetic changes, then one real one.
@@ -6455,7 +6443,7 @@ class BootstrapCheckTest(unittest.TestCase):
         same: str = ezpkg.bootstrap_fingerprint(block)
         indented: str = textwrap.indent(block, "    ")
         commented: str = block.replace(
-            "m = n = None\n", "m = n = None  # Fetch it.\n", 1)
+            "except ImportError: pass\n", "except ImportError: pass  # Fetch it.\n", 1)
         rewrapped: str = block.replace(
             "; t = pathlib", ";\\\n        t = pathlib", 1)
         for variant in (indented, commented, rewrapped):
@@ -6561,7 +6549,7 @@ class BootstrapCheckTest(unittest.TestCase):
                          first.stderr)
         self.assertRegex(" ".join(first.stderr.split()),
                          r"`prog\.py` carries the bootstrap `nopip6` \(lines "
-                         r"6-\d+\), but `ezpkg` now has `nopip7`\. The next "
+                         r"6-\d+\), but `ezpkg` now has `nopip8`\. The next "
                          r"release replaces it\.")
         second: subprocess.CompletedProcess[str] = run()
         self.assertEqual((second.returncode, second.stderr), (0, ""))
@@ -6586,7 +6574,7 @@ class BootstrapCheckTest(unittest.TestCase):
                          released.stderr)
         flat: str = " ".join(released.stderr.split())
         self.assertRegex(flat, r"Replaced the bootstrap `nopip6` \(lines "
-                         r"6-\d+ of `prog\.py`\) with `nopip7`\.")
+                         r"6-\d+ of `prog\.py`\) with `nopip8`\.")
         self.assertIn("Released `prog.py` 1.0.0.", flat)
         text: str = program.read_text()
         self.assertIn("if False:\n    try:", text)
@@ -6602,16 +6590,16 @@ class BootstrapCheckTest(unittest.TestCase):
     def test_an_edit_is_refused_where_it_is(self) -> None:
         """An edited bootstrap is refused, naming the line, indented or not.
 
-        Wayne's dogfood edit of 2026-10-16, `"choose pipx"`, which the
+        Wayne's dogfood edit of 2026-10-16, `"download ezpkgx"`, which the
         bootstrap survives, so only the check can notice.  See `T.reb`.
         """
         # The line is the program's, wherever the paste is indented.
         block: str = self.shipping()
-        self.assertIn('"choose pip"', block)
-        edited: str = block.replace('"choose pip"', '"choose pipx"', 1)
+        self.assertIn('"download ezpkg"', block)
+        edited: str = block.replace('"download ezpkg"', '"download ezpkgx"', 1)
         offset: int = next(index for index, line in
                            enumerate(edited.splitlines())
-                           if "choose pipx" in line)
+                           if "download ezpkgx" in line)
         indent: str
         for indent in ("", "    "):
             with self.subTest(indent=len(indent)):
@@ -6619,15 +6607,16 @@ class BootstrapCheckTest(unittest.TestCase):
                              + textwrap.indent(edited, indent))
                 first: int = 3 if indent else 2
                 refusal: str | None = ezpkg.bootstrap_refusal(
-                    Path("prog.py"), text, "nopip7")
+                    Path("prog.py"), text, "nopip8")
                 assert refusal is not None
                 self.assertIn("ezpkg: prog.py: its bootstrap (lines "
                               f"{first}-", refusal)
                 self.assertIn(
-                    f'  line {first + offset}: s = "choose pipx"; v = '
-                    "sys.version_info[1]\n"
-                    '  nopip7:  s = "choose pip"; v = sys.version_info[1]\n'
-                    "                          |\n", refusal)
+                    f'  line {first + offset}: s = "download ezpkgx"; d = '
+                    'g("https://pypi.org/pypi/ezpkg/json")\n'
+                    '  nopip8:  s = "download ezpkg"; d = '
+                    'g("https://pypi.org/pypi/ezpkg/json")\n'
+                    "                              |\n", refusal)
                 self.assertTrue(refusal.endswith("then run it again."))
 
     def test_only_indentation_and_staleness_pass(self) -> None:
@@ -6640,8 +6629,8 @@ class BootstrapCheckTest(unittest.TestCase):
         # Published code, wherever it is indented.
         block: str = self.shipping()
         fine: list[tuple[str, str]] = [
-            (block, "nopip7"),
-            ("if True:\n" + textwrap.indent(block, "    "), "nopip7"),
+            (block, "nopip8"),
+            ("if True:\n" + textwrap.indent(block, "    "), "nopip8"),
             (ezpkg.OLD_BOOTSTRAP_TEXTS["nopip5 of 2026-10-12"], "nopip5"),
         ]
         text: str
@@ -6652,17 +6641,18 @@ class BootstrapCheckTest(unittest.TestCase):
                     Path("prog.py"), text, name))
 
         # Anything else, however harmless.
-        self.assertIn("m = n = None\n", block)
-        self.assertIn("; v = ", block)
+        self.assertIn("except ImportError: pass\n", block)
+        self.assertIn("; d = ", block)
         edits: list[str] = [
-            block.replace("m = n = None\n", "m = n = None  # Mine.\n", 1),
-            block.replace("; v = ", " ; v = ", 1),
-            block.replace("; v = ", ";  v = ", 1),
+            block.replace("except ImportError: pass\n",
+                          "except ImportError: pass  # Mine.\n", 1),
+            block.replace("; d = ", " ; d = ", 1),
+            block.replace("; d = ", ";  d = ", 1),
         ]
         for text in edits:
             with self.subTest(edit=text):
                 self.assertIsNotNone(ezpkg.bootstrap_refusal(
-                    Path("prog.py"), text, "nopip7"))
+                    Path("prog.py"), text, "nopip8"))
 
     def test_added_and_missing_lines_say_where(self) -> None:
         """A line only one side has is named, and long lists are cut."""
@@ -6674,13 +6664,13 @@ class BootstrapCheckTest(unittest.TestCase):
         added: str = "".join([lines[0], '    print("hi")\n', *lines[1:]])
         dropped: str = "".join([*lines[:gone], *lines[gone + 1:]])
         more: str | None = ezpkg.bootstrap_refusal(Path("prog.py"), added,
-                                                   "nopip7")
+                                                   "nopip8")
         fewer: str | None = ezpkg.bootstrap_refusal(Path("prog.py"),
-                                                    dropped, "nopip7")
+                                                    dropped, "nopip8")
         assert more is not None and fewer is not None
         self.assertIn('  line 2:  print("hi")\n'
-                      "           (not in nopip7)\n", more)
-        self.assertIn(f"  nopip7:  {lines[gone].strip()}\n", fewer)
+                      "           (not in nopip8)\n", more)
+        self.assertIn(f"  nopip8:  {lines[gone].strip()}\n", fewer)
         self.assertIn(f"(missing after line {gone})\n", fewer)
 
         # Seven changed lines show six, then a count.  Trailing space
@@ -6688,7 +6678,7 @@ class BootstrapCheckTest(unittest.TestCase):
         many: str = "".join(f"{line.rstrip()}  # Seven.\n" if 0 < index < 8
                             else line for index, line in enumerate(lines))
         cut: str | None = ezpkg.bootstrap_refusal(Path("prog.py"), many,
-                                                  "nopip7")
+                                                  "nopip8")
         assert cut is not None
         self.assertEqual(cut.count("|\n"), 6, cut)
         self.assertIn("  ... and 1 more\n", cut)
@@ -6716,7 +6706,7 @@ class BootstrapCheckTest(unittest.TestCase):
 
         # A caller naming a bootstrap the program does not have.
         missing: str | None = ezpkg.bootstrap_refusal(
-            Path("prog.py"), "print('hello')\n", "nopip7")
+            Path("prog.py"), "print('hello')\n", "nopip8")
         assert missing is not None
         self.assertIn("no ezpkg bootstrap was found", missing)
 
@@ -6837,8 +6827,8 @@ class BootstrapCheckTest(unittest.TestCase):
         """`install(bootstrap=...)` exits with the refusal, unless unchecked."""
         # The paste must not run, so it sits under `if False:`, and the
         # program makes the call the bootstrap would have made.
-        edited: str = self.shipping().replace('"choose pip"',
-                                              '"choose pipx"', 1)
+        edited: str = self.shipping().replace('"download ezpkg"',
+                                              '"download ezpkgx"', 1)
         program: Path = self.root / "prog.py"
         program.write_text(
             "import sys\n"
@@ -7015,7 +7005,7 @@ class CoverageToolTest(unittest.TestCase):
         """Runs that never finished are named rather than ignored."""
         # An empty directory is missing everything the default selects.
         text: str = ezpkg_coverage.compare(self.root)
-        self.assertIn("No counts for: baseline, nopip1, nopip7.", text)
+        self.assertIn("No counts for: baseline, nopip1, nopip8.", text)
 
     def test_report_keeps_the_counts(self) -> None:
         """`report` saves what `compare` later reads back."""
@@ -7748,27 +7738,22 @@ class MetadataTest(unittest.TestCase):
         self.assertTrue(ezpkg.meets(ezpkg.__version__,
                                     entry.removeprefix("ezpkg")))
 
-    def test_needed_by_names_the_extra(self) -> None:
-        """An optional extra of another entry is marked with its name."""
-        # A distribution whose `fancy` extra needs `guest`.
+    def test_unused_lately_needs_the_latest_run(self) -> None:
+        """Unused means the latest run declared it and no run loaded it."""
+        # Nothing recorded: nothing is unused.
         with tempfile.TemporaryDirectory() as scratch:
-            info: Path = Path(scratch) / "host-1.0.dist-info"
-            info.mkdir()
-            (info / "METADATA").write_text(
-                "Metadata-Version: 2.1\nName: host\nVersion: 1.0\n"
-                "Requires-Dist: other\n"
-                'Requires-Dist: guest>=1; extra == "fancy"\n')
-            sys.path.insert(0, scratch)
-            try:
-                venv: ezpkg.EZPkg = ezpkg.EZPkg(Path(scratch) / "cache")
-                self.assertEqual(venv.needed_by("guest", ["host", "guest"]),
-                                 "# host needs this for fancy")
-                self.assertEqual(venv.needed_by("other", ["host", "other"]),
-                                 "# host needs this")
-                self.assertEqual(venv.needed_by("loner", ["host", "loner"]),
-                                 "# not imported: say why it is needed")
-            finally:
-                sys.path.remove(scratch)
+            venv: ezpkg.EZPkg = ezpkg.EZPkg(Path(scratch) / "cache")
+            self.assertEqual(venv.unused_lately({}), set())
+
+            # Declared by the latest run, loaded by an earlier one: kept.
+            runs: list[dict[str, list[str]]] = [
+                {"declared": ["a", "b"], "loaded": ["b"]},
+                {"declared": ["a", "b", "C"], "loaded": []}]
+            self.assertEqual(venv.unused_lately({"runs": runs}), {"a", "c"})
+
+            # Re-added after the latest run: not yet unused.
+            runs.append({"declared": ["b"], "loaded": []})
+            self.assertEqual(venv.unused_lately({"runs": runs}), set())
 
     def test_dependency_comments_survive_a_rewrite(self) -> None:
         """Each entry keeps its comment when `dependencies` is rewritten."""
@@ -7797,7 +7782,7 @@ class MetadataTest(unittest.TestCase):
                 ('bootstrap = "nopip9"\n',
                  ('prog.py.toml line 1: `bootstrap` must be "update" or a '
                   'published bootstrap, "nopip3", "nopip4", "nopip5", '
-                  '"nopip6" or "nopip7"')),
+                  '"nopip6", "nopip7" or "nopip8"')),
                 ("\nauto_dependencies = true\n",
                  ("prog.py.toml line 2: unknown setting `auto_dependencies` "
                  "(did you mean `auto-dependencies`?)")),
@@ -7852,7 +7837,7 @@ class MetadataTest(unittest.TestCase):
 
         # Read back, each part where it belongs.
         text: str = ("# /// script\n# dependencies = []\n# [tool.ezpkg]\n"
-                     + "".join(f"# approved = {line}\n" if number == 0
+                     + "".join(f"# checksums = {line}\n" if number == 0
                                else f"# {line}\n" for number, line
                                in enumerate(array.splitlines()))
                      + "# ///\n")
@@ -8416,7 +8401,7 @@ class LocatorTest(unittest.TestCase):
         self.assertIn("text= False", output)
 
     def test_approvals_live_in_part1(self) -> None:
-        """`approved` reads `[tool.ezpkg] approved` in the program's Part 1."""
+        """`approved` reads `[tool.ezpkg] checksums` in the program's Part 1."""
         # One package, as a developer's run writes it.
         program: Path = self.program(
             "inside",
@@ -8425,7 +8410,7 @@ class LocatorTest(unittest.TestCase):
             "print('approvals=', venv.approved())\n")
         program.write_text(
             "# /// script\n# dependencies = []\n# [tool.ezpkg]\n"
-            '# approved = [\n#   "widget==1.2.3  id:0123456789abcdef",\n'
+            '# checksums = [\n#   "widget==1.2.3  id:0123456789abcdef",\n'
             "# ]\n# ///\n" + program.read_text())
         output: str = self.run_program(str(program))
         self.assertIn("approvals= {'widget==1.2.3': '0123456789abcdef'}",
@@ -8453,7 +8438,7 @@ class LocatorTest(unittest.TestCase):
             "        print(tag, 'refused', error)\n")
         program.write_text(
             "# /// script\n# dependencies = []\n# [tool.ezpkg]\n"
-            '# approved = [\n#   "widget==1.2.3  id:0123456789abcdef'
+            '# checksums = [\n#   "widget==1.2.3  id:0123456789abcdef'
             '  tag:cp312-cp312-linux_x86_64",\n'
             "# ]\n# ///\n" + program.read_text())
         output: str = self.run_program(str(program))
@@ -8794,9 +8779,10 @@ class PyPITest(unittest.TestCase):
 
         What `README.md` promises, as close as it can be run before
         `ezpkg` is published.  An interpreter that has never had `pip`
-        runs `nopip3`, which chooses and fetches the real `pip` from the
-        real PyPI and checks its SHA-256; only `ezpkg` itself comes
-        from a local index, because no index has it yet.  A program
+        runs the shipping case for `ezpkg`, which comes from a local
+        index, because pypi.org does not have it yet; `EZPkg.own_pip`
+        then chooses and fetches the real `pip` from the real PyPI and
+        checks its SHA-256.  A program
         declaring `requests` then has `ezpkg` fetch it, its four
         dependencies with it, from the real PyPI, through that private
         `pip`, since the interpreter has no other.
@@ -8826,17 +8812,8 @@ class PyPITest(unittest.TestCase):
         self.addCleanup(server.shutdown)
         home: Path = self.root / "home"
         done: subprocess.CompletedProcess[str] = run_bootstrap_case(
-            SHIPPING, home, url,
-            {"BOOTSTRAP_JSON_API": "https://pypi.org/pypi"},
-            python=str(python))
+            SHIPPING, home, url, python=str(python))
         self.assertEqual(done.returncode, 0, done.stderr[-800:])
-
-        # The `pip` kept is PyPI's, not the copy the local index serves.
-        # Compared by content, because the local copy is named after this
-        # interpreter's own `pip`, which can be the very version PyPI has.
-        kept: bytes = (home / ".ezpkg" / "pip.whl").read_bytes()
-        self.assertNotEqual(hashlib.sha256(kept).hexdigest(),
-                            hashlib.sha256(pip_wheel()[1]).hexdigest())
 
         # A program that declares a real package, fetched from PyPI.
         cache: Path = home / ".ezpkg"
@@ -8846,7 +8823,7 @@ class PyPITest(unittest.TestCase):
             f'# dependencies = ["{self.REQUESTS}"]\n'
             "# ///\n"
             "import sys\n"
-            f"sys.path.insert(0, {str(cache)!r})\n"
+            f"sys.path.insert(0, {str(cache / f'{MODULE}.whl')!r})\n"
             "import ezpkg\n"
             "ezpkg.EZPkg().install()\n"
             "import requests\n"
@@ -8860,6 +8837,13 @@ class PyPITest(unittest.TestCase):
         self.assertEqual(ran.returncode, 0, ran.stderr[-800:])
         self.assertEqual(ran.stdout.strip(),
                          self.REQUESTS.partition("==")[2])
+
+        # The `pip` kept is PyPI's, not the copy the local index serves.
+        # Compared by content, because the local copy is named after this
+        # interpreter's own `pip`, which can be the very version PyPI has.
+        kept: bytes = (cache / "pip.whl").read_bytes()
+        self.assertNotEqual(hashlib.sha256(kept).hexdigest(),
+                            hashlib.sha256(pip_wheel()[1]).hexdigest())
 
     @runs_cases
     def test_the_matcher_handles_real_wheels(self) -> None:

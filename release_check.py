@@ -23,11 +23,14 @@ if the prompt never does.  Without it there is no terminal, and the
 prompt answers yes by itself.  See `I.owenabd`.
 
 * `pypi`:
-  Exactly what a stranger gets: the bootstrap fetches `ezpkg` itself.
+  Exactly what a stranger gets: the bootstrap fetches `ezpkg` itself,
+  the newest that pypi.org's JSON API names, which may lag an upload
+  by a few minutes.
 * `testpypi`:
-  Only the `ezpkg` wheel comes from test.pypi.org, downloaded here and
-  checked against its SHA-256; `pip` and `cowsay` still come from
-  pypi.org.  Anybody can upload to test.pypi.org, and its `cowsay` is a
+  Only the `ezpkg` wheel comes from test.pypi.org, downloaded here,
+  checked against its SHA-256 and put where `nopip8` keeps it,
+  `~/.ezpkg/ezpkg.whl`, since the bootstrap asks pypi.org only; `pip`
+  and `cowsay` still come from pypi.org.  Anybody can upload to test.pypi.org, and its `cowsay` is a
   stranger's, so the two indexes are never searched together.
 """
 
@@ -42,6 +45,7 @@ import tempfile
 import time
 import urllib.error
 import urllib.request
+import zipfile
 from pathlib import Path
 from typing import Any
 
@@ -289,8 +293,8 @@ def main() -> int:
     environment.update(HOME=str(home), USERPROFILE=str(home),
                        PIP_CONSTRAINT=str(constraint))
 
-    # For test.pypi.org, the one wheel is fetched here and offered to
-    # `pip` as a local file.
+    # For test.pypi.org, the one wheel is fetched here, kept where the
+    # bootstrap keeps it, and offered to `pip` as a local file.
     if target == "testpypi":
         wheels: Path = scratch / "wheels"
         wheels.mkdir()
@@ -303,6 +307,8 @@ def main() -> int:
             return 1
         (wheels / info["filename"]).write_bytes(data)
         environment["PIP_FIND_LINKS"] = str(wheels)
+        (home / ".ezpkg").mkdir()
+        (home / ".ezpkg" / "ezpkg.whl").write_bytes(data)
 
     # On a terminal the prompt is answered; with none it answers yes
     # by itself.
@@ -329,8 +335,15 @@ def main() -> int:
     sys.stdout.flush()
 
     # Passed only if it ran, the cow appeared and the right `ezpkg` did it.
+    # `nopip8` keeps `ezpkg` as `ezpkg.whl`; older bootstraps installed it.
     installed: list[str] = sorted(
         path.name for path in (home / ".ezpkg").glob("ezpkg-*.dist-info"))
+    kept: Path = home / ".ezpkg" / "ezpkg.whl"
+    if kept.is_file():
+        with zipfile.ZipFile(kept) as archive:
+            installed += sorted({
+                name.split("/")[0] for name in archive.namelist()
+                if name.endswith(".dist-info/METADATA")})
     problems: list[str] = []
     if status != 0:
         problems.append(f"exit status {status}")

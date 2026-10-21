@@ -131,6 +131,8 @@ user would type.  The real `~/.ezpkg` is never touched.
 | nopip7 | as nopip6,    | 4       | 39    | 42    | -      | -      | -      |
 |        | pip output    |         |       |       |        |        |        |
 |        | captured      |         |       |       |        |        |        |
+| nopip8 | ezpkg wheel   | 4       | 29    | 32    | -      | -      | -      |
+|        | only, no pip  |         |       |       |        |        |        |
 +--------+---------------+---------+-------+-------+--------+--------+--------+
 
 What the columns mean, in the order they appear above:
@@ -334,6 +336,13 @@ that a stranger's first run starts with the download prompt (`T.abfd`);
 a failed install raises with `pip`'s own reason.  It costs one line.
 Its timings are not measured yet (`-`); it runs the same steps as
 `nopip6`.
+
+`nopip8` has shipped since 2026-10-20.  It fetches only `ezpkg`'s
+wheel, through the JSON API, checks its SHA-256, keeps it as
+`~/.ezpkg/ezpkg.whl` and imports `ezpkg` straight from it, since
+`ezpkg` is pure Python.  Choosing, fetching and running `pip` moved
+into `EZPkg.own_pip`, so Part 3 went from 35 lines to 24 (Wayne:
+`nopip7` barely fit on a screen).  Its timings are not measured yet.
 
 MIT No Attribution
 
@@ -1070,6 +1079,54 @@ def nopip7() -> None:
         raise SystemExit(f"{PACKAGE}: {s} failed: {x!r}")  # Do not edit try block!
 
 
+def nopip8() -> None:
+    """As nopip7, but only `ezpkg`'s wheel is fetched, and imported as is.
+
+    `nopip7`'s Part 3 was 35 lines, too long for a screen (Wayne,
+    2026-10-20).  Most of it chose, fetched and ran a `pip` only to
+    install `ezpkg`, which is pure Python, and a wheel of pure Python
+    imports straight off `sys.path`.  So this fetches the newest
+    `ezpkg` wheel named by the JSON API, checks its SHA-256, keeps it as
+    `~/.ezpkg/ezpkg.whl` and imports from it.  `EZPkg.own_pip` then
+    fetches the `pip` that `nopip7` chose here, before anything is
+    asked, and knows a first run by `ezpkg.whl` in a cache with nothing
+    installed yet.  See `T.abfd`.
+
+    Raises:
+    * `SystemExit`:
+      If any step fails, with one line saying what failed and why.
+    """
+    # Ensure `ezpkg` is downloaded.
+    import hashlib
+    import json
+    import subprocess
+    import urllib.request as req
+    try:  # Do not edit try block!  See https://pypi.org/project/ezpkg/
+        s = f"find {PACKAGE}"; t = pathlib.Path.home()/".ezpkg"; w = t/f"{PACKAGE}.whl"
+        def g(u):  # Fetch u, with curl if this Python has no certificates.
+            try: return req.urlopen(u, None, 60).read()
+            except req.URLError as y: z = y  # As on python.org's macOS Python.
+            try: return subprocess.run(["curl", "-fsSL", u],
+                                       capture_output=True, check=True).stdout
+            except Exception: raise z from None
+        try: m = None; m = importlib.import_module(PACKAGE)  # Already importable?
+        except ImportError: pass
+        if m is None and not w.is_file():  # Not downloaded yet.
+            s = f"download {PACKAGE}"; d = g(f"{JSON_API}/{PACKAGE}/json")
+            e = next(e for e in json.loads(d)["urls"] if e["url"][-4:] == ".whl")
+            r = g(e["url"])
+            if hashlib.sha256(r).hexdigest() != e["digests"]["sha256"]:
+                raise ValueError(f"{e['filename']} fails its SHA-256 check")
+            t.mkdir(parents=True, exist_ok=True); p = t/f"{PACKAGE}.part"
+            p.write_bytes(r); p.replace(w)  # The rename is atomic.
+        if m is None:  # Python imports it straight from the wheel.
+            s = f"import {PACKAGE}"; sys.path.insert(0, str(w))
+            m = importlib.import_module(PACKAGE)
+        s = "fetch packages"; m.EZPkg().install(bootstrap="nopip8")
+    except Exception as x:
+        raise SystemExit(f"{PACKAGE}: {s} failed: {x!r}")  # Do not edit try block!
+
+
 def main() -> None:
     """Run the single bootstrap mechanism named by `sys.argv[1]`.
 
@@ -1125,6 +1182,7 @@ MECHANISMS = {
     "nopip5": "as nopip4, pip to stderr",
     "nopip6": "as nopip5, curl if no certs",
     "nopip7": "as nopip6, pip output captured",
+    "nopip8": "ezpkg wheel only, no pip",
 }
 # Lines a case needs but does not contain: the three module level
 # imports.  This is the difference between `lines` and `paste`.

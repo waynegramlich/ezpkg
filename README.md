@@ -5,24 +5,34 @@ one-file Python program to a friend.  When said friend tried to run it,
 a few packages were missing, so the friend had to create a virtual environment
 and install them.  It worked, but it was annoying.  So the question became
 "Could this be made really easy for the recipient?"  Thus was born `EZPkg`,
-which lets a single-file Python program to download its missing packages all
+which lets a single-file Python program download its missing packages all
 by itself.
 
 To get started with `EZPkg`, you paste a modest bootstrap at the front of
 your program and go.  After that, `EZPkg` fetches your packages over the
-net on demand, without a virtual environment or the needing administrative
+net on demand, without a virtual environment or needing administrative
 privileges to install packages.  Once everything is working with `EZPkg`,
-then either email the single `.py` file to a friend or let `EZPkg` package it
+either email the single `.py` file to a friend or let `EZPkg` package it
 up in either `zipapp` or `uv` format.  Done!
 
-<!--Claude: Put a table of contents for the `##` headings here. -->
+<!--Cluade: Keep this table of contents in sync. with all `##` headers. -->
+Table of Contents:
+* [Quick Start](#quick-start)
+* [Running a Program That Uses `EZPkg`](#running-a-program-that-uses-ezpkg)
+* [Enabling `EZPkg` for a Program](#enabling-ezpkg-for-a-program)
+* [Releasing a Packaged Program](#releasing-a-packaged-program)
+* [The Bootstrap](#the-bootstrap)
+* [Miscellaneous](#miscellaneous)
+* [How `EZPkg` Actually Works](#how-ezpkg-actually-works)
+* [Missing Sections](#missing-sections)
+* [Conclusion](#conclusion)
 
 ## Quick Start
 
-To get started please take the program below and paste into a file named
-`quick_start.py` on your computer.  The bulk of this program is the `EZPkg`
-bootstrap that start at Part 3.  This is the "magic" that skips the hassle
-of virtual environments.
+To get started, please take the program below and paste it into a file
+named `quick_start.py` on your computer.  The bulk of this program is the
+`EZPkg` bootstrap that starts at Part 3.  This is the "magic" that skips the
+hassle of virtual environments.
 
 ```python
 #!/usr/bin/env python3
@@ -42,41 +52,31 @@ import subprocess
 import sys
 import urllib.request as req
 
-# All other needed imports are added after the EZPkg bootstrap.
+# All other imports are added after the EZPkg bootstrap.
 
 # Part 3: The EZPkg bootstrap.  Never edit it.
 try:  # Do not edit try block!  See https://pypi.org/project/ezpkg/
-    s = "find home"; t = pathlib.Path.home()/".ezpkg"; w = t/"pip.whl"
-    m = n = None
+    s = "find ezpkg"; t = pathlib.Path.home()/".ezpkg"; w = t/"ezpkg.whl"
     def g(u):  # Fetch u, with curl if this Python has no certificates.
         try: return req.urlopen(u, None, 60).read()
         except req.URLError as y: z = y  # As on python.org's macOS Python.
         try: return subprocess.run(["curl", "-fsSL", u],
                                    capture_output=True, check=True).stdout
         except Exception: raise z from None
-    try: m = importlib.import_module("ezpkg")  # Already importable?
+    try: m = None; m = importlib.import_module("ezpkg")  # Already importable?
     except ImportError: pass
-    if m is None and not (t/"ezpkg").is_dir():  # Not installed yet.
-        s = "choose pip"; v = sys.version_info[1]
-        d = json.loads(g("https://pypi.org/pypi/pip/json"))
-        e = max((e for f in d["releases"].values() for e in f  # Newest pip ...
-                 if e["url"][-4:] == ".whl" and not e["yanked"]
-                 and (q := e["requires_python"] or "")[:4] == ">=3."
-                 and "," not in q and int(q.split(".")[1]) <= v),
-                key=lambda e: e["upload_time"])  # ... whose floor we meet.
-        s = "download pip"; r = g(e["url"])
+    if m is None and not w.is_file():  # Not downloaded yet.
+        s = "download ezpkg"; d = g("https://pypi.org/pypi/ezpkg/json")
+        e = next(e for e in json.loads(d)["urls"] if e["url"][-4:] == ".whl")
+        r = g(e["url"])
         if hashlib.sha256(r).hexdigest() != e["digests"]["sha256"]:
             raise ValueError(f"{e['filename']} fails its SHA-256 check")
-        t.mkdir(parents=True, exist_ok=True); p = t/"pip.part"
+        t.mkdir(parents=True, exist_ok=True); p = t/"ezpkg.part"
         p.write_bytes(r); p.replace(w)  # The rename is atomic.
-        s = "install ezpkg"; n = subprocess.run([sys.executable, w/"pip",
-            "install", "--no-input", "-t", t, "--disable-pip-version-check",
-            "ezpkg"], check=False, capture_output=True, text=True)
-        if n.returncode: raise RuntimeError(n.stderr.strip()[-300:])
-    if m is None:
-        s = "import ezpkg"; sys.path.insert(0, str(t))
-        importlib.invalidate_caches(); m = importlib.import_module("ezpkg")
-    s = "fetch packages"; m.EZPkg(pip=n).install(bootstrap="nopip7")
+    if m is None:  # Python imports it straight from the wheel.
+        s = "import ezpkg"; sys.path.insert(0, str(w))
+        m = importlib.import_module("ezpkg")
+    s = "fetch packages"; m.EZPkg().install(bootstrap="nopip8")
 except Exception as x:
     raise SystemExit(f"ezpkg: {s} failed: {x!r}")  # Do not edit try block!
 
@@ -91,19 +91,20 @@ print(f"The cow above was drawn by cowsay {cowsay.__version__}.")
 ## Running a Program That Uses `EZPkg`
 
 Prior to running, you should verify Python 3.11 or greater is available:
-* Windows: `python --version`
+* Windows: `py --version`
 * Linux/macOS: `python3 --version`
 
 The `quick_start.py` program is run as follows:
-* Windows: `python quick_start.py`
+* Windows: `py quick_start.py`
 * Linux/macOS: `python3 quick_start.py`
 
-The first time the `quick_start.py` runs, it outputs following: 
+The first time `quick_start.py` runs, it prints the following:
 
 ```
 The author of `quick_start.py` has selected some software packages from the
 internet.  If you agree, they are retained in `~/.ezpkg`.  If you do not trust
-the author, answer `n` and `quick_start.py` will not be run.
+the author, answer `n` and `~/.ezpkg` will simply go away without running
+`quick_start.py`.
 
 Retain `~/.ezpkg` and run `quick_start.py`?
 [y=>Yes|n=>No|?=>Explain]:
@@ -111,76 +112,115 @@ Retain `~/.ezpkg` and run `quick_start.py`?
 
 The three options are:
 * `y=>Yes`:
-  This ensures the downloaded packages are retained prior to execution.
+  Answer `y`, and `EZPkg` lists what it retained in `~/.ezpkg`, and then
+  the program runs.
 * `n=>No`:
-  This ensures that newly downloaded packages are not retained and the program
-  terminates immediately thereafter.
-* `?=Explain`:
+  The newly downloaded packages are removed and the program does not run.
+  On the very first run, all of `~/.ezpkg` is removed.  Pressing Control-C
+  before Enter is the same as `n`.  Also, if there is no answer within 5
+  minutes, it is treated as `n`.
+* `?=>Explain`:
   This lists the packages in question and repeats the question.
 
-The next time the program is executed, you will not be nagged again.
+The prompt is suppressed if the program is being run without terminal input
+(e.g. `cron`).  In that case `y` is assumed.
+
+
+```
+The following 3 package(s) are now retained in `~/.ezpkg`:
+1. pip 26.2.1 (used by `ezpkg`): The PyPA recommended tool for installing Py...
+2. ezpkg 0.0.1: Automatic Package Fetching for One-File Programs
+3. cowsay 6.1: The famous cowsay for GNU/Linux is now available for python
+`ezpkg` (https://pypi.org/project/ezpkg/) manages `~/.ezpkg`.
+
+  ____________
+| EZPkg works! |
+  ============
+            \
+             \
+               ^__^
+               (oo)\_______
+               (__)\       )\/\
+                   ||----w |
+                   ||     ||
+The cow above was drawn by cowsay 6.1.
+```
+
+The list includes `pip` and `ezpkg` only on a machine's very first run,
+when they have just been fetched; `pip` is the tool `ezpkg` uses,
+not one the program's author chose.  On Windows, the full path, such as
+`C:\Users\YOUR_NAME\.ezpkg`, is shown instead of `~/.ezpkg`.
+
+Now run it a second time.  There is no question and no download, and it
+starts in a fraction of a second, because `cowsay` is already in
+`~/.ezpkg/`.  You will not be asked about this program again, even when
+its author sends you a newer version that needs more packages, as long as
+it replaces the old file.
 
 There are basically 3 things that can go wrong:
 * **No Network**:
-  Without a network connect or previously downloaded packages, the program
-  will terminate due missing packages.  Note that the network is only needed
-  to do the initial package downloading.  After that they are cached in the
-  `.ezpkg` directory and no further network access is needed.
+  The network is needed only when a program needs packages that are not
+  yet in `~/.ezpkg`.
 * **No Version Available**:
-  Packages have to be compiled for a specific computer instruction set.
-  If the appropriate version is not available, the program can not run.
-* **PIP Failure**:
-  PIP is a recursive acronym that stands for "PIP Installs Packages".
-  It is the fundamental tool used to fetch Python packages.  When this program
-  fails, there the error from PIP is printed out verbatim and exits.
+  The version the author chose is no longer on PyPI, or none was built
+  for your computer and Python.
+* **`pip` Failure**:
+  `pip` ("`pip` Installs Packages") is the standard tool that fetches
+  Python packages, and it can fail for other reasons.
 
-<!--Claude: What is last_failure.txt? -->
-Talk about last_failure.txt`:
+Each prints one line, and the program does not run.  The details, for the
+program's author, go into `~/.ezpkg/last_failure.txt`, which the line
+names (except for No Network).
 
-If you want remove the `.ezpkg` directory and its contents, do the following:
-* Windows: `python $HOME\.ezpkg\remove.py`
-* Linux/macOS: `python3 $HOME/.ezpkg/remove.py`
+If you want to remove the `~/.ezpkg` directory and its contents, do the
+following:
+* Windows (PowerShell): `py $HOME\.ezpkg\remove.py`
+* Windows (`cmd.exe`): `py %USERPROFILE%\.ezpkg\remove.py`
+* Linux/macOS: `python3 ~/.ezpkg/remove.py`
 
-One final note.  If you run `quick_start.py` again, the `.ezpkg` directory
-will return.
+It is always safe to remove `~/.ezpkg`.  One final note: if you run
+`quick_start.py` again, the `~/.ezpkg` directory will return.
 
 ## Enabling `EZPkg` for a Program
 
 The easiest way to enable `EZPkg` in your program is to copy and paste code
 from `quick_start.py`:
 
-1. Take Parts 1, 2, and 3 from `quick_start.py` immediately paste at the
-   front of the program, immediately after the `#!/usr/bin/env...` line,
+1. Take Parts 1, 2, and 3 from `quick_start.py` and paste them at the
+   front of your program, immediately after the `#!/usr/bin/env...` line,
    if it is present.
 
-2. Create an initial empty `EZPkg` `.toml` configuration program.
+2. Create an initial empty `EZPkg` `.toml` configuration file.
    Replace `PROG_NAME` with your actual program name:
-   * Windows: `ni PROG_NAME.py`
-   * Linux/macOS: `touch PROG_NAME.py`
+   * Windows (PowerShell): `ni PROG_NAME.py.toml`
+   * Linux/macOS: `touch PROG_NAME.py.toml`
 
 3. Execute your program the first time.  In most cases, your program will
-   simply work the first time.  Even if the program fails, an empty
-   `PROG_NAME.toml` file is created and populated with options.
+   simply work the first time.  Even if the program fails, the empty
+   `PROG_NAME.py.toml` file is filled in with every setting, each commented
+   out.
 
-The created `.py.toml` file contains options that can be edited to modify
-your `EZPkg` program behavior.
+The `PROG_NAME.py.toml` file contains settings that you can edit to modify
+how `EZPkg` treats your program; see [The `prog.py.toml`
+Settings](#progpytoml-settings) below.  Its presence alone is what
+makes you the program's developer.  Without this file, you are treated as
+a regular end user.
 
 ### What are packages and where do they come from?
 
-A package is a Python module that can be downloaded from the internet.
 The most common place to fetch packages from is the
-[PYthon Package Index](https://pypi.org), which is where the Python community
-submits freely accessible packages.
+[Python Package Index](https://pypi.org) (PyPI), which is where the Python
+community submits freely accessible packages.
 
 One thing about packages is that they get updated and improved over time.
 Thus, each improved package has a new version number.  Version numbers are
 important because some package versions are incompatible with others.
 
-The good news is that `EZPkg` scans your program for all `import` statements
-and does its best attempt to populate the `dependencies=[...]` portion of the
-metadata so you don't have to deal with all this hassle!  This data is needed
-if you want to package your program up to be compatible with `uv` (see further
-below.) 
+The good news is that `EZPkg` scans your program for all `import`
+statements and does its best to populate the `dependencies = [...]`
+portion of the metadata, so you don't have to deal with all this hassle!
+The `dependencies` list is what `EZPkg` fetches for whoever runs your
+program, and it is what `uv` reads as well (see further below).
 
 If you want a mountain of additional information, please see:
 * [Python Package Index](https://pypi.org/):
@@ -192,57 +232,212 @@ If you want a mountain of additional information, please see:
   This is the syntax used for the inline script metadata.
 * [Dependency specifiers](
   https://packaging.python.org/en/latest/specifications/dependency-specifiers/):
+  The syntax of each entry in `dependencies`.
 
 In short, the metadata is encoded in TOML format, where each TOML line is
-preceded by a `# `.  The `dependencies=[...]` section is the place where
+preceded by a `# `.  The `dependencies = [...]` section is the place where
 package version dependency specifiers are recorded.
 
+When `EZPkg` adds a package for you, it writes a range of versions too.
+The lower end is the version your program ran with, so it never meets an
+older one.  The upper end is cautious: before the next minor release for
+a version below 1 (`>=0.9.1,<0.10`), before the next major release for
+versions 1 to 9 (`>=2.32.3,<3`), and none at all for 10 or more
+(`>=25.2`), since such numbers are usually dates, as in `certifi
+2025.8.3`, rather than promises.  An entry with no version at all is given
+a range the same way when you make a release.  A range you wrote yourself
+is never changed.
 
-<!--Claude: Please attempt to write a summary of the EZPkg TOML commands in
-one section below.  Remove from `### Verbosity` up to, but not including, `## Realising a Program` -->
+Below `dependencies`, `EZPkg` itself writes two more tables into Part 1:
+`[tool.ezpkg]`, whose `checksums` list records the exact version of every
+package your program ran with, and a checksum of each; and `[tool.uv]`,
+whose `exclude-newer` date freezes the versions.  Leave both to `EZPkg`.
+To upgrade every package to today's versions, delete the `exclude-newer`
+line and run the program again.
 
-### Verbosity
+### `prog.py.toml` Settings
 
-<!-- none, low, medium, high, with what each shows (ux19, ux21). -->
+On the first run, `EZPkg` fills the empty `prog.py.toml` with every
+setting, each commented out, with a line saying what it does.  Remove the
+`#` to change one; a misspelt setting stops the program.  The settings, as
+the file shows them, are:
 
-### Frozen Versions and Upgrading
+* `auto-dependencies = true`:
+  Keep `dependencies` matching the imports, with version ranges.  An
+  entry nothing imports is removed after a run that never loads it; a
+  comment after an entry keeps it.  `false` leaves `dependencies` to you.
+* `verbosity = "low"`:
+  How much `EZPkg` says: `"none"`, `"low"`, `"medium"` or `"high"`.
+* `release = "1.0.0"`:
+  Make a release of that version; while it is commented out, there is no
+  release.  See [Releasing a Packaged Program](#releasing-a-packaged-program).
+* `exports = ["zipapp", "uv"]`:
+  The extra files a release builds beside `prog.py`; see [Using
+  `zipapp`](#using-zipapp) and [Using `uv`](#using-uv).  While it is
+  commented out, a release builds neither.
+* `bootstrap = "update"`:
+  At a release, replace an older bootstrap with the current one.  A
+  bootstrap's name, such as `"nopip8"`, keeps exactly that one.
 
-<!-- The exclude-newer date and [tool.ezpkg] approved checksums; delete the date line to upgrade; a package newer than the date (ux22). -->
+## Releasing a Packaged Program
 
+Once you are satisfied with your program, you may choose to release it in
+a more durable single file package.  Currently two formats are supported:
+* *`zipapp`*:
+  This works for pure Python programs (i.e. no packages with C, C++, Rust,
+  etc.) and produces a `.pyz` file.  The file can be quite large since it
+  includes all of the needed code.  All that the recipient needs is a Python
+  interpreter; no network is needed.  It produces a file
+  `YOUR_PROG-X.Y.Z.pyz`, where `YOUR_PROG` is the program name and `X.Y.Z`
+  is the version number.
+* *`uv`*:
+  `uv` is a popular packaging system written in Rust.  It handles
+  compiled packages too.  The recipient must have `uv` installed, and
+  `uv` fetches the packages over the network on the first run.
 
-### Choosing Versions
+To build both, ensure that `YOUR_PROG.py.toml` has both `release =` and
+`exports =` enabled:
 
-See [PEP 508](https://peps.python.org/pep-0508/) to see how version numbers
-are generally selected.
+```toml
+release = "1.0.0"
+exports = ["zipapp", "uv"]
+```
 
-## Releasing a Program
-
-
-<!-- release = "X.Y.Z" and exports; what a release checks and changes; the next release is the next number (ux23). -->
-
-### Emailing the `.py`
-
-<!-- The program alone, frozen by its date and approvals. -->
+Then run the program once.  That run does not run your program; instead,
+three files appear in the same directory, `YOUR_PROG-1.0.0.pyz`,
+`YOUR_PROG-1.0.0-uv.py` and `YOUR_PROG-1.0.0-uv.py.lock`, and `EZPkg`
+says so.  To make the next release, change `release` to the next number.
 
 ### Using `zipapp`
 
-<!-- prog-X.Y.Z.pyz: no network, no ~/.ezpkg; pure-Python packages only (ux24, I.htdwcp). -->
+Your friend runs the `.pyz` with:
+* Linux/macOS: `python3 prog-1.0.0.pyz`
+* Windows: `py prog-1.0.0.pyz`
+
+If their Python is older than your `requires-python`, it says so and
+stops.  `EZPkg` refuses to build a `.pyz` with a compiled package, such
+as `numpy`, since Python cannot run one from inside a zip file; use `uv`
+instead.
 
 ### Using `uv`
 
-<!-- prog-X.Y.Z-uv.py and its lock; uv run (ux25). -->
+[`uv`](https://docs.astral.sh/uv/) must be installed on your computer
+and on your friend's.  `"uv"` in `exports` builds two files:
+* `prog-1.0.0-uv.py`:
+  Your program with the bootstrap taken out, since `uv` takes its place,
+  and each entry in `dependencies` pinned to the exact version in
+  `checksums`.
+* `prog-1.0.0-uv.py.lock`:
+  The lock file, written by `uv lock --script`, which names the files of
+  each of those versions for every kind of computer.  `EZPkg` checks it
+  against `checksums` and refuses the release if they differ.
+
+Without `uv` on your computer, only the `-uv.py` is written, and `EZPkg`
+prints the `uv lock` command that writes the lock.
+
+Send both files to your friend, who puts them in the same directory and
+runs:
+* Linux/macOS/Windows: `uv run prog-1.0.0-uv.py`
+
+`uv` finds the lock beside the script, fetches the packages it names
+(compiled ones, such as `numpy`, included) into its own cache, and runs
+the program.  Only the first run needs the network.
 
 ## The Bootstrap
 
-<!-- Never edit it; an edited one is refused, naming the line; a newer one is offered to the developer and replaced at release; ezpkg in Part 1 chooses which ezpkg runs (T.reb, T.eui). -->
+Never edit the bootstrap, not even a space or a comment.  Indenting the
+whole of it, as under an `if`, is the one change allowed.  Anything else
+stops the program, which shows each line that differs from the published
+bootstrap.
+
+An older bootstrap that has not been edited still runs, so a program that
+nobody maintains keeps working.  When you are the developer, `EZPkg` tells
+you once about each newer bootstrap, and the next release replaces it.
+
+## Miscellaneous
+
+Here are some miscellaneous observations:
+* **Garbage collection**:
+  Packages that no program has used for about six months are removed,
+  checked at most once a day.
+* **No duplication**:
+  Programs that need the same package share one copy.
+* **Versions side by side**:
+  Programs that need different versions of a package each get their own.
 
 ## How `EZPkg` Actually Works
 
-<!-- Cluade: Most of this is done previously.  Indicate what you think is missing here:
+This section is for the curious-minded.  Feel free to skip it unless you
+are interested in puzzling out how the `EZPkg` bootstrap actually works
+on your own.
 
-One bullet per stage: pip.whl, ezpkg, the versioned cache, approvals, cull. -->
+Please open `quick_start.py` and go to `# Part 3: ...`.  The entire
+bootstrap runs inside a Python `try` block.  Before each step, the
+variable `s` is set to the step's name, so that if anything goes wrong,
+the `except` at the bottom stops the program with
+`ezpkg: <step> failed: ...`, naming the step that broke.  The steps are:
+* `s = "find ezpkg"`:
+  * This names `~/.ezpkg/ezpkg.whl`, where `ezpkg` is kept, and tries
+    `import ezpkg`.  That succeeds when something like `uv run` has
+    already provided it.
+  * If `ezpkg` imported, or `~/.ezpkg/ezpkg.whl` already exists, the
+    download is skipped.  It runs only the first time any program uses
+    `EZPkg` on a machine.
+* `def g(u)`:
+  * This fetches a URL for the download.  If Python cannot, it asks
+    `curl` instead.  That happens with the Python installer from
+    python.org on macOS, which has no certificates (and so cannot check
+    that it is really talking to PyPI) until its
+    `Install Certificates.command` has been run.  Every Mac has `curl`,
+    which uses the Mac's own certificates.
+* `s = "download ezpkg"`:
+  * This asks [PyPI](https://pypi.org/) for the newest `ezpkg` wheel,
+    downloads it, checks its SHA-256 against the one PyPI publishes, and
+    keeps it as `~/.ezpkg/ezpkg.whl`.  A wheel is a zip file, and the
+    rename at the end means no program ever sees half of one.
+* `s = "import ezpkg"`:
+  * This puts `~/.ezpkg/ezpkg.whl` at the front of `sys.path` and
+    imports `ezpkg` straight from it, since Python can import pure
+    Python code from inside a zip file.  Nothing is installed.
+* `s = "fetch packages"`:
+  * `m.EZPkg()` sets up the `~/.ezpkg` directory, and `.install()`
+    reads Part 1, downloads any packages not already there, and puts
+    them on `sys.path`, so that the imports in Part 4 succeed.
+  * `bootstrap="nopip8"` names the bootstrap this program carries.
+  * If Part 1's `ezpkg` entry asks for a different version, this `ezpkg`
+    fetches that one and starts the program again with it.
+
+`ezpkg` fetches packages with `pip`, the standard tool.  It downloads
+its own copy of `pip`, the newest one your Python can run, and keeps it
+as `~/.ezpkg/pip.whl`, because some commonly used Linux releases (e.g.
+Ubuntu) do not include `pip` with the base Python installation, and
+others refuse to let it install into the system's Python
+([PEP 668](https://peps.python.org/pep-0668/)).  The machine's own
+`pip`, if it has one, is never changed.
+
+## Missing Sections:
+
+<!-- Issue: Sections that seem to be missing:
+* Troubleshooting: the messages a developer can meet (a misspelt import, a
+  misspelt setting, a failed fetch, a package newer than the date, an
+  import above the bootstrap, an edited bootstrap), each with what to do.
+* Limitations: compiled packages and `zipapp` (`I.htdwcp`); one version of
+  a module per process; Windows and macOS tested on GitHub's runners only
+  (`I.wmau`); programs with no file of their own (`python -c`) get no
+  checks.
+* Programs run by `uv run` or with `ezpkg` already installed (`pip install
+  ezpkg`): the bootstrap uses that `ezpkg`.
+* License, source repository (https://github.com/waynegramlich/ezpkg) and
+  how to report a problem, which PyPI's project page shows readers.
+-->
 
 ## Conclusion
 
-<!-- Claude: Fetch the previous conclusion.  It was pretty reasonable. We'll
-work form there. -->
+No more remembering which virtual environment is active.  Paste the
+bootstrap, and each program quietly gets its own packages, with nothing to
+create or activate, while `EZPkg` keeps its dependencies list in step with
+its imports.  What you are left with is a single file you can email to
+somebody who has nothing but Python 3.11 (or greater), and it will just
+work.  You can also trivially package it up in either `zipapp` (pure Python
+only) or `uv` (includes compiled packages like `numpy`).
+

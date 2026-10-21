@@ -34,9 +34,8 @@ the 2026-10-19 batches) are in `History.md`.
   Unread by Wayne, batched for later: `ux/ux01`-`ux25`.
 * Rehearsed as `0.0.1.dev202610200048` (the day's last commit):
   `release_check` and `check.yml` run 39349884759 (25 jobs) passed.
-* `README.md.old` is the old README; `README.md` is a skeleton of
-  headings (Wayne starts it 2026-10-20).  README gates the pypi.org
-  setup (`T.utpat`).
+* README gates the pypi.org setup (`T.utpat`); see the 2026-10-20
+  README entry below.
 
 ## Open
 
@@ -46,3 +45,43 @@ the 2026-10-19 batches) are in `History.md`.
   S3.3d, S5.1d (agent's notes, `History.md`).
 * Then `Summary.md` and close.  Issue numbering: `S<slice>.<n>`,
   letter sub-items, never renumbered.
+
+## 2026-10-20: `nopip8`, a shorter bootstrap
+
+* Wayne: `nopip7`'s Part 3 (35 lines) barely fit on a screen.
+  `nopip8` (24 lines) fetches only `ezpkg`'s wheel via the JSON API,
+  checks its SHA-256, keeps `~/.ezpkg/ezpkg.whl` and imports from it.
+  `EZPkg.own_pip` now fetches every stranger's `pip`, from `json_api`
+  (`PIP_INDEX_URL`'s index, else pypi.org).  A first run is
+  `first_run`: `nopip7`'s `pip=n`, or `ezpkg.whl` with no `versions/`.
+* `ux/drive.py` and `release_check.py testpypi` seed `ezpkg.whl`,
+  since pypi.org has no `ezpkg` yet; `release_check.py pypi` lets the
+  bootstrap fetch it.
+* Every new end user is asked, whatever Part 1 carries (Wayne); the
+  approvals are Part 1's `[tool.ezpkg] checksums` (renamed from
+  `approved`).  With no terminal, or `CI` set, the answer is yes.
+* An entry nothing imports goes once the latest recorded run declared
+  it and none of the last `RUNS_KEPT` (10) runs loaded it behind the
+  scenes (`unused_lately`; `note_loaded` by `atexit`, only the
+  program's entries); a comment keeps it.  Replaces the `# Needed`
+  marks (`needed_by`, `MARK`, `unmark` gone).  `Details.md` items
+  1-3 under "follows the imports".  `ux/drive.py` 2.4/2.5 rewritten,
+  not yet rerun.
+
+## 2026-10-20: README pass with Wayne (top-2 rounds)
+
+* Wayne rewrote `README.md` end to end; Claude checked it against the
+  code in rounds of two, quoting line numbers recomputed just before
+  each reply.  Done: Quick Start is `nopip8`; failures section (3
+  bullets, `last_failure.txt` named except for No Network); Windows
+  commands use `py`; "asked once" is per file path; no terminal (or
+  `CI`) means yes; settings listed as the template shows them;
+  "Releasing a Packaged Program" (`zipapp`, `uv`) rewritten from
+  `build_uv`/`release`; How It Works ends with the `ezpkg` switch.
+* Only `## Missing Sections` (an `Issue:` comment: Troubleshooting,
+  Limitations, `uv run`/installed `ezpkg`, License) is left; Wayne
+  says the rest is complete.  `README.md.old` was the source of the
+  restored text.
+* Not taken: the Garbage collection bullet's promise that an agreed
+  program keeps its packages (Wayne skeptical; left out).
+* Next: Wayne's own read; then `T.ept` (template), `T.utpat`.

@@ -11,14 +11,17 @@ needs live here instead.
 * `quick_start.py`: The Quick Start program, and the authority for the
   bootstrap text.
 * `bootstrap.py`: Every bootstrap this project has tried, one function
-  per case (`nopip1` ... `nopip7`); `nopip7` is the one that ships.
+  per case (`nopip1` ... `nopip8`); `nopip8` is the one that ships
+  (2026-10-20): it fetches only `ezpkg`'s wheel, keeps it as
+  `~/.ezpkg/ezpkg.whl` and imports from it; `EZPkg.own_pip` fetches
+  `pip`.  pypi.org has no `ezpkg` yet, so `ux/drive.py` and
+  `release_check.py testpypi` put the wheel there themselves.
 * `ezpkg_test.py`: The test suite.
 * `ezpkg_coverage.py`: Coverage with the standard library `trace`
   (`trace_hook/` carries it into child processes).
-* `README.md`: The user documentation, being rewritten by Wayne from a
-  skeleton of headings (2026-10-19; one-line comments say what each
-  section covers and which `ux/` steps show it).  `README.md.old` is
-  the README before the redesign, for reference.
+* `README.md`: The user documentation, rewritten by Wayne since
+  2026-10-19; Wayne leads it.  `README.md.old` is the README before the
+  redesign, from which lost text was restored (2026-10-20).
 * `release.py`: Builds the wheel to publish (`./release.py
   testpypi|pypi DIR`), using `release_wheel` from `ezpkg_test.py`.
 * `.github/workflows/release.yml`: Publishes it with Trusted
@@ -35,8 +38,8 @@ needs live here instead.
   target=testpypi -f version=V` (25 jobs, about 3 minutes; Claude
   starts it).  Started by hand, not yet by `release.yml` (`T.gar`).
 * `ux/drive.py [--keep] [--until STEP | --only STEP...] [--ux-dir
-  DIR]`: Runs the scripted UX steps (end user 1.1-1.12; developer
-  steps to come) on a pseudoterminal in a temporary copy of the Quick
+  DIR]`: Runs the scripted UX steps (end user 1.1-1.12, developer
+  2.1-2.13) on a pseudoterminal in a temporary copy of the Quick
   Start, as a stranger's real first run: a fresh home, the bootstrap
   fetching `pip` from pypi.org and installing a wheel of the project's
   `ezpkg.py` (`PIP_FIND_LINKS`), everything else from real pypi.org.
@@ -63,15 +66,16 @@ needs live here instead.
   trailer.  On per clone with `git config core.hooksPath git_hooks`.
   Update the trailer when the model changes.
 
-## The Bootstrap Has Four Copies
+## The Bootstrap Has Three Copies
 
 `quick_start.py` is the authority, and the test suite fails until these
 match it:
 
-* Both bootstrap copies in `README.md` (Quick Start, and Enabling
-  `EZPkg` for Your Program).
+* The Quick Start copy in `README.md`.  Its "Enabling `EZPkg` for a
+  Program" says to copy Parts 1-3 from `quick_start.py`, so it has no
+  copy of its own (Wayne's README, 2026-10-20).
 * `QUICK_START` in `ezpkg.py`.
-* The `nopip7` function in `bootstrap.py` (which spells the package name
+* The `nopip8` function in `bootstrap.py` (which spells the package name
   as `PACKAGE` and the index as `JSON_API`).
 
 A changed bootstrap is a new one, comments and spaces included
@@ -90,9 +94,11 @@ entry chooses which `ezpkg` runs it (`T.eui`).
 
 A `prog.py.toml` beside `prog.py` makes it its developer's: no
 questions, `dependencies` kept in step with the imports silently, the
-versions frozen by `exclude-newer` and the `[tool.ezpkg] approved`
-checksums `ezpkg` writes into Part 1, and `release = "X.Y.Z"` builds a
-release.  Without one, `prog.py` is an end user's: one question per
+versions frozen by `exclude-newer` and the `[tool.ezpkg] checksums`
+`ezpkg` writes into Part 1, and `release = "X.Y.Z"` builds a
+release.  An entry nothing imports goes once the latest recorded run
+declared it and none of the last 10 loaded it (`unused_lately`,
+`note_loaded`); a comment keeps it.  Without one, `prog.py` is an end user's: one question per
 program, ever, and the program is never edited.  `prog.ezpkg`,
 `EZPKG_APPROVE`, `EZPKG_EXPORT` and `EZPKG_BOOTSTRAP=check` are gone.
 

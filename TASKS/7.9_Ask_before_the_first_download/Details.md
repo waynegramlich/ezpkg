@@ -105,22 +105,34 @@ for a while.
     if the others carry one.
   * The program restarts after the edit, so line numbers in any
     traceback are right.
-  * An entry whose import was removed is removed.  Its packages stay in
-    `~/.ezpkg` until `cull` ages them out (or `remove.py`).  If the
-    import was removed by mistake, putting it back brings the entry
-    back.
-* **Needed, but not imported.**  An entry the developer adds by hand
-  that no import explains is kept, and marked with a comment:
-  * a module named in a string (`importlib.import_module("yaml")`)
-    counts as an import, so it needs no mark;
-  * an optional extra of another entry is marked `# Needed by pandas
-    (excel)`;
-  * anything else is marked `# Needed, but not imported`, for the
-    developer to reword (`# Needed by matplotlib`).
-
-  An entry whose comment starts `# Needed` is never removed.
-  `ezpkg`'s record of the program's last imports tells an entry added
-  by hand from one whose import was just removed.
+  * An entry is removed unless one of these keeps it (Wayne,
+    2026-10-20, replacing the `# Needed` marks):
+    1. **The source imports it.**  A module named in a string
+       (`importlib.import_module("yaml")`) counts as an import.
+    2. **A recent run loaded it, or has not had the chance.**  An
+       `atexit` hook records, for each of the last 10 finished runs,
+       the entries it declared and those whose packages it loaded
+       without the source importing them (from `sys.modules`), in the
+       program's record in `~/.ezpkg/develop/`, not in Part 1.  An
+       entry goes only when the latest recorded run declared it and
+       none of them loaded it.  So a package loaded behind the scenes,
+       such as `matplotlib`'s `pyqt6` backend or `pandas`'s
+       `openpyxl`, is kept without a word, and an entry added by hand
+       is kept until a run that declared it has finished.  A run that
+       ends in `os._exit`, or is replaced by the restart, records
+       nothing.
+    3. **It has a comment after it**, which the developer writes to
+       keep it on purpose (`"pyqt6",  # matplotlib's backend`).
+  * So an entry pasted in with the bootstrap (the Quick Start's
+    `cowsay`) goes on the second run, and an import deleted from the
+    source loses its entry on the next run; putting the import back
+    brings the entry back.  Removed packages stay in `~/.ezpkg` until
+    `cull` ages them out (or `remove.py`).
+  * An entry is removed only when the source scan and the run record
+    both say no, so an import inside a function that this run did not
+    call is kept by rule 1.
+  * `ezpkg` writes no marks; `needed_by` and `MARK` are gone (built
+    2026-10-20: `unused_lately`, `note_loaded`, `RUNS_KEPT`).
 * **`auto-dependencies = false`**: nothing is edited and nothing is
   said; keeping `dependencies` right is the developer's business.
 * **Versions never change by themselves.**  The approvals file

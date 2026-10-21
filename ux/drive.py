@@ -3,9 +3,11 @@
 
 Each step edits `prog.py`'s imports and runs it on a pseudoterminal,
 so `ezpkg`'s questions are asked as they are of a person.  The first
-run is a stranger's: a home of its own, and the bootstrap fetches `pip`
-from pypi.org and installs `ezpkg` from a wheel of the project's
-`ezpkg.py` (`PIP_FIND_LINKS`), as it will from pypi.org.  Each question is answered from the step's
+run is a stranger's: a home of its own, holding only the
+`~/.ezpkg/ezpkg.whl` that `nopip8` would fetch from pypi.org, a wheel
+of the project's `ezpkg.py` (also offered to `pip` by
+`PIP_FIND_LINKS`); `ezpkg` fetches `pip` from pypi.org.  Each question
+is answered from the step's
 script, in order, and checked against the text it expects; a download
 question ("... and run prog.py?") is answered `y` wherever it comes,
 since whether one comes depends on what this Python already has.
@@ -94,7 +96,7 @@ class Step:
     * `declared` (`list[str] | None`):
       The package names `dependencies` must then list, in order.
     * `kept` (`list[str] | None`):
-      What `[tool.ezpkg] unimported` must then list.
+      The entries a comment keeps, which `prog.py` must then list.
     * `before` (`Callable[[Path], None] | None`):
       Run on the copy first, such as removing a record.
     * `command` (`list[str] | None`):
@@ -304,26 +306,26 @@ STEPS: list[Step] = [
                                             "changed again"],
          declared=BASE, mode="developer"),
     Step("2.4 An entry added by hand",
-         "tabulate added to dependencies, never imported: kept, and "
-         "marked.",
-         None, present=[WORKS], absent=["Traceback", "changed again"],
+         "tabulate added to dependencies, never imported: kept on the "
+         "run that first declares it, with no mark.",
+         None, present=[WORKS], absent=["Traceback", "changed again",
+                                        "not imported"],
          before=entries(["tabulate"]), declared=[*BASE, "tabulate"],
-         kept=["tabulate"],
-         written=["# not imported: say why it is needed"],
-         mode="developer"),
-    Step("2.5 The mark goes",
-         "import tabulate added: the entry is explained, so its mark "
-         "goes.",
-         ["tabulate"], present=[WORKS], absent=["Traceback", "changed again"],
-         declared=[*BASE, "tabulate"], kept=[], mode="developer"),
+         kept=[], mode="developer"),
+    Step("2.5 Never loaded, so it goes",
+         "Run again: the last run declared tabulate and never loaded it, "
+         "so its entry goes, silently.",
+         None, present=[WORKS], absent=["Traceback", "changed again"],
+         declared=BASE, kept=[], mode="developer"),
     Step("2.6 A misspelt import",
          "import tabluate (sic): no such package, one line, then "
          "Python's own error.",
          ["tabulate", "tabluate"],
-         present=[("`prog.py` line 73: `import tabluate` needs a package, "
+         present=[("`prog.py` line 59: `import tabluate` needs a package, "
                   "but PyPI has none called `tabluate`"),
                   "No module named 'tabluate'"],
-         absent=[WORKS], declared=[*BASE, "tabulate"], mode="developer"),
+         absent=[WORKS, "line 58:"], declared=[*BASE, "tabulate"],
+         mode="developer"),
     Step("2.7 Medium verbosity",
          'verbosity = "medium", the misspelling fixed and humanize '
          "imported: each change said.",
@@ -414,6 +416,13 @@ def run_on_a_terminal(work: Path, script: list[tuple[str, str]],
         and key not in ("PYTHONPATH", "VIRTUAL_ENV", "CI")}
     environment.update(HOME=str(work / "home"),
                        PIP_FIND_LINKS=str(work / "links"), **(extra or {}))
+
+    # pypi.org has no `ezpkg` yet, so the wheel `nopip8` would fetch is
+    # put where it keeps it, for a run of the program itself.
+    kept: Path = work / "home" / ".ezpkg" / "ezpkg.whl"
+    if command is None and runner is None and not kept.is_file():
+        kept.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(next((work / "links").glob("ezpkg-*.whl")), kept)
     python: str = shutil.which("python3") or sys.executable
     pid: int
     master: int
