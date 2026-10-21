@@ -188,6 +188,7 @@ QUICK_START: str = '''#!/usr/bin/env python3
 """Try `EZPkg`: fetch the `cowsay` package on first use, then run."""
 
 # Part 2: EZPkg required imports are immediately below.
+# A `from __future__ import ...` line, if any, goes above Part 2.
 import hashlib
 import importlib
 import json
@@ -6341,6 +6342,11 @@ class EZPkg:
                     f"{program.stem}-{version}.pyz" if form == "zipapp"
                     else f"{program.stem}-{version}-uv.py")
                 built.append(self.export(form, providing, target))
+
+                # The lock `uv` wrote beside the script, if `uv` was there.
+                lock: Path = target.with_name(target.name + ".lock")
+                if form == "uv" and lock.is_file():
+                    built.append(lock)
         except (RuntimeError, ValueError) as error:
             raise SystemExit(f"{program.name} {version} was not "
                              f"released: {error}") from None

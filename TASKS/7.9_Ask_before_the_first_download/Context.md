@@ -85,3 +85,27 @@ the 2026-10-19 batches) are in `History.md`.
 * Not taken: the Garbage collection bullet's promise that an agreed
   program keeps its packages (Wayne skeptical; left out).
 * Next: Wayne's own read; then `T.ept` (template), `T.utpat`.
+
+## 2026-10-20: README against the code (top-2 rounds, evening)
+
+* Done: upgrade/`checksums` detail cut (one sentence left); a release
+  is once per version; zipapp refusal says take `"zipapp"` out of
+  `exports`; no-terminal wording (covers `CI`); `uv` bullets no longer
+  say `checksums`; Enabling step 1 keeps `from __future__` above Part
+  2 and deletes `"cowsay"`; `cmd.exe` `type nul`; "After a `y`" lead-in.
+* Part 2 of all three Quick Start copies has a new comment line, ``A
+  `from __future__ import ...` line, if any, goes above Part 2.``
+  (outside the `try`, so still `nopip8`).  `ux/` snapshots now stale.
+* Code: the "Released ..." line names the `uv` lock when written
+  (`release`); asserted in
+  `test_write_pins_an_ezpkg_installed_from_a_wheel`.  Quick suite: 312
+  tests OK (16 skipped: date tests, normal `HOME`).
+* Open: the `<!-- Claude: -->` Security proposal (README, before
+  Miscellaneous), unread by Wayne.
+* Found: `checksums` holds only what arrived on the author's machine,
+  so a marker-dependent package (`click`'s `colorama` on Windows,
+  `typing_extensions` on older Pythons) is refused by `verify` on a
+  friend's machine.  Wayne's direction: a new `email` export that
+  resolves for every platform and Python at release.  Not built; the
+  open questions (file name, platform matrix, per-platform `id:`s,
+  default `exports`, a new task) are in chat.

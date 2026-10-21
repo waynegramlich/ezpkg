@@ -7,6 +7,7 @@
 """Try `EZPkg`: fetch the `cowsay` package on first use, then run."""
 
 # Part 2: EZPkg required imports are immediately below.
+# A `from __future__ import ...` line, if any, goes above Part 2.
 import hashlib
 import importlib
 import json

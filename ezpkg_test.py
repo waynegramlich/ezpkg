@@ -5054,6 +5054,11 @@ class InstallTest(unittest.TestCase):
                               for pin in metadata["dependencies"]],
                              ["needy", "widget"])
 
+            # The release line names the lock as well as the script.
+            self.assertIn(f"building `{self.built.name}` and "
+                          f"`{self.built.name}.lock`.",
+                          " ".join(locked.stderr.split()))
+
     def test_write_cannot_pin_a_source_copy_of_ezpkg(self) -> None:
         """A copy not installed from a wheel is not pinned.
 

@@ -44,6 +44,7 @@ hassle of virtual environments.
 """Try `EZPkg`: fetch the `cowsay` package on first use, then run."""
 
 # Part 2: EZPkg required imports are immediately below.
+# A `from __future__ import ...` line, if any, goes above Part 2.
 import hashlib
 import importlib
 import json
@@ -122,9 +123,10 @@ The three options are:
 * `?=>Explain`:
   This lists the packages in question and repeats the question.
 
-The prompt is suppressed if the program is being run without terminal input
-(e.g. `cron`).  In that case `y` is assumed.
+The prompt is skipped when there is nobody at a terminal to answer it
+(e.g. `cron`), and `y` is assumed.
 
+After a `y`, the first run ends like this:
 
 ```
 The following 3 package(s) are now retained in `~/.ezpkg`:
@@ -188,11 +190,14 @@ from `quick_start.py`:
 
 1. Take Parts 1, 2, and 3 from `quick_start.py` and paste them at the
    front of your program, immediately after the `#!/usr/bin/env...` line,
-   if it is present.
+   if it is present.  If your program has a `from __future__` line, keep
+   it (and the docstring) above Part 2.  Then delete `"cowsay"` from
+   `dependencies`; `EZPkg` adds your own packages.
 
 2. Create an initial empty `EZPkg` `.toml` configuration file.
    Replace `PROG_NAME` with your actual program name:
    * Windows (PowerShell): `ni PROG_NAME.py.toml`
+   * Windows (`cmd.exe`): `type nul > PROG_NAME.py.toml`
    * Linux/macOS: `touch PROG_NAME.py.toml`
 
 3. Execute your program the first time.  In most cases, your program will
@@ -244,16 +249,10 @@ older one.  The upper end is cautious: before the next minor release for
 a version below 1 (`>=0.9.1,<0.10`), before the next major release for
 versions 1 to 9 (`>=2.32.3,<3`), and none at all for 10 or more
 (`>=25.2`), since such numbers are usually dates, as in `certifi
-2025.8.3`, rather than promises.  An entry with no version at all is given
-a range the same way when you make a release.  A range you wrote yourself
-is never changed.
+2025.8.3`, rather than promises.
 
-Below `dependencies`, `EZPkg` itself writes two more tables into Part 1:
-`[tool.ezpkg]`, whose `checksums` list records the exact version of every
-package your program ran with, and a checksum of each; and `[tool.uv]`,
-whose `exclude-newer` date freezes the versions.  Leave both to `EZPkg`.
-To upgrade every package to today's versions, delete the `exclude-newer`
-line and run the program again.
+`EZPkg` also adds a few lines below `dependencies` that record the exact
+versions your program ran with; leave them alone.
 
 ### `prog.py.toml` Settings
 
@@ -264,7 +263,7 @@ the file shows them, are:
 
 * `auto-dependencies = true`:
   Keep `dependencies` matching the imports, with version ranges.  An
-  entry nothing imports is removed after a run that never loads it; a
+  entry nothing imports is removed once recent runs show it is unused; a
   comment after an entry keeps it.  `false` leaves `dependencies` to you.
 * `verbosity = "low"`:
   How much `EZPkg` says: `"none"`, `"low"`, `"medium"` or `"high"`.
@@ -304,9 +303,10 @@ exports = ["zipapp", "uv"]
 ```
 
 Then run the program once.  That run does not run your program; instead,
-three files appear in the same directory, `YOUR_PROG-1.0.0.pyz`,
-`YOUR_PROG-1.0.0-uv.py` and `YOUR_PROG-1.0.0-uv.py.lock`, and `EZPkg`
-says so.  To make the next release, change `release` to the next number.
+`YOUR_PROG-1.0.0.pyz`, `YOUR_PROG-1.0.0-uv.py` and
+`YOUR_PROG-1.0.0-uv.py.lock` appear beside it, and `EZPkg` says so.  This
+happens once per version: later runs run your program as usual.  To make
+the next release, change `release` to the next number.
 
 ### Using `zipapp`
 
@@ -316,8 +316,8 @@ Your friend runs the `.pyz` with:
 
 If their Python is older than your `requires-python`, it says so and
 stops.  `EZPkg` refuses to build a `.pyz` with a compiled package, such
-as `numpy`, since Python cannot run one from inside a zip file; use `uv`
-instead.
+as `numpy`, since Python cannot run one from inside a zip file; take
+`"zipapp"` out of `exports` and use `uv` instead.
 
 ### Using `uv`
 
@@ -325,12 +325,11 @@ instead.
 and on your friend's.  `"uv"` in `exports` builds two files:
 * `prog-1.0.0-uv.py`:
   Your program with the bootstrap taken out, since `uv` takes its place,
-  and each entry in `dependencies` pinned to the exact version in
-  `checksums`.
+  and the exact versions your program ran with.
 * `prog-1.0.0-uv.py.lock`:
   The lock file, written by `uv lock --script`, which names the files of
-  each of those versions for every kind of computer.  `EZPkg` checks it
-  against `checksums` and refuses the release if they differ.
+  each of those versions for every kind of computer.  `EZPkg` checks that
+  it names the same files your program ran with.
 
 Without `uv` on your computer, only the `-uv.py` is written, and `EZPkg`
 prints the `uv lock` command that writes the lock.
@@ -353,6 +352,30 @@ bootstrap.
 An older bootstrap that has not been edited still runs, so a program that
 nobody maintains keeps working.  When you are the developer, `EZPkg` tells
 you once about each newer bootstrap, and the next release replaces it.
+
+<!-- Claude: Proposed new section:
+
+## Security
+
+`EZPkg` fetches code from the internet and runs it, so here is who you
+are trusting:
+* **The program's author**:
+  The one question on a first run is about them.  If you do not trust
+  them, answer `n`.  A `y` also covers later versions of the program
+  that they send you.
+* **PyPI**:
+  Every package, `ezpkg` included, comes from the
+  [Python Package Index](https://pypi.org), and each download is checked
+  against the checksum PyPI publishes for it.
+* **Exactly what the author ran**:
+  Once its author has run a program with `EZPkg`, the program carries a
+  checksum of every package file it ran with.  A file that differs, such
+  as one re-uploaded to PyPI later, is refused before anything in it
+  can run.
+* **Nothing outside `~/.ezpkg`**:
+  No administrator rights are needed, and your Python and its `pip` are
+  never changed.
+-->
 
 ## Miscellaneous
 
