@@ -271,3 +271,49 @@ Decided, being built.  Supersedes the first-run note above.
   323 OK (16 skipped).  `email_check.py` now expects `prog.py`
   unedited and runs only the releases as a friend.
 * Not done: `ux/drive.py` developer steps still expect edits (stale).
+
+## 2026-10-22: Phase 2 built: `prog.py.releases` (Wayne)
+
+* Not a builds folder: one file, `prog.py.releases` (visible, TOML),
+  a `[[release]]` entry appended per release (`release_entry`):
+  version, date, `commit` (`git` short hash, `+` if `prog.py` differs,
+  else `hg id -i`; `commit_of`), `exclude-newer`, the shipped
+  `dependencies`.  No program copy, no `checksums` (Wayne: just what
+  is needed).  `read_releases`, `releases_path`.
+* Files to send go beside `prog.py` (`release_files`: `prog-X.Y.Z.py`,
+  `.pyz`, `-uv.py`, `-uv.py.lock`); the last release's go when the
+  next is built.  A failed release removes what it built.
+* Trigger: `exports` names a form and `release` differs from the
+  newest entry (`release_due`); `prog.py.release`, `prog_builds/`,
+  `builds_path`, the stash's `released` and Part 1's `released` are
+  gone.  `released` reads the newest entry.  A lost stash is seeded
+  from it (`seed_from_releases`).  Template release paragraph rewritten.
+* Tests: `no_release`/`releasing` gone; `test_changing_release_builds_a_release`
+  replaces the deleting-the-file test.  Default suite runs only
+  `nopip8` (`FAST_CASES`).  Quick suite 323 OK (16 skipped);
+  `email_check.py build`/`friend` passed locally.
+
+## 2026-10-22: Phase 3 built: `cull` (Wayne's answers to the proposal)
+
+* One number for all culling: `CULL_DAYS` is now 30 days (was 180),
+  and a program's `cull-days` in `prog.py.toml` overrides it for what
+  that program holds (`Settings.cull_days`, `cull_seconds`; template's
+  last setting).  An end user (no `.toml`) gets 30.
+* `stale`: a `develop/` record stays while its program file exists
+  (the yes and the stash, #1/#4); once the program is gone, it goes
+  after the program's time unused, unplugged drives included.
+  Requests and scans go by their own last use; the one request a
+  program now uses (`note_request`, now for developers too and the
+  latest only, #3) is kept for that program's `cull-days` if longer.
+  So an idle agreed program keeps its yes but its packages go, and its
+  next run fetches them silently (#2, replaces S3.3b's "never").
+* `list.py` (`LIST_SCRIPT`, beside `remove.py`, #5): the cache's size
+  and each program (path, "developed here" / "agreed to", last run,
+  size of what its request holds, "no longer there").  The line after
+  a yes: "... manages `~/.ezpkg`; its `list.py` says what is there."
+* No size cap (#6).  README not yet updated (Wayne: eventually).
+* Tests: `test_a_programs_record_goes_only_with_the_program`,
+  `test_cull_days_keeps_a_programs_latest_packages_longer`,
+  `test_list_says_what_the_cache_holds_for_whom`, `read_settings`
+  cases; `test_a_yes_covers_later_versions` now expects the packages
+  gone and fetched again silently.

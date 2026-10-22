@@ -112,17 +112,20 @@ is the program's stash in its `~/.ezpkg/develop/` record
 `upgrade = true` in `prog.py.toml` takes the newest versions; a
 release merges the stash into a staged copy (`staged`) that its forms
 are built from.  Releases are off until `exports` in
-`prog.py.toml` names a form (the template leaves `exports = [` open
-with each form's line commented out, so each is one `#` to remove;
-Wayne, 2026-10-21: no `prog_builds/` on a first run).  Then a
-developer's run with no `prog.py.release` beside it builds a release
-(the forms `exports` names, in `EXPORT_FORMS` order: `email`,
-`zipapp`, `uv`) into `prog_builds/X.Y.Z/`, writes `prog.py.release`,
-and then runs the program; so the first run after `exports` is set
-builds 1.0.0, and deleting the file builds the next patch number.
-`release = "X.Y.Z"` chooses a version (any time, even an older one).
-The test suite gives developer programs a placeholder
-`prog.py.release` (`no_release`) unless a test sets `self.releasing`.  An entry nothing imports goes once the latest recorded run
+`prog.py.toml` names a form and `release` names a version (the
+template leaves `exports = [` open with each form's line commented
+out, and `release` commented out).  Then a developer's run where
+`release` differs from the newest entry of `prog.py.releases` builds
+that release (the forms `exports` names, in `EXPORT_FORMS` order:
+`email`, `zipapp`, `uv`) beside `prog.py` as `prog-X.Y.Z.py`,
+`.pyz`, `-uv.py` and its lock (`release_files`), removes the last
+release's files, appends a `[[release]]` entry (version, date, commit,
+`exclude-newer`, `dependencies`; `release_entry`) to
+`prog.py.releases`, and then runs the program (Wayne, 2026-10-22: one
+file for version control, no folder).  A lost stash is seeded from the
+newest entry.  `cull` uses one number, 30 days (`CULL_DAYS`, or a
+program's `cull-days`), and keeps a `develop/` record while its
+program exists; `~/.ezpkg/list.py` lists what the cache holds.  An entry nothing imports goes once the latest recorded run
 declared it and none of the last 10 loaded it (`unused_lately`,
 `note_loaded`); a comment keeps it.  Without one, `prog.py` is an end user's: one question per
 program, ever, and the program is never edited.  `prog.ezpkg`,

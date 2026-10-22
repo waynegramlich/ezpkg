@@ -12,10 +12,11 @@ never edited (Wayne, 2026-10-22): the `checksums` are kept in
   `prog.py` (the Quick Start's Parts 1-3, needing `tqdm`) and an empty
   `prog.py.toml`, and runs it: that first developer run must fill the
   file and run the program, building nothing, since releases are off
-  until `exports` is set.  With the `#`s removed from the filled file's
-  `exports` entries, the next run must build release 1.0.0 into
-  `prog_builds/1.0.0/`, write `prog.py.release` and run the program;
-  the run after that must build nothing.  It leaves
+  until `exports` and `release` are set.  With the `#`s removed from
+  the filled file's `exports` entries and `release` line, the next run
+  must build release 1.0.0 beside `prog.py`, add it to
+  `prog.py.releases` and run the program; the run after that must build
+  nothing.  It leaves
   `DIR/out/prog-1.0.0.py` and `DIR/out/prog-1.0.0.pyz`.  The runs
   pass over any installed `uv` (`EZPKG_UV=fetch`), so `ezpkg` must
   fetch the `uv` wheel for this computer; `prog.py` must be as it was
@@ -122,31 +123,31 @@ def build(directory: pathlib.Path) -> int:
     if filling.returncode or "tqdm " not in filling.stdout:
         print("FAIL: the filling developer run did not run prog.py")
         return 1
-    if ((work / "prog_builds").exists()
-            or (work / "prog.py.release").exists()
+    if (list(work.glob("prog-*"))
+            or (work / "prog.py.releases").exists()
             or '#   "email",' not in settings.read_text(encoding="utf-8")):
         print("FAIL: the filling run released, or left no `exports`")
         return 1
 
-    # Every `exports` entry uncommented: the next run releases and runs;
-    # the one after only runs.
+    # Every `exports` entry and `release` uncommented: the next run
+    # releases and runs; the one after only runs.
     settings.write_text(re.sub(
         r'^#( +"(?:email|zipapp|uv)",)', r" \1",
-        settings.read_text(encoding="utf-8"), flags=re.MULTILINE),
+        settings.read_text(encoding="utf-8"), flags=re.MULTILINE).replace(
+            '# release = "1.0.0"', 'release = "1.0.0"'),
         encoding="utf-8")
     first: subprocess.CompletedProcess[str] = run(program, home,
                                                   EZPKG_UV="fetch")
     if first.returncode or "tqdm " not in first.stdout:
         print("FAIL: the first releasing run did not run prog.py")
         return 1
-    folder: pathlib.Path = work / "prog_builds" / "1.0.0"
-    copy: pathlib.Path = folder / "prog-1.0.0.py"
-    archive: pathlib.Path = folder / "prog-1.0.0.pyz"
-    built: list[str] = sorted(one.name for one in folder.glob("*"))
+    copy: pathlib.Path = work / "prog-1.0.0.py"
+    archive: pathlib.Path = work / "prog-1.0.0.pyz"
+    built: list[str] = sorted(one.name for one in work.glob("prog-*"))
     print(f"built: {built}")
     if not (copy.is_file() and archive.is_file()
-            and (work / "prog.py.release").is_file()):
-        print("FAIL: no prog-1.0.0.py, prog-1.0.0.pyz or prog.py.release")
+            and (work / "prog.py.releases").is_file()):
+        print("FAIL: no prog-1.0.0.py, prog-1.0.0.pyz or prog.py.releases")
         return 1
     second: subprocess.CompletedProcess[str] = run(program, home,
                                                    EZPKG_UV="fetch")

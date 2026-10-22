@@ -106,11 +106,13 @@ ANSWER_SECONDS: float = 300.0
 CULL_GRACE: float = 86400.0
 CULL_INTERVAL: float = 86400.0
 
-# How long a request may go unanswered before the cache stops keeping the
-# packages that answered it.  Six months, because the cost of being wrong
-# is one download and the cost of being right is a little disk, and those
-# are not symmetrical.  See `T.gc`.
-CULL_DAYS: float = 180.0 * 86400.0
+# How long anything in the cache may go unused before `cull` takes it:
+# a request and the packages that answered it, a scan, the record of a
+# program that no longer exists.  One number for all of it, 30 days
+# unless a program's `prog.py.toml` sets `cull-days` for what that
+# program holds (Wayne, 2026-10-22; it was six months).  The yes and the
+# stash of a program that still exists never go.  See `T.gc`.
+CULL_DAYS: float = 30.0 * 86400.0
 
 # How often the private `pip` is checked for a newer release.  Weekly, as
 # `pip` checks itself, because each check asks the index and may fetch
@@ -170,6 +172,77 @@ if here.exists():
     sys.exit(f"`{shown}` could not be removed completely; a program may "
              f"still be using it.")
 print(f"Removed `{shown}`.")
+'''
+
+# The constructor writes this into the cache as `list.py`, so that
+# anybody can see what `ezpkg` keeps there and for whom, without being
+# asked anything (Wayne, 2026-10-22: an end user could hold a lot and not
+# know it).  Standard library only, like `remove.py`.
+LIST_SCRIPT: str = '''#!/usr/bin/env python3
+"""List what this `ezpkg` cache holds, and for which programs.
+
+Written by `ezpkg` (https://pypi.org/project/ezpkg/).  It changes
+nothing.  `ezpkg` removes what nothing has used for 30 days (or a
+program's own `cull-days`), and `remove.py` removes everything.
+"""
+
+import json
+import os
+import time
+from pathlib import Path
+
+here: Path = Path(__file__).resolve().parent
+# As `ezpkg` shows it: `~/.ezpkg`, except on Windows, which has no `~`.
+shown: str = str(here)
+if os.name != "nt" and here.is_relative_to(Path.home()):
+    shown = "~/" + here.relative_to(Path.home()).as_posix()
+
+
+def size(path: Path) -> int:
+    """Return the bytes under a path."""
+    if path.is_file():
+        return path.stat().st_size
+    return sum(one.stat().st_size for one in path.rglob("*")
+               if one.is_file() and not one.is_symlink())
+
+
+def megabytes(count: int) -> str:
+    """Return a size as people read it."""
+    return f"{count / 1e6:,.1f} MB"
+
+
+# Each request's trees, by the request's hash.
+trees: dict[str, list[str]] = {}
+for record in (here / "requests").glob("*.json"):
+    try:
+        trees[record.stem] = list(json.loads(record.read_text())["trees"])
+    except (OSError, ValueError, KeyError, TypeError):
+        continue
+
+# Each program, newest use first.
+rows: list[tuple[float, str]] = []
+for record in (here / "develop").glob("*.json"):
+    try:
+        kept: dict = json.loads(record.read_text())
+        used: float = record.stat().st_mtime
+    except (OSError, ValueError):
+        continue
+    program: Path = Path(str(kept.get("program", "")))
+    how: str = ("developed here" if "stash" in kept
+                else "agreed to" if kept.get("agreed") else "seen")
+    held: int = sum(size(here / "versions" / tree)
+                    for request in kept.get("requests", []) or []
+                    for tree in trees.get(str(request), [])
+                    if (here / "versions" / tree).exists())
+    rows.append((used, f"{program}\\n    {how}, last run "
+                 f"{time.strftime('%Y-%m-%d', time.localtime(used))}, "
+                 f"{megabytes(held)}"
+                 + ("" if program.is_file() else ", no longer there")))
+print(f"`{shown}` holds {megabytes(size(here))}.")
+if rows:
+    print("Programs (the sizes overlap where they share packages):")
+for _, row in sorted(rows, reverse=True):
+    print(row)
 '''
 
 # The Quick Start program from `README.md`, which the constructor writes
@@ -895,21 +968,20 @@ SETTINGS_TEMPLATE: str = """\
 # verbosity = "low"
 
 # Releases are off until you remove the `#` from at least one entry of
-# `exports`.  Then a run with no {name}.release beside {name} builds a
-# release into {stem}_builds/VERSION/ and writes {name}.release, then
-# {name} runs as usual.  So to build the next release, delete
-# {name}.release and run {name}.  Each release checks the imports and
-# the bootstrap, and gives each entry without a version a range (write
-# a range or `==` yourself to choose one).
+# `exports` and from `release` below.  Then each run where `release`
+# differs from the last one released builds that release beside {name}
+# ({stem}-VERSION.py, ...), in place of the last one's files, adds it
+# to {name}.releases, and runs {name} as usual.  Each release checks
+# the imports and the bootstrap, and gives each entry without a
+# version a range (write a range or `==` yourself to choose one).
 exports = [  # Remove the `#`s of the forms each release builds.
 #   "email",   # A `.py` to send, ready for every computer.
 #   "zipapp",  # A `.pyz` that needs no network (pure Python only).
 #   "uv",      # A `-uv.py` and its lock, for `uv run`.
 ]
 
-# The version of the next release.  Without it, the first release is
-# 1.0.0 and each one after adds 1 to the last number (1.0.1, ...).
-# Change it whenever you like, even to go back to 1.0.0.
+# The version of the next release.  Change it whenever you like, even
+# to go back to an older number.
 # release = "1.0.0"
 
 # The bootstrap {name} carries: "update" replaces an older one at the
@@ -920,6 +992,10 @@ exports = [  # Remove the `#`s of the forms each release builds.
 # run.  With `upgrade = true`, every run takes the newest versions;
 # put the `#` back to freeze them at the last run's date.
 # upgrade = false
+
+# How many days the packages {name} uses may go unused before ezpkg
+# removes them from ~/.ezpkg (they are fetched again if needed).
+# cull-days = 30
 """
 
 def first_run_note(name: str, adding: Sequence[str] | None) -> str:
@@ -965,7 +1041,7 @@ RUNS_KEPT: int = 10
 
 # Whether a developer's runs edit the program's Part 1.  Off: what
 # `ezpkg` works out (the entries for imports Part 1 does not declare,
-# the `checksums`, the frozen date, the last release) is kept in the
+# the `checksums`, the frozen date) is kept in the
 # program's `develop/` record, its stash (`EZPkg.stash`), and only a
 # release's copies carry it (Wayne, 2026-10-22).  Whether `prog.py` is
 # never to be edited is not yet decided, so the editing code stays, and
@@ -975,7 +1051,7 @@ EDIT_PROGRAM: bool = os.environ.get("EZPKG_EDIT_PROGRAM", "").lower() == "on"
 
 # What a release can build, in the order it builds them.  `exports`
 # names none of them until the developer turns releases on (Wayne,
-# 2026-10-21: no `prog_builds/` on a first run).
+# 2026-10-21: no release on a first run).
 EXPORT_FORMS: tuple[str, ...] = ("email", "zipapp", "uv")
 
 # The values of `verbosity`, quietest first, so that each one's index is
@@ -998,7 +1074,7 @@ class Settings:
       How much `ezpkg` says, from `VERBOSITY`; see `EZPkg.say`.
     * `release` (`str | None`):
       The version of the next release, such as `"1.0.0"`, or `None`
-      to count on from the last one (`next_release`).
+      for no release (`EZPkg.release_due`).
     * `exports` (`tuple[str, ...]`):
       What a release builds, from `EXPORT_FORMS`; none unless the file
       says otherwise, and with none there are no releases.
@@ -1008,6 +1084,9 @@ class Settings:
     * `upgrade` (`bool`):
       Take the newest versions on every run, rather than those of the
       frozen date (`EZPkg.declared_date`).
+    * `cull_days` (`int | None`):
+      How many days what the program holds may go unused before `cull`
+      takes it, or `None` for `CULL_DAYS` (`cull_seconds`).
     """
 
     auto_dependencies: bool = True
@@ -1016,6 +1095,7 @@ class Settings:
     exports: tuple[str, ...] = ()
     bootstrap: str = "update"
     upgrade: bool = False
+    cull_days: int | None = None
 
 
 def settings_path(program: Path) -> Path:
@@ -1033,12 +1113,14 @@ def settings_path(program: Path) -> Path:
     return program.with_name(f"{program.name}.toml")
 
 
-def release_path(program: Path) -> Path:
-    """Return a program's release record: `prog.py.release` beside it.
+def releases_path(program: Path) -> Path:
+    """Return a program's release record: `prog.py.releases` beside it.
 
-    `EZPkg.release` writes it; while it is missing, a developer's run
-    builds a release, once `exports` names a form (Wayne, 2026-10-21:
-    deleting a file is the one gesture every computer makes easily).
+    One file, so that a developer who keeps the program in version
+    control keeps one more file, not a folder of builds (Wayne,
+    2026-10-22).  `EZPkg.release` adds a `[[release]]` entry at its end
+    for each release: what it needs to make that release again, and
+    nothing more (`release_entry`).
 
     Arguments:
     * `program` (`Path`):
@@ -1048,22 +1130,159 @@ def release_path(program: Path) -> Path:
     * (`Path`): The record, whether or not it exists.
     """
     # Named like the settings file.
-    return program.with_name(f"{program.name}.release")
+    return program.with_name(f"{program.name}.releases")
 
 
-def builds_path(program: Path) -> Path:
-    """Return the folder a program's releases are built in.
+def release_files(program: Path, version: str) -> list[Path]:
+    """Return the files a release of a program may build, beside it.
 
     Arguments:
     * `program` (`Path`):
       The program, such as `prog.py`.
+    * `version` (`str`):
+      The release, such as `1.0.0`.
 
     Returns:
-    * (`Path`): Such as `prog_builds`, whether or not it exists; each
-      release is a folder in it named by its version.
+    * (`list[Path]`): The `email` copy, the `zipapp`, the `uv` script
+      and its lock, in `EXPORT_FORMS` order, whether or not they exist.
     """
-    # Beside the program.
-    return program.with_name(f"{program.stem}_builds")
+    # Named by version, so a recipient can tell one from another.
+    stem: str = f"{program.stem}-{version}"
+    return [program.with_name(f"{stem}.py"),
+            program.with_name(f"{stem}.pyz"),
+            program.with_name(f"{stem}-uv.py"),
+            program.with_name(f"{stem}-uv.py.lock")]
+
+
+def read_releases(program: Path) -> list[dict[str, Any]]:
+    """Return the entries of a program's `prog.py.releases`, oldest first.
+
+    Arguments:
+    * `program` (`Path`):
+      The program.
+
+    Returns:
+    * (`list[dict[str, Any]]`): Each `[[release]]` table; empty when
+      there is no file.
+
+    Raises:
+    * `ValueError`:
+      If the file cannot be read as TOML, naming it.
+    """
+    # A missing file is no releases yet.
+    path: Path = releases_path(program)
+    try:
+        table: dict[str, Any] = tomllib.loads(
+            path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return []
+    except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError) as error:
+        raise ValueError(f"{path.name}: {error}") from None
+    entries: object = table.get("release", [])
+    return [one for one in (entries if isinstance(entries, list) else [])
+            if isinstance(one, dict)]
+
+
+def release_entry(version: str, dated: str, entries: Sequence[str],
+                  commit: str) -> str:
+    """Return the `[[release]]` entry `prog.py.releases` gets for a release.
+
+    The version, when it was made, the date its versions are frozen at
+    and the `dependencies` it shipped with, which are enough to make
+    it again, plus the version control commit it was made from, if
+    there is one (Wayne, 2026-10-22: no copy of the program).
+
+    Arguments:
+    * `version` (`str`):
+      Such as `1.0.0`.
+    * `dated` (`str`):
+      The `exclude-newer` date, or empty for none.
+    * `entries` (`Sequence[str]`):
+      The release's `dependencies`.
+    * `commit` (`str`):
+      Such as `git dd6c8b3`, or empty.
+
+    Returns:
+    * (`str`): The entry, a blank line first.
+    """
+    # One key per line, `dependencies` one entry per line.
+    lines: list[str] = [
+        "", "[[release]]", f"version = {json.dumps(version)}",
+        f'date = "{time.strftime("%Y-%m-%d %H:%M UTC", time.gmtime())}"']
+    if commit:
+        lines.append(f"commit = {json.dumps(commit)}")
+    if dated:
+        lines.append(f"exclude-newer = {json.dumps(dated)}")
+    lines.append("dependencies = [")
+    lines += [f"    {json.dumps(entry)}," for entry in entries]
+    lines.append("]")
+    return "\n".join(lines) + "\n"
+
+
+def commit_of(program: Path) -> str:
+    """Return the version control commit a program's folder is at.
+
+    Arguments:
+    * `program` (`Path`):
+      The program.
+
+    Returns:
+    * (`str`): Such as `git dd6c8b3` (with `+` when the program differs
+      from it), `hg 1a2b3c4d5e6f`, or empty when neither knows it.
+    """
+    # `git`, then `hg`; either may be missing.
+    command: list[str]
+    for command in (["git", "rev-parse", "--short", "HEAD"],
+                    ["hg", "id", "-i"]):
+        try:
+            found: subprocess.CompletedProcess[str] = subprocess.run(
+                command, cwd=program.parent, capture_output=True,
+                text=True, timeout=10, check=False)
+        except (OSError, subprocess.TimeoutExpired):
+            continue
+        if found.returncode or not found.stdout.strip():
+            continue
+        commit: str = found.stdout.strip()
+        if command[0] == "git":
+            try:
+                changed: subprocess.CompletedProcess[str] = subprocess.run(
+                    ["git", "status", "--porcelain", "--", program.name],
+                    cwd=program.parent, capture_output=True, text=True,
+                    timeout=10, check=False)
+                if changed.stdout.strip():
+                    commit += "+"
+            except (OSError, subprocess.TimeoutExpired):
+                pass
+        return f"{command[0]} {commit}"
+    return ""
+
+
+def cull_seconds(program: Path, default: float = CULL_DAYS) -> float:
+    """Return how long what a program holds may go unused, in seconds.
+
+    Its `prog.py.toml`'s `cull-days`, for a developer's program that
+    still has one; otherwise `default` (`CULL_DAYS`).  A settings file
+    that cannot be read is the default, since `cull` must not stop.
+
+    Arguments:
+    * `program` (`Path`):
+      The program, which may no longer exist.
+    * `default` (`float`):
+      The seconds otherwise.
+
+    Returns:
+    * (`float`): The seconds.
+    """
+    # Only a file that is there, reads, and sets it.
+    try:
+        if settings_path(program).is_file():
+            chosen: int | None = read_settings(
+                settings_path(program)).cull_days
+            if chosen is not None:
+                return chosen * 86400.0
+    except (OSError, ValueError):
+        pass
+    return default
 
 
 def next_release(last: str) -> str:
@@ -1167,6 +1386,10 @@ def read_settings(path: Path) -> Settings:
             if value != "update" and value not in published:
                 wrong = '"update" or a published bootstrap, ' + and_list(
                     [f'"{one}"' for one in published], "or")
+        elif key == "cull-days":
+            if (isinstance(value, bool) or not isinstance(value, int)
+                    or value < 1):
+                wrong = "a whole number of days, 1 or more"
         elif key == "verbosity":
             if value not in VERBOSITY:
                 wrong = "one of " + and_list(
@@ -3500,6 +3723,8 @@ class EZPkg:
           `ezpkg-<version>.dist-info/` are `EZPkg` as bootstraps before
           `nopip8` installed it.)
         * `remove.py` removes this whole directory.
+        * `list.py` says what is here and for which programs, and
+          changes nothing.
         * `quick_start.py` is a complete program that uses `EZPkg`.
           Copy its parts into a program of your own; the comments in
           it say which part is which.  It is the copy that came with
@@ -3579,6 +3804,7 @@ class EZPkg:
         self.quick_start = self.root / "quick_start.py"
         refresh(self.quick_start, QUICK_START)
         refresh(self.root / "remove.py", REMOVE_SCRIPT)
+        refresh(self.root / "list.py", LIST_SCRIPT)
 
         # Repair a single module install, so that the bootstrap that
         # fetched this one recognises it next time.  See `I.cctfd`.
@@ -3699,28 +3925,28 @@ class EZPkg:
         return None if found is None else approvals_in(found[1])
 
     def released(self) -> str:
-        """Return Part 1's `[tool.ezpkg] released` version, if any.
+        """Return the newest version in `prog.py.releases`, if any.
 
         Written by `release`, so that a `release` setting releases once
-        each time it changes (`T.abfd`).
+        each time it changes (`T.abfd`, Wayne, 2026-10-22).
 
         Returns:
         * (`str`): Such as `1.0.0`; empty when nothing was released.
-        """
-        # The stash's, for a developer whose Part 1 is not edited.
-        if self.stashing():
-            last: object = self.stash().get("released")
-            return last if isinstance(last, str) else ""
 
-        # A block that will not parse has released nothing.
-        try:
-            declared: dict[str, Any] = self.declaration()
-        except ValueError:
+        Raises:
+        * `SystemExit`:
+          If `prog.py.releases` cannot be read, since a release made
+          without knowing the last one could repeat it.
+        """
+        # The last entry is the newest.
+        program: Path | None = main_path()
+        if program is None:
             return ""
-        tool: object = declared.get("tool", {})
-        table: object = tool.get("ezpkg", {}) if isinstance(tool, dict) else {}
-        version: object = (table.get("released")
-                           if isinstance(table, dict) else None)
+        try:
+            entries: list[dict[str, Any]] = read_releases(program)
+        except ValueError as error:
+            raise SystemExit(str(error)) from None
+        version: object = entries[-1].get("version") if entries else None
         return version if isinstance(version, str) else ""
 
     def edit_part1(self, settings: Sequence[tuple[str, str, str | None]]
@@ -4998,11 +5224,11 @@ class EZPkg:
         `.toml` (Wayne, 2026-10-22): `dependencies`, the entries for
         imports Part 1 does not declare; `checksums` and `tags`, the
         approvals (`record_approvals`); `exclude-newer`, the frozen
-        date; and `released`, the last release.  A program with none yet
+        date.  A program with none yet
         (a new program, a deleted `~/.ezpkg`, another computer, a moved
         program) is seeded once from what Part 1 itself holds, as an
-        older `ezpkg` wrote it there, else from its newest release's
-        `email` copy (`seed_from_builds`), else starts empty.
+        older `ezpkg` wrote it there, else from the newest entry of
+        `prog.py.releases` (`seed_from_releases`), else starts empty.
 
         Returns:
         * (`dict[str, Any]`): The stash, empty for a program with no
@@ -5034,63 +5260,44 @@ class EZPkg:
             dated = dated.isoformat()
         if isinstance(dated, str) and dated:
             seeded["exclude-newer"] = dated
-        released: object = self.part1_value("ezpkg", "released")
-        if isinstance(released, str) and released:
-            seeded["released"] = released
         if "checksums" not in seeded:
-            seeded = {**self.seed_from_builds(program[0]), **seeded}
+            seeded = {**self.seed_from_releases(program[0]), **seeded}
         self.stashed = seeded
         self.keep(record, kept, stash=seeded)
         return seeded
 
-    def seed_from_builds(self, program: Path) -> dict[str, Any]:
-        """Return a stash taken from a program's newest `email` release.
+    def seed_from_releases(self, program: Path) -> dict[str, Any]:
+        """Return a stash taken from a program's newest release.
 
-        Its copy holds the merged `dependencies`, the `checksums` and
-        the date, so a program whose stash was lost carries on with the
-        versions it last released.
+        Its entry in `prog.py.releases` holds the `dependencies` it
+        shipped with and the date its versions are frozen at, so a
+        program whose stash was lost resolves the same versions again,
+        and its next run approves them afresh.
 
         Arguments:
         * `program` (`Path`):
           The program.
 
         Returns:
-        * (`dict[str, Any]`): The stash, empty when there is no such
-          release.
+        * (`dict[str, Any]`): The stash, empty when there is no release.
         """
-        # The newest version folder that has an `email` copy.
-        folders: list[Path] = sorted(
-            (one for one in builds_path(program).glob("*")
-             if (one / f"{program.stem}-{one.name}.py").is_file()),
-            key=lambda one: [int(number) for number
-                             in re.findall(r"\d+", one.name)])
-        if not folders:
-            return {}
-        copy: Path = folders[-1] / f"{program.stem}-{folders[-1].name}.py"
+        # The newest entry, if the file can be read.
         try:
-            text: str = read_program(copy)[0]
-            declared: dict[str, Any] = script_metadata(text) or {}
-        except (OSError, ValueError):
+            entries: list[dict[str, Any]] = read_releases(program)
+        except ValueError:
             return {}
-
-        # Its entries beyond Part 1's, its approvals and date.
-        seeded: dict[str, Any] = {"released": folders[-1].name}
-        entries: object = declared.get("dependencies")
-        if isinstance(entries, list):
-            seeded["dependencies"] = [one for one in entries
+        if not entries:
+            return {}
+        seeded: dict[str, Any] = {}
+        listed: object = entries[-1].get("dependencies")
+        if isinstance(listed, list):
+            seeded["dependencies"] = [one for one in listed
                                       if isinstance(one, str)]
-        approved: dict[str, str] | None = approvals_in(text)
-        if approved:
-            seeded["checksums"] = approved
-            seeded["tags"] = approval_tags(text)
-        tool: object = declared.get("tool", {})
-        uv: object = tool.get("uv", {}) if isinstance(tool, dict) else {}
-        when: object = uv.get("exclude-newer") if isinstance(uv, dict) else None
-        if isinstance(when, datetime.date):
-            when = when.isoformat()
+        when: object = entries[-1].get("exclude-newer")
         if isinstance(when, str) and when:
             seeded["exclude-newer"] = when
-        self.say(3, f"ezpkg: {program.name}'s versions taken from {copy}")
+        self.say(3, f"ezpkg: {program.name}'s versions taken from "
+                 f"{releases_path(program).name}")
         return seeded
 
     def put_stash(self, **changes: object) -> None:
@@ -6182,8 +6389,8 @@ class EZPkg:
         lines += [cut(f"{number}. {title}" + (f": {told}" if told else ""),
                       width)
                   for number, (title, told) in enumerate(packages, 1)]
-        lines.append(wrapped(f"`ezpkg` ({HOME_PAGE}) manages {place}.",
-                             width))
+        lines.append(wrapped(f"`ezpkg` ({HOME_PAGE}) manages {place}; "
+                             f"its `list.py` says what is there.", width))
         return "\n".join(lines) + "\n"
 
 
@@ -6451,34 +6658,31 @@ class EZPkg:
             self.keep(record, kept, agreed="yes")
 
     def note_request(self, request: str) -> None:
-        """Remember which cached request an agreed program uses.
+        """Remember which cached request a program uses now.
 
-        So that `cull` keeps its packages, however long it sits idle: an
-        end user who agreed once should not meet a download, and perhaps
-        a network failure, on a later run (Wayne, S3.3b).  The last four
-        requests are kept, so that a program whose `dependencies`
-        changed lets its old packages go.
+        So that `cull` keeps its packages for as long as the program's
+        own `cull-days` says (`stale`), which may be longer than the
+        default.  Only the latest is kept: a program whose
+        `dependencies` changed lets its old packages go at the default
+        age (Wayne, 2026-10-22; S3.3b kept an agreed program's for
+        ever).
 
         Arguments:
         * `request` (`str`):
           The key `request_for` built, as `remember` files it.
         """
-        # Only an end user's agreed program.
+        # A developer's program, or an end user's agreed one.
         program: Path | None = main_path()
-        if self.developing() or program is None:
+        if program is None:
             return
         record: Path
         kept: dict[str, Any]
         record, kept = self.development_record(program)
-        if not kept.get("agreed"):
+        if not (kept.get("agreed") or self.developing()):
             return
         digest: str = hashlib.sha256(request.encode()).hexdigest()
-        held: object = kept.get("requests")
-        requests: list[str] = ([str(one) for one in held]
-                               if isinstance(held, list) else [])
-        if requests[-1:] != [digest]:
-            requests = [one for one in requests if one != digest]
-            self.keep(record, kept, requests=[*requests, digest][-4:])
+        if kept.get("requests") != [digest]:
+            self.keep(record, kept, requests=[digest])
 
     def record_approvals(self, wheels: Sequence[Path]) -> None:
         """Keep a developer's approvals and date up to date, silently.
@@ -7107,14 +7311,11 @@ class EZPkg:
         """Return the version to release now, or empty for none.
 
         Only a developer's run releases, and only once `exports` names a
-        form: releases are off until the developer turns them on, so a
-        first run leaves no `prog_builds/` (Wayne, 2026-10-21).  Then it
-        does when `prog.py.release` is missing, which is so on the first
-        run after `exports` is set and whenever the developer deletes
-        it, or when `release` names a version other than the last one
-        released, which is how a developer chooses a number, even an
-        older one.  The version is `release` when it is new, else the
-        one after the last (`next_release`).
+        form and `release` names a version: releases are off until the
+        developer turns them on (Wayne, 2026-10-21).  Then a release is
+        due whenever `release` differs from the newest entry of
+        `prog.py.releases`, which is how a developer chooses each
+        number, even an older one (Wayne, 2026-10-22).
 
         Arguments:
         * `settings` (`Settings | None`):
@@ -7126,14 +7327,10 @@ class EZPkg:
         # Nothing for an end user, without the program's file, or with
         # releases off.
         program: Path | None = main_path()
-        if settings is None or program is None or not settings.exports:
+        if (settings is None or program is None or not settings.exports
+                or not settings.release):
             return ""
-        last: str = self.released()
-        chosen: bool = settings.release not in (None, last)
-        if not chosen and release_path(program).exists():
-            return ""
-        return (settings.release if chosen and settings.release
-                else next_release(last))
+        return "" if settings.release == self.released() else settings.release
 
     def restart(self, after_release: bool = False) -> None:
         """Run the program again after `ezpkg` has changed its file.
@@ -7148,7 +7345,7 @@ class EZPkg:
         (`statements_above_bootstrap`).  Once only: `EZPKG_RESTARTED`
         marks the second start, and a second edit is only reported;
         except after a release, which cannot come twice, since it has
-        written `prog.py.release` and recorded its version.
+        recorded its version in `prog.py.releases`.
 
         Arguments:
         * `after_release` (`bool`):
@@ -7325,20 +7522,21 @@ class EZPkg:
         program's `ezpkg` entry gets the range of this `ezpkg` (S5.1,
         S5.1c); the imports are checked; bare entries get ranges
         (S5.1b); the approvals (kept up to date by every developer run)
-        are frozen as they are; each of `exports` is built into
-        `prog_builds/1.0.0/`, named by version (`prog-1.0.0.py`,
-        `prog-1.0.0.pyz`, `prog-1.0.0-uv.py`), a `zipapp` that cannot
-        carry a compiled package being skipped with a line; `released =
-        "1.0.0"` is recorded in Part 1; and `prog.py.release` says what
-        was built.  The caller then runs the program as usual (Wayne,
-        2026-10-21).
+        are frozen as they are; each of `exports` is built beside the
+        program, named by version (`prog-1.0.0.py`, `prog-1.0.0.pyz`,
+        `prog-1.0.0-uv.py`; `release_files`), a `zipapp` that cannot
+        carry a compiled package being skipped with a line; an entry is
+        added to `prog.py.releases` (`release_entry`); and the last
+        release's files are removed, so one set is ever there.  The
+        caller then runs the program as usual (Wayne, 2026-10-21,
+        2026-10-22).
 
-        A release that fails says why and writes no `prog.py.release`,
-        so the program still runs, and its next run tries again.
+        A release that fails says why, removes what it built and records
+        nothing, so the program still runs, and its next run tries again.
 
         With `EDIT_PROGRAM` off, every change is made to a staged copy
-        of the program (`staged`, `program_text`), never to `prog.py`,
-        and the version is recorded in the stash (Wayne, 2026-10-22).
+        of the program (`staged`, `program_text`), never to `prog.py`
+        (Wayne, 2026-10-22).
 
         Arguments:
         * `settings` (`Settings`):
@@ -7389,87 +7587,79 @@ class EZPkg:
             replaced: str = self.replace_bootstrap()
             if replaced:
                 self.say(1, replaced)
-        folder: Path = builds_path(program) / version
         built: list[Path] = []
-        skipped: list[str] = []
         try:
             asking = self.range_ezpkg(asking)
             self.check_imports(asking)
 
-            # Ranges, then what `exports` lists, into a folder of its
-            # own; a rebuilt version replaces what it had.  Every form
-            # takes the pasted bootstrap out or sends it, so a program
-            # that uses `ezpkg` some other way builds none.
+            # Ranges, then what `exports` lists, beside the program.
+            # Every form takes the pasted bootstrap out or sends it, so a
+            # program that uses `ezpkg` some other way builds none.
             asking = self.give_ranges(asking)
-            shutil.rmtree(folder, ignore_errors=True)
-            folder.mkdir(parents=True)
             forms: list[str] = sorted(settings.exports,
                                       key=EXPORT_FORMS.index)
             if forms and find_bootstrap(
                     self.program_text(program)[0]) is None:
-                skipped.append("all: no pasted bootstrap")
                 self.say(1, f"`{program.name}` has no pasted bootstrap, "
                          f"so its release builds no "
                          f"{and_list(forms, 'or')}.")
                 forms = []
+            files: list[Path] = release_files(program, version)
             form: str
             for form in forms:
-                target: Path = folder / (
-                    f"{program.stem}-{version}.pyz" if form == "zipapp"
-                    else f"{program.stem}-{version}.py" if form == "email"
-                    else f"{program.stem}-{version}-uv.py")
+                target: Path = files[EXPORT_FORMS.index(form)]
                 try:
                     built.append(self.export(form, providing, target))
                 except RuntimeError as error:
                     # A zip cannot carry compiled code; the rest can.
                     if form != "zipapp" or "cannot bundle" not in str(error):
                         raise
-                    skipped.append(f"zipapp: {error}")
                     self.say(1, f"No `{target.name}`: {error}.")
 
                 # The lock `uv` wrote beside the script, if `uv` was there.
-                lock: Path = target.with_name(target.name + ".lock")
-                if form == "uv" and lock.is_file():
-                    built.append(lock)
+                if form == "uv" and files[3].is_file():
+                    built.append(files[3])
+
+            # What the entry records: the copy's `dependencies`.
+            declared: dict[str, Any] = script_metadata(
+                self.program_text(program)[0]) or {}
+            shipped: object = declared.get("dependencies", [])
+            entry: str = release_entry(
+                version, self.declared_date()
+                or str(self.stash().get("exclude-newer") or ""),
+                [one for one in (shipped if isinstance(shipped, list)
+                                 else []) if isinstance(one, str)],
+                commit_of(program))
         except (RuntimeError, ValueError, SystemExit, OSError) as error:
+            for made in built:
+                made.unlink(missing_ok=True)
             self.say(1, f"`{program.name}` {version} was not released: "
                      f"{error}.  `{program.name}` runs as usual, and its "
                      f"next run tries again.")
             return False
 
-        # Recorded in Part 1 (or the stash) and in `prog.py.release`,
-        # then said.
-        trouble: str = ""
-        if self.stashing():
-            self.put_stash(released=version)
-        else:
-            trouble = self.edit_part1(
-                [("ezpkg", "released", f'"{version}"')])
-        if trouble:
-            self.say(1, f"`{program.name}` {version} was built, but "
-                     f"{trouble}")
-            return False
-        record: Path = release_path(program)
-        where: str = f"{folder.parent.name}/{version}"
-        record.write_text(
-            f"# {record.name}: the last release of {program.name}, "
-            f"written by ezpkg.\n"
-            f"# Delete this file and run {program.name} to build the "
-            f"next release\n"
-            f"# ({next_release(version)}, unless `release` in "
-            f"{program.name}.toml names another).\n"
-            f'version = "{version}"\n'
-            f'date = "{time.strftime("%Y-%m-%d %H:%M UTC", time.gmtime())}"\n'
-            f'folder = "{where}"\n'
-            f"built = [{', '.join(json.dumps(one.name) for one in built)}]\n"
-            + (f"skipped = [{', '.join(json.dumps(one) for one in skipped)}]\n"
-               if skipped else ""),
-            encoding="utf-8")
+        # Recorded at the end of `prog.py.releases`, a heading first in
+        # a new file; then the last release's files go, so that one set
+        # is ever beside the program.
+        record: Path = releases_path(program)
+        last: str = self.released()
+        with record.open("a", encoding="utf-8") as adding:
+            if adding.tell() == 0:
+                adding.write(
+                    f"# {record.name}: the releases of {program.name}, "
+                    f"oldest first, written by ezpkg.\n"
+                    f"# Change `release` in {program.name}.toml and run "
+                    f"{program.name} to make the next one.\n")
+            adding.write(entry)
+        if last and last != version:
+            for gone in release_files(program, last):
+                gone.unlink(missing_ok=True)
         names: list[str] = [f"`{one.name}`" for one in built]
-        self.say(1, f"Released `{program.name}` {version} into `{where}`"
+        self.say(1, f"Released `{program.name}` {version}"
                  + (f": {and_list(names)}" if names else "")
-                 + f".  To build the next release, delete `{record.name}` "
-                 f"and run `{program.name}`.")
+                 + f".  To make the next release, change `release` in "
+                 f"`{program.name}.toml` (to \"{next_release(version)}\", "
+                 f"say) and run `{program.name}`.")
         return True
 
     def range_ezpkg(self, asking: list[str]) -> list[str]:
@@ -7729,9 +7919,8 @@ class EZPkg:
             self.scan_imports(asked)
         self.name_the_additions()
 
-        # A missing `prog.py.release`, or a new `release` value, builds
-        # a release on the edited file, which then starts again and runs
-        # as usual (`release`).
+        # A new `release` value builds a release, after which the
+        # program runs as usual (`release`).
         version: str = self.release_due(settings)
         if version and settings is not None:
             if self.edited:
@@ -8362,14 +8551,15 @@ class EZPkg:
 
         Scan records in `scans/` age the same way, since `scan_imports`
         touches them too, and nothing else names them; so do the
-        records in `develop/`, which `development_record` touches,
-        except one that holds an end user's yes (`agreed`): that is
-        asked once and never again, however long the program sits idle,
-        since whoever runs it next may not be who agreed (Wayne,
-        2026-10-19).  Nor one that holds a developer's `stash`, which
-        is the only record of the program's frozen versions (until the
-        garbage collection question is settled, Wayne, 2026-10-22).  Nor are the requests such a program uses
-        (`note_request`), so its packages stay (S3.3b).
+        records in `develop/`, which `development_record` touches on
+        every run, except that the record of a program that still exists
+        never goes: it holds the end user's yes (`agreed`), asked once
+        and never again, and the developer's `stash`.  A program deleted
+        (or moved, or on a drive that is not there) lets its record go
+        once it has been unused for its time.  The latest request a
+        program uses (`note_request`) is kept as long as that program's
+        own `cull-days` says (`cull_seconds`), if that is longer; every
+        other age is `days` (Wayne, 2026-10-22).
 
         Nothing else is aged.  Trees are kept or dropped by whether a
         record still names them, so removing a record is what makes its
@@ -8378,37 +8568,47 @@ class EZPkg:
 
         Arguments:
         * `days` (`float`):
-          Seconds of disuse before a record counts as stale.  Named for
-          the unit a person thinks in; `CULL_DAYS` does the arithmetic.
+          Seconds of disuse before a record counts as stale, unless a
+          program's `cull-days` says otherwise.  Named for the unit a
+          person thinks in; `CULL_DAYS` does the arithmetic.
 
         Returns:
         * (`list[Path]`): The records, sorted, removed by nobody.
         """
-        # The requests agreed programs use are never stale (S3.3b).
-        held: set[str] = set()
+        # Each program's record: kept while the program exists, and
+        # its latest request kept for the program's own time.
+        now: float = time.time()
+        allowed: dict[str, float] = {}
+        found: list[Path] = []
         record: Path
-        for record in (self.root / "develop").glob("*.json"):
+        for record in sorted((self.root / "develop").glob("*.json")):
             try:
                 kept: object = json.loads(record.read_text())
+                used: float = record.stat().st_mtime
             except (OSError, ValueError):
                 continue
-            if isinstance(kept, dict) and kept.get("agreed"):
-                held |= {str(one) for one in kept.get("requests", [])}
+            if not isinstance(kept, dict):
+                continue
+            program: Path = Path(str(kept.get("program", "")))
+            alive: bool = program.is_file()
+            seconds: float = cull_seconds(program, days) if alive else days
+            if not alive and used < now - seconds:
+                found.append(record)
+                continue
+            digest: object
+            for digest in kept.get("requests", []) or []:
+                allowed[str(digest)] = max(allowed.get(str(digest), days),
+                                           seconds)
 
-        # An unreadable record is `litter`'s business, not this one's.
-        cutoff: float = time.time() - days
-        found: list[Path] = []
+        # Requests and scans, by their own last use.  An unreadable one
+        # is `litter`'s business, not this one's.
         for record in [*self.paths()[3].glob("*.json"),
-                       *(self.root / "scans").glob("*.json"),
-                       *(self.root / "develop").glob("*.json")]:
+                       *(self.root / "scans").glob("*.json")]:
             try:
-                if record.stat().st_mtime < cutoff and not (
-                        record.parent.name == "develop"
-                        and any(json.loads(record.read_text()).get(key)
-                                for key in ("agreed", "stash"))
-                        or record.stem in held):
+                if record.stat().st_mtime < now - allowed.get(record.stem,
+                                                              days):
                     found.append(record)
-            except (OSError, ValueError, AttributeError):
+            except OSError:
                 continue
         return sorted(found)
 

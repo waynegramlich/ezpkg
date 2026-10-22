@@ -163,10 +163,11 @@ SHIPPING: str = "nopip8"
 # fallback for a Python without certificates (`I.btosc`), and `nopip7`
 # took `nopip6`'s on 2026-10-17, capturing `pip`'s output (`T.abfd`),
 # and `nopip8` took `nopip7`'s on 2026-10-20, fetching no `pip` at all.
-# The others are kept, because keeping them costs nothing, and run
-# under `EZPKG_TEST=COMPLETE`; a test that names a case of its own
-# still runs it.
-FAST_CASES: tuple[str, ...] = ("nopip1", "nopip8")
+# On 2026-10-22 Wayne cut the default to the shipping case alone, to
+# save time.  The others are kept, because keeping them costs nothing,
+# and run under `EZPKG_TEST=COMPLETE`; a test that names a case of its
+# own still runs it.
+FAST_CASES: tuple[str, ...] = (SHIPPING,)
 
 def platform_tag() -> str:
     """Return a compatibility tag this interpreter would accept.
@@ -3323,11 +3324,6 @@ class InstallTest(unittest.TestCase):
                     **extra: str) -> subprocess.CompletedProcess[str]:
         """Run one of those programs against the local index.
 
-        A developer's program (one with a `prog.py.toml`) is given a
-        `prog.py.release`, so that its run does not build a release when
-        its `exports` names a form, unless the test sets
-        `self.releasing` to see that it does.
-
         Arguments:
         * `program` (`Path`):
           What `program` returned.
@@ -3338,30 +3334,12 @@ class InstallTest(unittest.TestCase):
         * (`subprocess.CompletedProcess[str]`): The finished child.
         """
         # The index is local; everything else is inherited.
-        self.no_release(program)
         environment: dict[str, str] = {
             **os.environ, "PIP_INDEX_URL": self.index_url, **extra}
         environment.pop("VIRTUAL_ENV", None)
         return subprocess.run([sys.executable, str(program)],
                               env=environment, capture_output=True,
                               text=True, check=False)
-
-    def no_release(self, program: Path) -> None:
-        """Give a developer's program a `prog.py.release`, so none is built.
-
-        Unless the test sets `self.releasing` to see that a missing one
-        builds a release.
-
-        Arguments:
-        * `program` (`Path`):
-          The program about to run.
-        """
-        # Only beside a `prog.py.toml`, and never over a real one.
-        record: Path = ezpkg.release_path(program)
-        if (program.with_name(f"{program.name}.toml").exists()
-                and not getattr(self, "releasing", False)
-                and not record.exists()):
-            record.write_text("# No release here: the test suite.\n")
 
     def run_as_developer(self, program: Path,
                          **extra: str) -> subprocess.CompletedProcess[str]:
@@ -3417,11 +3395,8 @@ class InstallTest(unittest.TestCase):
         # A new version each time, and its file's name.
         self.releases: int = getattr(self, "releases", 0) + 1
         version: str = f"1.0.{self.releases}"
-        self.built: Path = (
-            program.with_name(f"{program.stem}_builds") / version) / (
-            f"{program.stem}-{version}.pyz" if form == "zipapp"
-            else f"{program.stem}-{version}.py" if form == "email"
-            else f"{program.stem}-{version}-uv.py")
+        self.built: Path = ezpkg.release_files(program, version)[
+            ezpkg.EXPORT_FORMS.index(form)]
         settings: Path = program.with_name(f"{program.name}.toml")
         settings.write_text(f'auto-dependencies = false\nrelease = '
                             f'"{version}"\nexports = ["{form}"]\n')
@@ -3837,7 +3812,6 @@ class InstallTest(unittest.TestCase):
         # `preexec_fn`, which runs between `fork` and `exec` and can
         # deadlock in a process that has threads -- and this one has a
         # server thread.
-        self.no_release(program)
         master: int
         slave: int
         master, slave = pty.openpty()
@@ -3902,7 +3876,8 @@ class InstallTest(unittest.TestCase):
         self.assertIn("1.2.3", seen)
 
         # Long idle and swept: still never asked again (Wayne, S2.1),
-        # and its packages kept, so nothing is fetched (S3.3b).
+        # but its packages go, and come back silently (Wayne,
+        # 2026-10-22, in place of S3.3b).
         venv: ezpkg.EZPkg = ezpkg.EZPkg(cache)
         record: Path
         for record in [*(cache / "develop").glob("*.json"),
@@ -3910,11 +3885,11 @@ class InstallTest(unittest.TestCase):
             os.utime(record, (0, 0))
         venv.cull(grace=-1, days=-1)
         self.assertTrue(list((cache / "develop").glob("*.json")))
-        self.assertTrue(list((cache / "requests").glob("*.json")))
-        self.assertTrue(list((cache / "versions").glob("widget-*")))
-        seen = self.answer_on_a_terminal(program, b"",
-                                         PIP_INDEX_URL="http://127.0.0.1:1/")
+        self.assertFalse(list((cache / "requests").glob("*.json")))
+        self.assertFalse(list((cache / "versions").glob("widget-*")))
+        seen = self.answer_on_a_terminal(program, b"")
         self.assertNotIn(PROMPT, seen)
+        self.assertNotIn("now retained", seen)
         self.assertIn("1.2.3", seen)
 
         # Another program, its packages already cached: still asked
@@ -4074,7 +4049,8 @@ class InstallTest(unittest.TestCase):
             f"The following 3 package(s) are now retained in `{root}`:",
             "1. pip 26.2.1 (used by `ezpkg`): The tool.",
             "2. ezpkg 0.0.1: Easy.", "3. cowsay 6.1: Moo.",
-            f"`ezpkg` ({ezpkg.HOME_PAGE}) manages `{root}`.", ""]))
+            (f"`ezpkg` ({ezpkg.HOME_PAGE}) manages `{root}`; its "
+             f"`list.py` says what is there."), ""]))
 
         # Once told, and on any other run, only what arrived.
         venv.told = True
@@ -4725,6 +4701,96 @@ class InstallTest(unittest.TestCase):
         self.assertEqual(venv.stale(), [])
         self.age(record, 2 * ezpkg.CULL_DAYS)
         self.assertEqual(venv.stale(), [record])
+
+    def test_a_programs_record_goes_only_with_the_program(self) -> None:
+        """A program's yes and stash stay while it exists, however idle.
+
+        Its packages do not: a request unused for `CULL_DAYS` goes, and
+        the next run fetches it again.  Once the program is deleted, its
+        record goes too, after the same time (Wayne, 2026-10-22).
+        """
+        # A program and its record, both long unused.
+        target: Path = self.root / "kept"
+        venv: ezpkg.EZPkg = ezpkg.EZPkg(target)
+        program: Path = self.root / "kept_prog.py"
+        program.write_text("print('ran')\n")
+        record: Path
+        kept: dict[str, Any]
+        record, kept = venv.development_record(program)
+        request: Path = venv.paths()[3] / f"{'a' * 64}.json"
+        request.write_text("{}")
+        venv.keep(record, kept, agreed="yes", stash={},
+                  requests=[request.stem])
+        self.age(record, 2 * ezpkg.CULL_DAYS)
+        self.age(request, 2 * ezpkg.CULL_DAYS)
+        self.assertEqual(venv.stale(), [request])
+
+        # Deleted: its record goes once unused for the same time.
+        program.unlink()
+        self.assertEqual(venv.stale(), sorted([record, request]))
+        self.age(record, -1.5 * ezpkg.CULL_DAYS)
+        self.assertEqual(venv.stale(), [request])
+
+    def test_list_says_what_the_cache_holds_for_whom(self) -> None:
+        """`list.py` names each program, how it is held, and its size.
+
+        It changes nothing (Wayne, 2026-10-22).
+        """
+        # An agreed program holding one tree through its request.
+        target: Path = self.root / "listed"
+        venv: ezpkg.EZPkg = ezpkg.EZPkg(target)
+        program: Path = self.root / "listed_prog.py"
+        program.write_text("print('ran')\n")
+        tree: Path = venv.paths()[2] / "widget-1.2.3"
+        tree.mkdir()
+        (tree / "widget.py").write_bytes(b"x" * 2_000_000)
+        request: Path = venv.paths()[3] / f"{'d' * 64}.json"
+        request.write_text(json.dumps({"request": "widget",
+                                       "trees": [tree.name], "wheels": []}))
+        record: Path
+        kept: dict[str, Any]
+        record, kept = venv.development_record(program)
+        venv.keep(record, kept, agreed="yes", requests=[request.stem])
+
+        def listed() -> str:
+            # One run of the script, which must succeed.
+            done: subprocess.CompletedProcess[str] = subprocess.run(
+                [sys.executable, str(target / "list.py")],
+                capture_output=True, text=True, check=False)
+            self.assertEqual(done.returncode, 0, done.stderr)
+            return done.stdout
+
+        said: str = listed()
+        self.assertIn(f"`{target}` holds ", said)
+        self.assertIn(f"{program}\n    agreed to, last run ", said)
+        self.assertIn(", 2.0 MB\n", said)
+        program.unlink()
+        self.assertIn(", 2.0 MB, no longer there\n", listed())
+        self.assertTrue(record.exists())
+
+    def test_cull_days_keeps_a_programs_latest_packages_longer(self) -> None:
+        """`cull-days` keeps the latest request the program uses.
+
+        An older request of the same program goes at the default age.
+        """
+        # A developer's program that asks for a year.
+        target: Path = self.root / "patient"
+        venv: ezpkg.EZPkg = ezpkg.EZPkg(target)
+        program: Path = self.root / "patient_prog.py"
+        program.write_text("print('ran')\n")
+        self.developer_settings(program, "cull-days = 365\n")
+        record: Path
+        kept: dict[str, Any]
+        record, kept = venv.development_record(program)
+        latest: Path = venv.paths()[3] / f"{'b' * 64}.json"
+        older: Path = venv.paths()[3] / f"{'c' * 64}.json"
+        for one in (latest, older):
+            one.write_text("{}")
+            self.age(one, 2 * ezpkg.CULL_DAYS)
+        venv.keep(record, kept, stash={}, requests=[latest.stem])
+        self.assertEqual(venv.stale(), [older])
+        self.age(latest, 365 * 86400.0)
+        self.assertEqual(venv.stale(), sorted([latest, older]))
 
     def test_a_stale_request_takes_its_packages_with_it(self) -> None:
         """One sweep removes the record and then the trees it named.
@@ -5486,21 +5552,20 @@ class InstallTest(unittest.TestCase):
         self.assertEqual(done.returncode, 0, done.stderr[-400:])
         self.assertEqual(done.stdout.strip(), "1.0.0")
 
-    def test_deleting_the_release_file_builds_the_next_release(self) -> None:
-        """Once `exports` is set, no `prog.py.release` means a release.
+    def test_changing_release_builds_a_release(self) -> None:
+        """Once `exports` and `release` are set, a new `release` releases.
 
         Releases are off until the developer removes the `#`s from the
-        template's `exports` entries, so the first developer run builds
-        nothing and writes no `prog.py.release`.  Then the next run
-        builds 1.0.0, every form, into `prog_builds/1.0.0/`, writes
-        `prog.py.release` and runs the program; the next run builds
-        nothing; deleting the file builds 1.0.1; and `release` chooses a
-        version, even an older one (Wayne, 2026-10-21).
+        template's `exports` entries and its `release` line, so a first
+        run builds nothing.  Then a run builds 1.0.0, every form, beside
+        the program, adds it to `prog.py.releases` and runs the program;
+        the next run builds nothing; a new `release` builds that version
+        in place of the last one's files, even an older one (Wayne,
+        2026-10-22).
         """
         # `uv` does the resolving for every computer.
         if ezpkg.find_uv() is None:
             self.skipTest("uv is not installed")
-        self.releasing: bool = True
         program: Path
         home: Path
         program, home = self.bootstrapped_program(
@@ -5510,8 +5575,6 @@ class InstallTest(unittest.TestCase):
             program, ezpkg.SETTINGS_TEMPLATE.format(
                 name="prog.py", stem="prog", note="").replace(
                     "# auto-dependencies = true", "auto-dependencies = false"))
-        record: Path = ezpkg.release_path(program)
-        builds: Path = program.with_name("prog_builds")
 
         def run() -> str:
             # One developer run, which must run the program too.
@@ -5521,60 +5584,70 @@ class InstallTest(unittest.TestCase):
             self.assertEqual(done.stdout.strip(), "1.0.0")
             return " ".join(done.stderr.split())
 
-        # The template as it comes: no release at all.
-        said: str = run()
-        self.assertNotIn("Released", said)
-        self.assertFalse(record.exists())
-        self.assertFalse(builds.exists())
+        def beside() -> list[str]:
+            # What the releases left beside the program.
+            return sorted(one.name for one in program.parent.glob("prog-*"))
 
-        # Its `exports` entries uncommented: everything, then the
-        # program.
+        def versions() -> list[str]:
+            # The record's versions, oldest first.
+            return [one["version"] for one in ezpkg.read_releases(program)]
+
+        # The template as it comes, then with only `exports` set: no
+        # release at all.
+        self.assertNotIn("Released", run())
         settings.write_text(re.sub(
             r'^#( +"(?:email|zipapp|uv)",)', r" \1", settings.read_text(),
             flags=re.MULTILINE))
         self.assertEqual(ezpkg.read_settings(settings).exports,
                          ezpkg.EXPORT_FORMS)
-        said = run()
-        self.assertIn("Released `prog.py` 1.0.0 into "
-                      "`prog_builds/1.0.0`", said)
-        self.assertEqual(
-            sorted(one.name for one in (builds / "1.0.0").iterdir()),
-            ["prog-1.0.0-uv.py", "prog-1.0.0-uv.py.lock",
-             "prog-1.0.0.py", "prog-1.0.0.pyz"])
-        text: str = record.read_text()
-        self.assertIn('version = "1.0.0"', text)
-        self.assertIn("(1.0.1, unless", text)
-
-        # Then nothing, until the file goes.
         self.assertNotIn("Released", run())
-        record.unlink()
-        self.assertIn("Released `prog.py` 1.0.1", run())
-        self.assertTrue((builds / "1.0.1" / "prog-1.0.1.py").is_file())
+        self.assertEqual((beside(), versions()), ([], []))
 
-        # `release` goes back to 1.0.0, which is built again.
+        # `release` too: everything, then the program.
+        settings.write_text(settings.read_text().replace(
+            '# release = "1.0.0"', 'release = "1.0.0"'))
+        said: str = run()
+        self.assertIn("Released `prog.py` 1.0.0: ", said)
+        self.assertEqual(beside(), ["prog-1.0.0-uv.py",
+                                    "prog-1.0.0-uv.py.lock",
+                                    "prog-1.0.0.py", "prog-1.0.0.pyz"])
+        self.assertEqual(versions(), ["1.0.0"])
+
+        # Then nothing, until `release` changes, when the last one's
+        # files go.
+        self.assertNotIn("Released", run())
+        settings.write_text(settings.read_text().replace(
+            'release = "1.0.0"', 'release = "1.0.1"'))
+        self.assertIn("Released `prog.py` 1.0.1", run())
+        self.assertEqual(beside(), ["prog-1.0.1-uv.py",
+                                    "prog-1.0.1-uv.py.lock",
+                                    "prog-1.0.1.py", "prog-1.0.1.pyz"])
+
+        # Back to 1.0.0, which is built again and recorded again.
         settings.write_text('auto-dependencies = false\nrelease = "1.0.0"\n'
                             'exports = ["email"]\n')
         self.assertIn("Released `prog.py` 1.0.0", run())
-        self.assertEqual(
-            [one.name for one in (builds / "1.0.0").iterdir()],
-            ["prog-1.0.0.py"])
-        self.assertIn('version = "1.0.0"', record.read_text())
+        self.assertEqual(beside(), ["prog-1.0.0.py"])
+        self.assertEqual(versions(), ["1.0.0", "1.0.1", "1.0.0"])
+        self.assertTrue(ezpkg.releases_path(program).read_text().startswith(
+            "# prog.py.releases: the releases of prog.py"))
 
     def test_a_release_copy_carries_the_stash(self) -> None:
         """A release writes the stash into its copies, never into `prog.py`.
 
-        And a lost stash is taken back from the newest release.
+        And `prog.py.releases` records it, from which a lost stash is
+        taken back.
         """
         # `uv` does the resolving for every computer.
         if ezpkg.find_uv() is None:
             self.skipTest("uv is not installed")
-        self.releasing = True
         program: Path
         home: Path
         program, home = self.bootstrapped_program(
             "carried", 'dependencies = ["paned"]',
             "import paned\nimport widget\nprint(paned.__version__)")
-        self.developer_settings(program, 'exports = ["email"]\n')
+        self.developer_settings(program,
+                                'release = "1.0.0"\nexports = ["email"]\n')
         written: str = program.read_text()
         done: subprocess.CompletedProcess[str] = self.run_program(
             program, HOME=str(home))
@@ -5586,9 +5659,7 @@ class InstallTest(unittest.TestCase):
         # The copy: every entry ranged, its checksums and its date.
         cache: Path = home / ".ezpkg"
         stashed: dict[str, Any] = self.stash_of(program, cache)
-        self.assertEqual(stashed["released"], "1.0.0")
-        copy: str = (program.with_name("prog_builds") / "1.0.0"
-                     / "prog-1.0.0.py").read_text()
+        copy: str = program.with_name("prog-1.0.0.py").read_text()
         metadata: dict[str, Any] | None = ezpkg.script_metadata(copy)
         assert metadata is not None
         # A source `ezpkg` leaves its entry bare (S5.1c).
@@ -5599,13 +5670,20 @@ class InstallTest(unittest.TestCase):
         self.assertTrue(set(stashed["checksums"]) <= set(
             ezpkg.approvals_in(copy) or {}))
 
-        # A lost stash comes back from the copy.
+        # The record: what the copy shipped, and its date.
+        entry: dict[str, Any] = ezpkg.read_releases(program)[-1]
+        self.assertEqual(entry["version"], "1.0.0")
+        self.assertEqual(entry["dependencies"], metadata["dependencies"])
+        self.assertEqual(entry["exclude-newer"], stashed["exclude-newer"])
+
+        # A lost stash comes back from the record.
         shutil.rmtree(cache / "develop")
         done = self.run_program(program, HOME=str(home))
         self.assertEqual(done.returncode, 0, done.stderr[-400:])
+        self.assertNotIn("Released", done.stderr)
         again: dict[str, Any] = self.stash_of(program, cache)
-        self.assertEqual(again["released"], "1.0.0")
         self.assertEqual(again["exclude-newer"], stashed["exclude-newer"])
+        self.assertEqual(again["dependencies"][-1], "widget>=1.2.3,<2")
         self.assertEqual(program.read_text(), written)
 
     def test_next_release_adds_one_to_the_last_number(self) -> None:
@@ -6073,8 +6151,8 @@ class InstallTest(unittest.TestCase):
     def test_a_release_happens_once_per_value(self) -> None:
         """A new `release` value releases, once, and the program runs.
 
-        Every release gives bare entries ranges (S5.1b); Part 1 records
-        `released`; the next run with the same value just runs
+        Every release gives bare entries ranges (S5.1b); `prog.py.releases`
+        records it; the next run with the same value just runs
         (`T.abfd`).  `exports` names a form, since without one there are
         no releases; with no pasted bootstrap, none is built.
         """
@@ -6087,14 +6165,14 @@ class InstallTest(unittest.TestCase):
         done: subprocess.CompletedProcess[str] = self.run_program(program)
         self.assertEqual(done.returncode, 0, done.stderr[-400:])
         self.assertEqual(done.stdout, "ran\n")
-        self.assertIn("Released `prog.py` 1.0.0 into `prog_builds/1.0.0`",
+        self.assertIn("Released `prog.py` 1.0.0.",
                       " ".join(done.stderr.split()))
         self.assertEqual(self.declared_now(program),
                          ["widget>=1.2.3,<2", "sprocket>=1"])
-        metadata: dict[str, Any] | None = ezpkg.script_metadata(
-            program.read_text())
-        assert metadata is not None
-        self.assertEqual(metadata["tool"]["ezpkg"]["released"], "1.0.0")
+        entries: list[dict[str, Any]] = ezpkg.read_releases(program)
+        self.assertEqual([one["version"] for one in entries], ["1.0.0"])
+        self.assertEqual(entries[0]["dependencies"],
+                         ["widget>=1.2.3,<2", "sprocket>=1"])
         self.assertFalse(program.with_suffix(".ezpkg").exists())
 
         # Same value: an ordinary run.
@@ -7045,7 +7123,6 @@ class BootstrapCheckTest(unittest.TestCase):
             "print('ran')\n")
         settings: Path = self.root / "prog.py.toml"
         settings.write_text("auto-dependencies = false\n")
-        (self.root / "prog.py.release").write_text("# Not yet.\n")
         environment: dict[str, str] = dict(os.environ)
         environment.pop("EZPKG_BOOTSTRAP", None)
 
@@ -7520,7 +7597,7 @@ class CoverageToolTest(unittest.TestCase):
         """Runs that never finished are named rather than ignored."""
         # An empty directory is missing everything the default selects.
         text: str = ezpkg_coverage.compare(self.root)
-        self.assertIn("No counts for: baseline, nopip1, nopip8.", text)
+        self.assertIn(f"No counts for: baseline, {SHIPPING}.", text)
 
     def test_report_keeps_the_counts(self) -> None:
         """`report` saves what `compare` later reads back."""
@@ -7612,9 +7689,10 @@ class CoverageToolTest(unittest.TestCase):
             Returns:
             * (`tuple[str, int, float]`): As `measure_one` returns.
             """
-            # Only `nopip1` fails, so the verdict has to notice it.
+            # Only the shipping case fails, so the verdict has to
+            # notice it.
             calls.append((name, selection, marked_only))
-            return name, int(name == "nopip1"), 0.0
+            return name, int(name == SHIPPING), 0.0
 
         with (unittest.mock.patch.object(ezpkg_coverage, "measure_one",
                                          fake),
@@ -8292,6 +8370,13 @@ class MetadataTest(unittest.TestCase):
             cases: list[tuple[str, str | ezpkg.Settings]] = [
                 ("", ezpkg.Settings()),
                 ("exports = []\n", ezpkg.Settings(exports=())),
+                ("cull-days = 90\n", ezpkg.Settings(cull_days=90)),
+                ("cull-days = 0\n",
+                 ("prog.py.toml line 1: `cull-days` must be a whole number "
+                  "of days, 1 or more")),
+                ("cull-days = true\n",
+                 ("prog.py.toml line 1: `cull-days` must be a whole number "
+                  "of days, 1 or more")),
                 (('verbosity = "high"\nrelease = "1.2.0"\nexports = ["uv"]\n'
                  'auto-dependencies = false\nbootstrap = "nopip6"\n'),
                  ezpkg.Settings(False, "high", "1.2.0", ("uv",), "nopip6")),
@@ -8305,7 +8390,7 @@ class MetadataTest(unittest.TestCase):
                 ("\n\n[colour]\nx = 1\n",
                  ("prog.py.toml line 3: unknown setting `colour` (the "
                  "settings are `auto-dependencies`, `verbosity`, `release`, "
-                 "`exports`, `bootstrap` and `upgrade`)")),
+                 "`exports`, `bootstrap`, `upgrade` and `cull-days`)")),
                 ('auto-dependencies = "yes"\n',
                  ("prog.py.toml line 1: `auto-dependencies` must be `true` "
                   "or `false`")),
