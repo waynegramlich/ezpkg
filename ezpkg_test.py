@@ -3386,7 +3386,7 @@ class InstallTest(unittest.TestCase):
         settings: Path = program.with_name(f"{program.name}.toml")
         made: bool = not settings.exists()
         if made:
-            settings.write_text("auto-dependencies = false\n")
+            settings.write_text('verbosity = "low"\n')
         try:
             return self.run_program(
                 program, **{"EZPKG_EDIT_PROGRAM": "on", **extra})
@@ -3419,7 +3419,7 @@ class InstallTest(unittest.TestCase):
         self.built: Path = ezpkg.release_files(program, version)[
             ezpkg.EXPORT_FORMS.index(form)]
         settings: Path = program.with_name(f"{program.name}.toml")
-        settings.write_text(f'auto-dependencies = false\nrelease = '
+        settings.write_text(f'release = '
                             f'"{version}"\nexports = ["{form}"]\n')
         try:
             return self.run_program(program, **extra)
@@ -5593,8 +5593,7 @@ class InstallTest(unittest.TestCase):
             "trigger", 'dependencies = ["paned"]',
             "import paned\nprint(paned.__version__)")
         settings: Path = self.developer_settings(
-            program, ezpkg.SETTINGS_TEMPLATE.replace(
-                "# auto-dependencies = true", "auto-dependencies = false"))
+            program, ezpkg.SETTINGS_TEMPLATE)
 
         def run() -> str:
             # One developer run, which must run the program too.
@@ -5644,7 +5643,7 @@ class InstallTest(unittest.TestCase):
                                     "prog-1.0.1.py", "prog-1.0.1.pyz"])
 
         # Back to 1.0.0, which is built again and recorded again.
-        settings.write_text('auto-dependencies = false\nrelease = "1.0.0"\n'
+        settings.write_text('release = "1.0.0"\n'
                             'exports = ["email"]\n')
         self.assertIn("Released `prog.py` 1.0.0", run())
         self.assertEqual(beside(), ["prog-1.0.0.py"])
@@ -5873,7 +5872,7 @@ class InstallTest(unittest.TestCase):
 
     def synced_program(self, name: str, declared: str, tail: str,
                        comment: str = "",
-                       settings: str = "auto-dependencies = true\n"
+                       settings: str = 'verbosity = "low"\n'
                        ) -> Path:
         """Write a program, run it once clean, then change its imports.
 
@@ -5915,7 +5914,7 @@ class InstallTest(unittest.TestCase):
         return program
 
     def developer_settings(self, program: Path,
-                           settings: str = "auto-dependencies = true\n"
+                           settings: str = 'verbosity = "low"\n'
                            ) -> Path:
         """Make a program its developer's, with a `prog.py.toml`.
 
@@ -6046,7 +6045,7 @@ class InstallTest(unittest.TestCase):
             "upgrading", 'dependencies = ["sprocket==1.0.0"]',
             "import sprocket\nprint(sprocket.__version__)")
         settings: Path = self.developer_settings(
-            program, "auto-dependencies = false\n")
+            program, 'verbosity = "low"\n')
 
         def run() -> str:
             # One developer run, giving `sprocket`'s version.
@@ -6062,9 +6061,9 @@ class InstallTest(unittest.TestCase):
         self.assertEqual(run(), "1.0.0")
 
         # Upgraded, then frozen there; the file never changes.
-        settings.write_text("auto-dependencies = false\nupgrade = true\n")
+        settings.write_text("upgrade = true\n")
         self.assertEqual(run(), "2.0.0")
-        settings.write_text("auto-dependencies = false\n")
+        settings.write_text('verbosity = "low"\n')
         self.assertEqual(run(), "2.0.0")
         self.assertIn("sprocket==2.0.0", self.stash_of(program)["checksums"])
         self.assertEqual(program.read_text(), written)
@@ -6146,27 +6145,6 @@ class InstallTest(unittest.TestCase):
         self.assertNotIn("Retain", seen)
         self.assertNotIn("[y=>Yes", seen)
 
-    def test_auto_dependencies_off_says_nothing(self) -> None:
-        """`auto-dependencies = false` leaves `dependencies` to the developer.
-
-        Nothing is edited, and nothing is said (`T.abfd`).
-        """
-        # Declares `widget`, imports nothing of it: a discrepancy.
-        program: Path = self.declaring_program(
-            "auto-off", 'dependencies = ["widget"]', "print('ran')")
-        self.developer_settings(program, "auto-dependencies = false\n")
-        done: subprocess.CompletedProcess[str] = self.run_program(program)
-        self.assertEqual((done.returncode, done.stdout, done.stderr),
-                         (0, "ran\n", ""))
-        self.assertEqual(self.declared_now(program), ["widget"])
-
-        # The first run dated it; after that, nothing changes at all.
-        before: str = program.read_text()
-        done = self.run_program(program)
-        self.assertEqual((done.returncode, done.stdout, done.stderr),
-                         (0, "ran\n", ""))
-        self.assertEqual(program.read_text(), before)
-
     @editing
     def test_a_release_happens_once_per_value(self) -> None:
         """A new `release` value releases, once, and the program runs.
@@ -6185,12 +6163,16 @@ class InstallTest(unittest.TestCase):
         done: subprocess.CompletedProcess[str] = self.run_program(program)
         self.assertEqual(done.returncode, 0, done.stderr[-400:])
         self.assertEqual(done.stdout, "ran\n")
-        self.assertIn("Released `prog.py` 1.0.0.",
+        self.assertIn("Released `prog.py` 1.0.0, with 1 warning(s), listed "
+                      "in `prog.py.releases`.",
                       " ".join(done.stderr.split()))
         self.assertEqual(self.declared_now(program),
                          ["widget>=1.2.3,<2", "sprocket>=1"])
         entries: list[dict[str, Any]] = ezpkg.read_releases(program)
         self.assertEqual([one["version"] for one in entries], ["1.0.0"])
+        self.assertEqual(entries[0]["warnings"], [
+            ("`prog.py` has no pasted bootstrap, so its release builds no "
+             "email.")])
         self.assertEqual(entries[0]["dependencies"],
                          ["widget>=1.2.3,<2", "sprocket>=1"])
         self.assertFalse(program.with_suffix(".ezpkg").exists())
@@ -6241,9 +6223,8 @@ class InstallTest(unittest.TestCase):
                       done.stderr)
         self.assertEqual(program.read_text(), before)
         filled: str = settings.read_text(encoding="utf-8")
-        self.assertEqual(filled, ezpkg.SETTINGS_TEMPLATE.replace(
-            ezpkg.AUTO_DEPENDENCIES_LINE, ezpkg.AUTO_DEPENDENCIES_LINE
-            + ezpkg.first_run_note("prog.py", []) + "\n", 1))
+        self.assertEqual(filled, ezpkg.SETTINGS_TEMPLATE + "\n"
+                         + ezpkg.first_run_note("prog.py", []) + "\n")
         self.assertIn("(right now nothing needs adding)", filled)
 
         # Filled, it is every default, and left alone; now the program
@@ -6258,7 +6239,7 @@ class InstallTest(unittest.TestCase):
     def test_the_filling_run_names_what_the_next_run_adds(self) -> None:
         """A new import is fetched for the filling run, but not written.
 
-        The note beside `auto-dependencies` names the entry, and the
+        The note at the end of the file names the entry, and the
         next run adds it (Wayne, 2026-10-21).
         """
         # Nothing declared, `widget` imported.
@@ -7159,7 +7140,7 @@ class BootstrapCheckTest(unittest.TestCase):
             "ezpkg.EZPkg(cache).install()\n"
             "print('ran')\n")
         settings: Path = self.root / "prog.py.toml"
-        settings.write_text("auto-dependencies = false\n")
+        settings.write_text('verbosity = "low"\n')
         environment: dict[str, str] = dict(os.environ)
         environment.pop("EZPKG_BOOTSTRAP", None)
 
@@ -7179,11 +7160,11 @@ class BootstrapCheckTest(unittest.TestCase):
         self.assertEqual((second.returncode, second.stderr), (0, ""))
 
         # Named: kept, and nothing said; another name stops the run.
-        settings.write_text('auto-dependencies = false\nbootstrap = "nopip6"\n')
+        settings.write_text('bootstrap = "nopip6"\n')
         named: subprocess.CompletedProcess[str] = run()
         self.assertEqual((named.returncode, named.stdout), (0, "ran\n"),
                          named.stderr)
-        settings.write_text('auto-dependencies = false\nbootstrap = "nopip5"\n')
+        settings.write_text('bootstrap = "nopip5"\n')
         wrong: subprocess.CompletedProcess[str] = run()
         self.assertNotEqual(wrong.returncode, 0)
         self.assertEqual(wrong.stdout, "")
@@ -7195,7 +7176,7 @@ class BootstrapCheckTest(unittest.TestCase):
         # needs an `exports` form, and this one's fails, since nothing
         # came from a cache for a `.pyz` to carry; but the bootstrap and
         # the `ezpkg` entry come first, so both are brought up to date.
-        settings.write_text('auto-dependencies = false\nrelease = "1.0.0"\n'
+        settings.write_text('release = "1.0.0"\n'
                             'exports = ["zipapp"]\n')
         released: subprocess.CompletedProcess[str] = run()
         self.assertEqual((released.returncode, released.stdout),
@@ -8526,7 +8507,7 @@ class MetadataTest(unittest.TestCase):
                 self.assertTrue(venv.add_missing(program, error, None))
                 proved.assert_called_once_with("PySocks", "socks")
                 put.assert_called_once_with(
-                    dependencies=["cowsay", "PySocks"])
+                    dependencies=["cowsay", "PySocks"], notes={})
                 self.assertIn("`prog.py` needed `socks`, so `ezpkg` added "
                               "`PySocks`", told.getvalue())
 
@@ -8540,6 +8521,52 @@ class MetadataTest(unittest.TestCase):
                 self.assertFalse(venv.add_missing(
                     program, ValueError("socks"), None))
                 self.assertEqual(put.call_count, 1)
+
+    def test_a_release_lists_its_warnings(self) -> None:
+        """Guesses, drops and a release's own warnings go in its entry.
+
+        Each once, a guess only while the stash still declares it, and
+        none at all leaves the entry as it was (Wayne, 2026-10-22).
+        """
+        # Notes from a run: one guess added, one known name, one drop.
+        with tempfile.TemporaryDirectory() as scratch:
+            program: Path = Path(scratch) / "prog.py"
+            venv: ezpkg.EZPkg = ezpkg.EZPkg(Path(scratch) / "cache")
+            found: ezpkg.Discrepancy = ezpkg.Discrepancy(
+                program, ["old>=1", "kept"], [0, 0], [], {}, [
+                    (3, "tabulate", "tabulate"), (4, "yaml", "PyYAML")],
+                [0], set(), {"tabulate", "PyYAML"})
+            stashed: dict[str, Any] = {"notes": {"dropped:tabulate": "x"}}
+            with unittest.mock.patch.object(ezpkg.EZPkg, "stash",
+                                            return_value=stashed):
+                notes: dict[str, str] = venv.noted(
+                    found, {"tabulate": "tabulate", "PyYAML": "yaml"}, [0])
+            self.assertEqual(sorted(notes), ["dropped:old", "guess:tabulate"])
+            self.assertIn("`import tabulate` (line 3) was taken to need the "
+                          "PyPI package `tabulate`", notes["guess:tabulate"])
+            self.assertIn("`old>=1` was dropped", notes["dropped:old"])
+
+            # Listed with the release's own, a guess only while declared.
+            venv.warnings = ["Own.", "Own."]
+            for declared, expected in (
+                    (["tabulate>=0.10"], [notes["dropped:old"],
+                                          notes["guess:tabulate"], "Own."]),
+                    (["kept"], [notes["dropped:old"], "Own."])):
+                with (unittest.mock.patch.object(
+                          ezpkg.EZPkg, "stashing", return_value=True),
+                      unittest.mock.patch.object(
+                          ezpkg.EZPkg, "stash", return_value={
+                              "dependencies": declared, "notes": notes})):
+                    self.assertEqual(venv.release_warnings(), expected)
+
+        # The entry lists them, and none adds nothing.
+        entry: str = ezpkg.release_entry("1.0.0", "", ["a"], "", ["Say \"x\"."])
+        self.assertTrue(entry.endswith(
+            'warnings = [\n    "Say \\"x\\".",\n]\n'))
+        self.assertEqual(tomllib.loads(entry)["release"][0]["warnings"],
+                         ['Say "x".'])
+        self.assertNotIn("warnings", ezpkg.release_entry("1.0.0", "", ["a"],
+                                                         ""))
 
     def test_dependency_comments_survive_a_rewrite(self) -> None:
         """Each entry keeps its comment when `dependencies` is rewritten."""
@@ -8571,22 +8598,22 @@ class MetadataTest(unittest.TestCase):
                  ("prog.py.toml line 1: `cull-days` must be a whole number "
                   "of days, 1 or more")),
                 (('verbosity = "high"\nrelease = "1.2.0"\nexports = ["uv"]\n'
-                 'auto-dependencies = false\nbootstrap = "nopip6"\n'),
-                 ezpkg.Settings(False, "high", "1.2.0", ("uv",), "nopip6")),
+                 'bootstrap = "nopip6"\n'),
+                 ezpkg.Settings("high", "1.2.0", ("uv",), "nopip6")),
                 ('bootstrap = "nopip9"\n',
                  ('prog.py.toml line 1: `bootstrap` must be "update" or a '
                   'published bootstrap, "nopip3", "nopip4", "nopip5", '
                   '"nopip6", "nopip7" or "nopip8"')),
-                ("\nauto_dependencies = true\n",
-                 ("prog.py.toml line 2: unknown setting `auto_dependencies` "
-                 "(did you mean `auto-dependencies`?)")),
+                ("\ncull_days = 9\n",
+                 ("prog.py.toml line 2: unknown setting `cull_days` "
+                 "(did you mean `cull-days`?)")),
                 ("\n\n[colour]\nx = 1\n",
                  ("prog.py.toml line 3: unknown setting `colour` (the "
-                 "settings are `auto-dependencies`, `verbosity`, `release`, "
-                 "`exports`, `bootstrap`, `upgrade`, `cull-days`, "
-                 "`dependencies` and `requires-python`)")),
-                ('auto-dependencies = "yes"\n',
-                 ("prog.py.toml line 1: `auto-dependencies` must be `true` "
+                 "settings are `verbosity`, `release`, `exports`, "
+                 "`bootstrap`, `upgrade`, `cull-days`, `dependencies` and "
+                 "`requires-python`)")),
+                ('upgrade = "yes"\n',
+                 ("prog.py.toml line 1: `upgrade` must be `true` "
                   "or `false`")),
                 ('verbosity = "loud"\n',
                  ('prog.py.toml line 1: `verbosity` must be one of "none", '
@@ -9135,7 +9162,7 @@ class MetadataTest(unittest.TestCase):
                 ezpkg.fetch_url((root / "gone.txt").as_uri())
 
     def developer_here(self, block: str = 'dependencies = ["widget"]',
-                       settings: str = "auto-dependencies = false\n"
+                       settings: str = 'verbosity = "low"\n'
                        ) -> tuple[Path, ezpkg.EZPkg]:
         """Make a developer's program, as the running one, and a cache.
 

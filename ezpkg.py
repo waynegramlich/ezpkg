@@ -270,6 +270,7 @@ import pathlib
 import subprocess
 import sys
 import urllib.request as req
+
 try:  # Do not edit try block!  See https://pypi.org/project/ezpkg/
     s = "find ezpkg"; t = pathlib.Path.home()/".ezpkg"; w = t/"ezpkg.whl"
     def g(u):  # Fetch u, with curl if this Python has no certificates.
@@ -942,7 +943,7 @@ def main_source() -> tuple[Path, str] | None:
 # left open so that each form is one `#` to remove (Wayne, 2026-10-21).
 # `README.md` shows it verbatim, so it names no particular program:
 # `PROG_NAME` is the README's word for one (Wayne, 2026-10-22).  With
-# `EDIT_PROGRAM` on, `first_run_note` follows `AUTO_DEPENDENCIES_LINE`.
+# `EDIT_PROGRAM` on, `first_run_note` follows it.
 SETTINGS_TEMPLATE: str = """\
 # PROG_NAME.py.toml: EZPkg settings for PROG_NAME.py, the program
 # beside this file.  More: https://pypi.org/project/ezpkg/
@@ -950,32 +951,24 @@ SETTINGS_TEMPLATE: str = """\
 # This file makes you the program's developer.  If you delete this file,
 # you are no longer treated as a developer.  This file is the only place
 # where your development decisions get recorded (i.e. there are no unexpected
-# text prompts when the program runs.)  All information that EZPkg collects
-# is stored in files in the `~/.ezpkg/` directory (not this file.)
+# text prompts when the program runs).  All information that EZPkg collects
+# is stored in files in the `~/.ezpkg/` directory and not this file.
 #
-# Wayne has edited to here.
+# On each run, EZPkg fetches the packages the program's imports need
+# and records the versions that were run.  A release writes both into
+# the copies it makes, so that whoever you send a release to gets
+# exactly those.  The program itself is never edited.  Without this file, the
+# program is an end user's: they are asked once, on its first run,
+# whether to keep its packages.
 #
-# to control what EZPkg does.  
-# ezpkg asks you nothing,
-# fetches the packages the program's imports need, and remembers them
-# and the versions you ran in ~/.ezpkg, never in the program itself.  A
-# release writes them into the copies it makes, so that whoever you
-# send a release to gets exactly those.  Without this file, the program
-# is an end user's: they are asked once, on its first run, and the
-# program is never edited.
-#
-# Each setting is shown at its default, after a `#`.  To change one,
-# remove its `#` and edit its value.  A misspelt setting or a wrong
-# value stops the program, naming the line.  To see this text again,
-# empty this file and run the program.
+# Each setting below is shown at its default, mostly after a `#`.  To
+# change one, remove its `#` and edit its value.  A misspelled setting or
+# a wrong value stops the program, naming the line.  To see this text
+# again, empty this file and run the program.
 
-# Keep the packages matching the imports: a new import gets a package,
-# with a version range, and one whose import is gone is dropped.  With
-# `false`, ezpkg fetches only what `dependencies` (at the end of this
-# file) lists, with the program's own Part 1, if it has one.
-# auto-dependencies = true
-
-# How much ezpkg says: "none", "low", "medium" or "high".
+# How much EZPkg says: "none", "low" (one-off notices), "medium" (also
+# each change to the packages) or "high" (also what was decided, and
+# why).
 # verbosity = "low"
 
 # The versions are frozen at the date of the program's first run, so
@@ -985,7 +978,7 @@ SETTINGS_TEMPLATE: str = """\
 # upgrade = false
 
 # How many days the packages the program uses may go unused before
-# ezpkg removes them from ~/.ezpkg (they are fetched again if needed).
+# EZPkg removes them from ~/.ezpkg (they are fetched again if needed).
 # cull-days = 30
 
 # Releases: a release builds the copies you send to others, beside the
@@ -995,7 +988,9 @@ SETTINGS_TEMPLATE: str = """\
 # last one released builds that release, in place of the last one's
 # files, and then runs the program as usual.  Each release checks the
 # imports and the bootstrap, and gives each package without a version
-# a range.
+# a range.  Anything worth a second look, such as a package name EZPkg
+# had to guess, is listed under `warnings` in the release's entry in
+# PROG_NAME.py.releases, and the release's one line says how many.
 exports = [  # Remove the `#`s of the forms each release builds.
 #   "email",   # PROG_NAME-VERSION.py, to send; for every computer.
 #   "zipapp",  # PROG_NAME-VERSION.pyz, no network; pure Python only.
@@ -1010,32 +1005,28 @@ exports = [  # Remove the `#`s of the forms each release builds.
 # the next release; a name, such as "nopip8", keeps exactly that one.
 # bootstrap = "update"
 
-# Rarely needed: ezpkg works these out, and you set them only when it
+# Rarely needed: EZPkg works these out, and you set them only when it
 # gets one wrong.
 
 # The Pythons the program runs on.  Each release works this out from
 # the program's syntax and its packages (never older than 3.11, which
-# ezpkg needs), and says so when it is older than every Python you have
-# run the program on.  Set it if the program needs a newer Python.
+# EZPkg needs).  Set it if the program needs a newer Python anyway, as
+# when it uses a library function that is new.
 # requires-python = ">=3.11"
 
-# Packages ezpkg cannot work out.  It finds a package for each import,
+# Packages EZPkg cannot work out.  It finds a package for each import,
 # with a range from the version you ran, takes a marker from a guard
 # such as `if sys.platform == "win32":`, and adds a package when the
 # program stops because one is missing.  For anything else, write an
 # entry such as "numpy>=2.1" or "requests[socks]", a Python "dependency
 # specifier", as explained at
 # https://packaging.python.org/en/latest/specifications/dependency-specifiers/
-# An entry here wins over the one ezpkg would choose for that package.
+# An entry here wins over the one EZPkg would choose for that package.
 # dependencies = []
 """
 
-# The template's line that `first_run_note` follows, when it is used.
-AUTO_DEPENDENCIES_LINE: str = "# auto-dependencies = true\n"
-
 def first_run_note(name: str, adding: Sequence[str] | None) -> str:
-    """Return the note a filled `prog.py.toml` carries beside its
-    `auto-dependencies` line.
+    """Return the note a filled `prog.py.toml` carries at its end.
 
     The run that fills the file edits nothing in the program, so the
     developer is told before anything is changed, and can say no in the
@@ -1062,8 +1053,7 @@ def first_run_note(name: str, adding: Sequence[str] | None) -> str:
         f"First run ({time.strftime('%Y-%m-%d')}): ezpkg has not edited "
         f"{name}.  From the next run, it keeps the `dependencies` in "
         f"{name}'s Part 1 matching the imports{now}, and records there the "
-        f"versions {name} ran with.  To stop the `dependencies` edits, set "
-        f"`auto-dependencies = false` above before running {name} again.  "
+        f"versions {name} ran with.  "
         f"Once {name} has run again, this note has done its job: delete it.")
     return textwrap.fill(text, 72, initial_indent="# ",
                          subsequent_indent="# ", break_on_hyphens=False)
@@ -1103,8 +1093,6 @@ class Settings:
     `-` spelt `_`.
 
     Attributes:
-    * `auto_dependencies` (`bool`):
-      Keep `dependencies` matching the imports.
     * `verbosity` (`str`):
       How much `ezpkg` says, from `VERBOSITY`; see `EZPkg.say`.
     * `release` (`str | None`):
@@ -1131,7 +1119,6 @@ class Settings:
       the release works out (`EZPkg.python_range`).
     """
 
-    auto_dependencies: bool = True
     verbosity: str = "low"
     release: str | None = None
     exports: tuple[str, ...] = ()
@@ -1228,7 +1215,7 @@ def read_releases(program: Path) -> list[dict[str, Any]]:
 
 
 def release_entry(version: str, dated: str, entries: Sequence[str],
-                  commit: str) -> str:
+                  commit: str, warnings: Sequence[str] = ()) -> str:
     """Return the `[[release]]` entry `prog.py.releases` gets for a release.
 
     The version, when it was made, the date its versions are frozen at
@@ -1245,6 +1232,9 @@ def release_entry(version: str, dated: str, entries: Sequence[str],
       The release's `dependencies`.
     * `commit` (`str`):
       Such as `git dd6c8b3`, or empty.
+    * `warnings` (`Sequence[str]`):
+      What the release and the runs before it found worth a second
+      look (`EZPkg.warn`, `EZPkg.noted`), if anything.
 
     Returns:
     * (`str`): The entry, a blank line first.
@@ -1260,6 +1250,10 @@ def release_entry(version: str, dated: str, entries: Sequence[str],
     lines.append("dependencies = [")
     lines += [f"    {json.dumps(entry)}," for entry in entries]
     lines.append("]")
+    if warnings:
+        lines.append("warnings = [")
+        lines += [f"    {json.dumps(warning)}," for warning in warnings]
+        lines.append("]")
     return "\n".join(lines) + "\n"
 
 
@@ -4118,6 +4112,9 @@ class EZPkg:
         self.stashed: dict[str, Any] | None = None  # See `stash`.
         # A release's copy of the program while it is built (`staged`).
         self.staging: tuple[str, str, bool] | None = None
+        # A release's warnings while it is built, for its entry in
+        # `prog.py.releases` rather than the terminal (`warn`).
+        self.warnings: list[str] | None = None
         # The `prog.py.toml` this run filled, and what it wrote, so that
         # nothing in the program is edited until the next run.
         self.filled: tuple[Path, str] | None = None
@@ -4599,10 +4596,10 @@ class EZPkg:
         Part 1's own, left alone, when it has one; otherwise the floor
         worked out here: the highest of 3.11 (which `ezpkg` needs), the
         program's syntax (`syntax_floor`) and each package's own
-        `Requires-Python` (`package_floor`).  A worked-out floor older
-        than every Python the developer has run the program on is said,
-        in one line, since a library function newer than the floor would
-        not show in the source (Wayne, 2026-10-22).
+        `Requires-Python` (`package_floor`).  A library function newer
+        than the floor does not show; `requires-python` is for that, and
+        nothing is said, since a warning on nearly every release would
+        teach people to ignore warnings (Wayne, 2026-10-22).
 
         Arguments:
         * `text` (`str`):
@@ -4634,21 +4631,6 @@ class EZPkg:
                 floor = max(floor, found[:2])
         wanted: str = ">=" + ".".join(str(part) for part in floor)
 
-        # Said when nobody has run it on a Python that old.
-        program: Path | None = main_path()
-        if program is not None:
-            ran: object = self.development_record(program)[1].get("pythons")
-            tried: list[tuple[int, ...]] = sorted(
-                tuple(int(part) for part in one.split("."))
-                for one in (ran if isinstance(ran, list) else [])
-                if isinstance(one, str) and re.fullmatch(r"\d+\.\d+", one))
-            if tried and floor[:2] < tried[0]:
-                self.say(1, f"`{program.name}` is released for Python "
-                         f"{wanted}, but you have run it only on "
-                         + and_list(["Python " + ".".join(map(str, one))
-                                     for one in tried])
-                         + f".  If it needs a newer Python, set "
-                         f"`requires-python` in `{program.name}.toml`.")
         return wanted
 
     def give_ranges(self, asking: Sequence[str]) -> list[str]:
@@ -4776,7 +4758,7 @@ class EZPkg:
                           argv: Sequence[str] = ()) -> list[str]:
         """Keep Part 1's `dependencies` in step with the imports, silently.
 
-        For the program's developer, with `auto-dependencies` on, once
+        For the program's developer, once
         per change of the program's imports or `dependencies`
         (`dependency_fingerprint`): any discrepancy (`discrepancy`) is
         fixed without asking (`reconcile`, `T.abfd`).
@@ -5066,9 +5048,11 @@ class EZPkg:
                               *fetched)
             own: set[str] = {normal_name(requirement_name(entry))
                              for entry in self.written()}
-            self.put_stash(dependencies=[
-                entry for entry in final
-                if normal_name(requirement_name(entry)) not in own])
+            self.put_stash(
+                dependencies=[
+                    entry for entry in final
+                    if normal_name(requirement_name(entry)) not in own],
+                notes=self.noted(found, modules, removed))
             if self.verbosity() >= 2:
                 before: set[str] = {normal_name(requirement_name(entry))
                                     for entry in found.entries}
@@ -5216,6 +5200,76 @@ class EZPkg:
                 for holding in {one.parent for one in arrived}:
                     shutil.rmtree(holding, ignore_errors=True)
 
+    def noted(self, found: Discrepancy, modules: Mapping[str, str],
+              removed: Collection[int]) -> dict[str, str]:
+        """Return the stash's notes, after `reconcile`'s changes.
+
+        Things worth a second look, which the next release lists in its
+        entry in `prog.py.releases` (Wayne, 2026-10-22): each package
+        named only by guessing the import's own name (not from metadata
+        or `MODULE_PACKAGES`), while it is still the stash's, and each
+        entry dropped because nothing imports it any more.  A release
+        lists them once and clears them.
+
+        Arguments:
+        * `found` (`Discrepancy`):
+          What disagreed.
+        * `modules` (`Mapping[str, str]`):
+          The module each added package was added for.
+        * `removed` (`Collection[int]`):
+          The indexes of the entries removed.
+
+        Returns:
+        * (`dict[str, str]`): The notes, by `guess:` or `dropped:` and
+          the package's `normal_name`.
+        """
+        # The notes as they were, then this run's changes.
+        held: object = self.stash().get("notes")
+        notes: dict[str, str] = dict(held) if isinstance(held, dict) else {}
+        program: Path = found.program
+        line: int
+        module: str
+        package: str
+        for line, module, package in found.additions:
+            if package not in modules:
+                continue
+            name: str = requirement_name(package)
+            normal: str = normal_name(name)
+            notes.pop(f"dropped:{normal}", None)
+            if (package in found.guessed and module not in MODULE_PACKAGES
+                    and normal == normal_name(module)):
+                notes[f"guess:{normal}"] = (
+                    f"`import {module}` (line {line}) was taken to need the "
+                    f"PyPI package `{name}`; if that is wrong, name the "
+                    f"right one in `dependencies` in `{program.name}.toml`.")
+        index: int
+        for index in removed:
+            entry: str = found.entries[index]
+            gone: str = normal_name(requirement_name(entry))
+            notes.pop(f"guess:{gone}", None)
+            notes[f"dropped:{gone}"] = (
+                f"`{entry}` was dropped from the packages, since nothing "
+                f"imports it any more.")
+        return notes
+
+    def warn(self, text: str) -> None:
+        """Say a release's warning, or keep it for `prog.py.releases`.
+
+        While a release is built, its warnings go into its entry in
+        `prog.py.releases`, and the one "Released ..." line counts them,
+        so that a release with nothing to say says one line (Wayne,
+        2026-10-22).  Otherwise the warning is said, as `say(1)`.
+
+        Arguments:
+        * `text` (`str`):
+          The warning, one sentence or more.
+        """
+        # Kept during a release, said otherwise.
+        if self.warnings is not None:
+            self.warnings.append(text)
+        else:
+            self.say(1, text)
+
     def unused_lately(self, kept: Mapping[str, Any]) -> set[str]:
         """Return the entries recent runs show to be unused.
 
@@ -5284,14 +5338,9 @@ class EZPkg:
                   for name in providers.get(top, [])} - imported) & declared)
             runs: object = kept.get("runs")
             earlier: list[Any] = runs if isinstance(runs, list) else []
-            # And the Python it ran on, for `python_range`.
-            pythons: object = kept.get("pythons")
-            this: str = f"{sys.version_info.major}.{sys.version_info.minor}"
             self.keep(record, kept, runs=[
                 *earlier[-(RUNS_KEPT - 1):],
-                {"declared": sorted(declared), "loaded": behind}],
-                pythons=sorted({*(pythons if isinstance(pythons, list)
-                                  else []), this}))
+                {"declared": sorted(declared), "loaded": behind}])
         except (OSError, ValueError, TypeError, KeyError) as error:
             self.say(3, f"ezpkg: this run's packages were not noted "
                      f"({error!r})")
@@ -5469,17 +5518,16 @@ class EZPkg:
             raise SystemExit(f"{path.name}: {error}") from None
         if not text.strip():
             try:
-                filling: str = SETTINGS_TEMPLATE if not EDIT_PROGRAM else (
-                    SETTINGS_TEMPLATE.replace(
-                        AUTO_DEPENDENCIES_LINE, AUTO_DEPENDENCIES_LINE
-                        + first_run_note(program.name, None) + "\n", 1))
+                filling: str = SETTINGS_TEMPLATE + (
+                    "\n" + first_run_note(program.name, None) + "\n"
+                    if EDIT_PROGRAM else "")
                 path.write_text(filling, encoding="utf-8")
                 if EDIT_PROGRAM:
                     self.filled = (path, filling)
                 print(wrapped(
                     f"`{path.name}` was empty, so `ezpkg` filled it in"
                     + (f" and left `{program.name}` as it is; the note "
-                       f"under `auto-dependencies` says what changes from "
+                       f"at its end says what changes from "
                        f"the next run." if EDIT_PROGRAM else
                        ", with every setting at its default."),
                     columns(sys.stderr)), file=sys.stderr)
@@ -6374,9 +6422,9 @@ class EZPkg:
                 raise RuntimeError("no uv wheel arrived")
             tree = self.unpack(wheel)
         except (RuntimeError, ValueError, OSError) as error:
-            self.say(1, f"`uv`, which a release uses to find what other "
-                     f"computers need, could not be fetched: "
-                     f"{failure_reason(error)}")
+            self.warn(f"`uv`, which a release uses to find what other "
+                      f"computers need, could not be fetched: "
+                      f"{failure_reason(error)}")
             return None
         finally:
             holding: Path
@@ -6387,7 +6435,7 @@ class EZPkg:
         fetched: Path | None = next(
             tree.glob(f"uv-*.data/scripts/{name}"), None)
         if fetched is None:
-            self.say(1, f"The `uv` wheel in {tree} has no {name}.")
+            self.warn(f"The `uv` wheel in {tree} has no {name}.")
             return None
         fetched.chmod(fetched.stat().st_mode | 0o111)
         self.say(2, f"Fetched `uv` into {tree} for this release.")
@@ -6491,9 +6539,9 @@ class EZPkg:
         # Without `uv`, this computer's packages are all there is.
         uv: str | None = self.uv()
         if uv is None:
-            self.say(1, f"So `{target.name}` carries only the packages "
-                     f"this computer needed; another kind of computer "
-                     f"may need more.")
+            self.warn(f"So `{target.name}` carries only the packages "
+                      f"this computer needed; another kind of computer "
+                      f"may need more.")
             return []
         program: Path | None = main_path()
         lock: dict[str, Any] = self.lock_everywhere(
@@ -6544,10 +6592,10 @@ class EZPkg:
                 tree = self.unpack(arrived)
             trees.append(tree)
         if compiled:
-            self.say(1, f"`{target.name}` cannot carry "
-                     f"{and_list(compiled)}, which another kind of "
-                     f"computer needs and which is compiled, so it will "
-                     f"not run on that kind of computer.")
+            self.warn(f"`{target.name}` cannot carry "
+                      f"{and_list(compiled)}, which another kind of "
+                      f"computer needs and which is compiled, so it will "
+                      f"not run on that kind of computer.")
         return trees
 
     def build_email(self, target: Path | None = None) -> Path:
@@ -7958,17 +8006,22 @@ class EZPkg:
         if program is None:
             return False
         try:
+            self.warnings = []
             if self.stashing():
                 self.staging = self.staged(asking)
             return self.build_release(program, settings, asking,
                                       providing, version)
         except (RuntimeError, OSError) as error:
+            warning: str
+            for warning in self.warnings or []:
+                self.say(1, warning)
             self.say(1, f"`{program.name}` {version} was not released: "
                      f"{error}.  `{program.name}` runs as usual, and its "
                      f"next run tries again.")
             return False
         finally:
             self.staging = None
+            self.warnings = None
 
     def build_release(self, program: Path, settings: Settings,
                       asking: list[str], providing: Sequence[str],
@@ -7988,7 +8041,7 @@ class EZPkg:
         if settings.bootstrap == "update":
             replaced: str = self.replace_bootstrap()
             if replaced:
-                self.say(1, replaced)
+                self.warn(replaced)
         built: list[Path] = []
         try:
             asking = self.range_ezpkg(asking)
@@ -8002,9 +8055,9 @@ class EZPkg:
                                       key=EXPORT_FORMS.index)
             if forms and find_bootstrap(
                     self.program_text(program)[0]) is None:
-                self.say(1, f"`{program.name}` has no pasted bootstrap, "
-                         f"so its release builds no "
-                         f"{and_list(forms, 'or')}.")
+                self.warn(f"`{program.name}` has no pasted bootstrap, "
+                          f"so its release builds no "
+                          f"{and_list(forms, 'or')}.")
                 forms = []
             files: list[Path] = release_files(program, version)
             form: str
@@ -8016,7 +8069,7 @@ class EZPkg:
                     # A zip cannot carry compiled code; the rest can.
                     if form != "zipapp" or "cannot bundle" not in str(error):
                         raise
-                    self.say(1, f"No `{target.name}`: {error}.")
+                    self.warn(f"No `{target.name}`: {error}.")
 
                 # The lock `uv` wrote beside the script, if `uv` was there.
                 if form == "uv" and files[3].is_file():
@@ -8026,15 +8079,20 @@ class EZPkg:
             declared: dict[str, Any] = script_metadata(
                 self.program_text(program)[0]) or {}
             shipped: object = declared.get("dependencies", [])
+            warnings: list[str] = self.release_warnings()
             entry: str = release_entry(
                 version, self.declared_date()
                 or str(self.stash().get("exclude-newer") or ""),
                 [one for one in (shipped if isinstance(shipped, list)
                                  else []) if isinstance(one, str)],
-                commit_of(program))
+                commit_of(program), warnings)
         except (RuntimeError, ValueError, SystemExit, OSError) as error:
             for made in built:
                 made.unlink(missing_ok=True)
+            # Nothing records a failed release's warnings, so they are said.
+            warning: str
+            for warning in self.warnings or []:
+                self.say(1, warning)
             self.say(1, f"`{program.name}` {version} was not released: "
                      f"{error}.  `{program.name}` runs as usual, and its "
                      f"next run tries again.")
@@ -8056,13 +8114,43 @@ class EZPkg:
         if last and last != version:
             for gone in release_files(program, last):
                 gone.unlink(missing_ok=True)
+        # Each note is listed by one release only.
+        if self.stashing():
+            self.put_stash(notes={})
         names: list[str] = [f"`{one.name}`" for one in built]
         self.say(1, f"Released `{program.name}` {version}"
                  + (f": {and_list(names)}" if names else "")
+                 + (f", with {len(warnings)} warning(s), listed in "
+                    f"`{record.name}`" if warnings else "")
                  + f".  To make the next release, change `release` in "
                  f"`{program.name}.toml` (to \"{next_release(version)}\", "
                  f"say) and run `{program.name}`.")
         return True
+
+    def release_warnings(self) -> list[str]:
+        """Return what a release lists under `warnings` in its entry.
+
+        The stash's notes (`noted`), those about a guessed package only
+        while the stash still declares it, then the release's own
+        warnings (`warn`), each once.
+
+        Returns:
+        * (`list[str]`): The warnings, perhaps none.
+        """
+        # A guess stands while its package is still the stash's.
+        stashed: dict[str, Any] = self.stash() if self.stashing() else {}
+        held: object = stashed.get("dependencies")
+        names: set[str] = {normal_name(requirement_name(entry))
+                           for entry in (held if isinstance(held, list)
+                                         else []) if isinstance(entry, str)}
+        notes: object = stashed.get("notes")
+        found: list[str] = [
+            note for key, note in sorted(
+                notes.items() if isinstance(notes, dict) else ())
+            if isinstance(note, str) and (
+                not key.startswith("guess:")
+                or key.removeprefix("guess:") in names)]
+        return list(dict.fromkeys(found + (self.warnings or [])))
 
     def range_ezpkg(self, asking: list[str]) -> list[str]:
         """Give the program's `ezpkg` entry the range of this `ezpkg`.
@@ -8313,10 +8401,9 @@ class EZPkg:
         # the program's developer, then warns about every import still
         # uncovered, now that the declared packages can be found.  An
         # end user's program is never edited, and a forgotten package
-        # is Python's `ImportError` to report; a developer who turned
-        # `auto-dependencies` off hears nothing either (`T.abfd`).
+        # is Python's `ImportError` to report (`T.abfd`).
         settings: Settings | None = self.settings()
-        if settings is not None and settings.auto_dependencies:
+        if settings is not None:
             asked = self.sync_dependencies(asked, argv)
             self.scan_imports(asked)
         self.name_the_additions()
@@ -8340,8 +8427,7 @@ class EZPkg:
         # And a module the program stops for want of gets its package
         # for the next run.
         program: Path | None = main_path()
-        if (settings is not None and settings.auto_dependencies
-                and program is not None):
+        if settings is not None and program is not None:
             atexit.register(self.note_loaded, program, list(asked))
             if self.stashing():
                 self.catch_missing(program)
@@ -8430,8 +8516,16 @@ class EZPkg:
                 wanting = program.name
             trace = trace.tb_next
         held: object = self.stash().get("dependencies")
+        noted: object = self.stash().get("notes")
+        notes: dict[str, str] = (dict(noted) if isinstance(noted, dict)
+                                 else {})
+        if top not in MODULE_PACKAGES:
+            notes[f"guess:{normal_name(package)}"] = (
+                f"`{package}` was added because `{wanting}` needed `{top}` "
+                f"while `{program.name}` ran; if that is wrong, name the "
+                f"right one in `dependencies` in `{program.name}.toml`.")
         self.put_stash(dependencies=[
-            *(held if isinstance(held, list) else []), package])
+            *(held if isinstance(held, list) else []), package], notes=notes)
         print(wrapped(f"`{wanting}` needed `{top}`, so `ezpkg` added "
                       f"`{package}` to `{program.name}`'s packages; run "
                       f"`{program.name}` again.", columns(sys.stderr)),

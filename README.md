@@ -53,6 +53,7 @@ import pathlib
 import subprocess
 import sys
 import urllib.request as req
+
 try:  # Do not edit try block!  See https://pypi.org/project/ezpkg/
     s = "find ezpkg"; t = pathlib.Path.home()/".ezpkg"; w = t/"ezpkg.whl"
     def g(u):  # Fetch u, with curl if this Python has no certificates.
@@ -252,32 +253,24 @@ it with the following, which explains every setting:
 # This file makes you the program's developer.  If you delete this file,
 # you are no longer treated as a developer.  This file is the only place
 # where your development decisions get recorded (i.e. there are no unexpected
-# text prompts when the program runs.)  All information that EZPkg collects
-# is stored in files in the `~/.ezpkg/` directory (not this file.)
+# text prompts when the program runs).  All information that EZPkg collects
+# is stored in files in the `~/.ezpkg/` directory and not this file.
 #
-# Wayne has edited to here.
+# On each run, EZPkg fetches the packages the program's imports need
+# and records the versions that were run.  A release writes both into
+# the copies it makes, so that whoever you send a release to gets
+# exactly those.  The program itself is never edited.  Without this file, the
+# program is an end user's: they are asked once, on its first run,
+# whether to keep its packages.
 #
-# to control what EZPkg does.  
-# ezpkg asks you nothing,
-# fetches the packages the program's imports need, and remembers them
-# and the versions you ran in ~/.ezpkg, never in the program itself.  A
-# release writes them into the copies it makes, so that whoever you
-# send a release to gets exactly those.  Without this file, the program
-# is an end user's: they are asked once, on its first run, and the
-# program is never edited.
-#
-# Each setting is shown at its default, after a `#`.  To change one,
-# remove its `#` and edit its value.  A misspelt setting or a wrong
-# value stops the program, naming the line.  To see this text again,
-# empty this file and run the program.
+# Each setting below is shown at its default, mostly after a `#`.  To
+# change one, remove its `#` and edit its value.  A misspelled setting or
+# a wrong value stops the program, naming the line.  To see this text
+# again, empty this file and run the program.
 
-# Keep the packages matching the imports: a new import gets a package,
-# with a version range, and one whose import is gone is dropped.  With
-# `false`, ezpkg fetches only what `dependencies` (at the end of this
-# file) lists, with the program's own Part 1, if it has one.
-# auto-dependencies = true
-
-# How much ezpkg says: "none", "low", "medium" or "high".
+# How much EZPkg says: "none", "low" (one-off notices), "medium" (also
+# each change to the packages) or "high" (also what was decided, and
+# why).
 # verbosity = "low"
 
 # The versions are frozen at the date of the program's first run, so
@@ -287,7 +280,7 @@ it with the following, which explains every setting:
 # upgrade = false
 
 # How many days the packages the program uses may go unused before
-# ezpkg removes them from ~/.ezpkg (they are fetched again if needed).
+# EZPkg removes them from ~/.ezpkg (they are fetched again if needed).
 # cull-days = 30
 
 # Releases: a release builds the copies you send to others, beside the
@@ -297,7 +290,9 @@ it with the following, which explains every setting:
 # last one released builds that release, in place of the last one's
 # files, and then runs the program as usual.  Each release checks the
 # imports and the bootstrap, and gives each package without a version
-# a range.
+# a range.  Anything worth a second look, such as a package name EZPkg
+# had to guess, is listed under `warnings` in the release's entry in
+# PROG_NAME.py.releases, and the release's one line says how many.
 exports = [  # Remove the `#`s of the forms each release builds.
 #   "email",   # PROG_NAME-VERSION.py, to send; for every computer.
 #   "zipapp",  # PROG_NAME-VERSION.pyz, no network; pure Python only.
@@ -312,110 +307,25 @@ exports = [  # Remove the `#`s of the forms each release builds.
 # the next release; a name, such as "nopip8", keeps exactly that one.
 # bootstrap = "update"
 
-# Rarely needed: ezpkg works these out, and you set them only when it
+# Rarely needed: EZPkg works these out, and you set them only when it
 # gets one wrong.
 
 # The Pythons the program runs on.  Each release works this out from
 # the program's syntax and its packages (never older than 3.11, which
-# ezpkg needs), and says so when it is older than every Python you have
-# run the program on.  Set it if the program needs a newer Python.
+# EZPkg needs).  Set it if the program needs a newer Python anyway, as
+# when it uses a library function that is new.
 # requires-python = ">=3.11"
 
-# Packages ezpkg cannot work out.  It finds a package for each import,
+# Packages EZPkg cannot work out.  It finds a package for each import,
 # with a range from the version you ran, takes a marker from a guard
 # such as `if sys.platform == "win32":`, and adds a package when the
 # program stops because one is missing.  For anything else, write an
 # entry such as "numpy>=2.1" or "requests[socks]", a Python "dependency
 # specifier", as explained at
 # https://packaging.python.org/en/latest/specifications/dependency-specifiers/
-# An entry here wins over the one ezpkg would choose for that package.
+# An entry here wins over the one EZPkg would choose for that package.
 # dependencies = []
 ```
-
-`EZPkg` writes this file only once, when it is empty; after that it only
-reads it.  It is meant to be self-documenting.
-
-<!-- Wayne: The intention is that the document above be self documenting.
-I do ***NOT*** want to reproduce the same text twice in `README .md`.
-Feel free to insert HTML comments into the `.toml` file above.  The text in
-this HTML comment will eventually be deleted.
-
-* The opening comment:
-  Says that the file's presence makes you the developer, and what that
-  means, compared with an end user.  An empty file is enough; to see the
-  template again, empty the file and run `prog.py`.
-* `auto-dependencies = true`:
-  `EZPkg` keeps the `dependencies` list in Part 1 matching your imports.
-  A new import gets an entry with a version range, such as
-  `"cowsay>=6.1,<7"`.  An entry nothing imports is removed once recent
-  runs show the program never loaded it; a comment after an entry keeps
-  it (`"pyqt6",  # matplotlib's backend`).  `false` leaves
-  `dependencies` to you.
-* `verbosity = "low"`:
-  How much `EZPkg` says: `"none"`, `"low"`, `"medium"` or `"high"`.
-* The releases comment:
-  Releases are off by default, so nothing is built until you ask.
-* `exports = ["email", "zipapp", "uv"]`:
-  Removing the `#` turns releases on, and the list says which forms to
-  build.  The next run builds release 1.0.0 into `prog_builds/1.0.0/`,
-  writes `prog.py.release` saying what it built, and then runs `prog.py`
-  as usual.  To build the next release, delete `prog.py.release`
-  (`del prog.py.release` on Windows, `rm prog.py.release` on Linux and
-  macOS) and run `prog.py`.  Each release checks the imports and the
-  bootstrap, gives each entry without a version a range, and fetches
-  `uv` if your computer lacks a recent one.  Take a form out of the list
-  to stop building it; see [Releasing a Packaged
-  Program](#releasing-a-packaged-program) for the three forms.
-* `release = "1.0.0"`:
-  The version of the next release.  Without it, the first release is
-  1.0.0 and each one after adds one to the last number: 1.0.1, 1.0.2,
-  and so on.  You can change it whenever you like, even back to
-  `"1.0.0"`, which rebuilds `prog_builds/1.0.0/`.  The numbers are
-  yours: only a release published somewhere public, such as PyPI,
-  needs a number that was never used before.
-* `bootstrap = "update"`:
-  At a release, an older bootstrap in `prog.py` is replaced by the
-  current one.  Naming one, such as `"nopip8"`, keeps exactly that
-  bootstrap.
-* The upgrading comment:
-  Not a setting.  The versions `prog.py` runs are frozen at the date on
-  Part 1's `exclude-newer` line, so they never change by themselves.
-  Delete that line and run `prog.py` to move to today's versions.
-
-On the first run, `EZPkg` fills the empty `prog.py.toml` with every
-setting, each commented out, with a line saying what it does.  Remove the
-`#` to change one; a misspelt setting stops the program.  The settings, as
-the file shows them, are:
-
-* `auto-dependencies = true`:
-  Keep `dependencies` matching the imports, with version ranges.  An
-  entry nothing imports is removed once recent runs show it is unused; a
-  comment after an entry keeps it.  `false` leaves `dependencies` to you.
-* `verbosity = "low"`:
-  How much `EZPkg` says: `"none"`, `"low"`, `"medium"` or `"high"`.
-* `release = "1.0.0"`:
-  Make a release of that version; while it is commented out, there is no
-  release.  See [Releasing a Packaged Program](#releasing-a-packaged-program).
-* `exports = ["zipapp", "uv"]`:
-  The extra files a release builds beside `prog.py`; see [Using
-  `zipapp`](#using-zipapp) and [Using `uv`](#using-uv).  While it is
-  commented out, a release builds neither.
-  Claude: (2026-10-21, built) Proposed replacement for the
-  `release` and `exports` bullets:
-
-* `release = "1.0.0"`:
-  The version of the next release.  While it is commented out, the
-  first release is 1.0.0 and each one after adds 1 to the last number.
-  Change it whenever you like.  See [Releasing a Packaged
-  Program](#releasing-a-packaged-program).
-* `exports = ["email", "zipapp", "uv"]`:
-  What a release builds; while it is commented out, all three.  See
-  [Using `email`](#using-email), [Using `zipapp`](#using-zipapp) and
-  [Using `uv`](#using-uv).
-* `bootstrap = "update"`:
-  At a release, replace an older bootstrap with the current one.  A
-  bootstrap's name, such as `"nopip8"`, keeps exactly that one.
--->
 
 ## Releasing a Packaged Program
 
