@@ -138,3 +138,92 @@
 * Not yet changed: `T.abfd`'s `Details.md` "Release" bullets (Wayne's
   file); `ux/drive.py` developer steps (2.x) will now see a release on
   the first developer run.
+
+## 2026-10-21: The end user's refusal is plain (open item 2 done)
+
+* `verify` raises `Unapproved` (a `RuntimeError` carrying `pin`) for a
+  wheel not in `checksums`; `end_user_failure` turns it into
+  "`prog.py` needs colorama 0.4.6 on this computer, which its author
+  did not approve, so `prog.py` did not run.  Ask its author for its
+  release, and try again." plus the `last_failure.txt` note.  The
+  developer's line is unchanged.  README "Not Approved" bullet (Wayne).
+* Releases off until `exports` is uncommented: built the same day
+  (next entry).
+
+## 2026-10-21: Releases are off until `exports` names a form
+
+* Wayne: no `prog_builds/` on a first run.  `Settings.exports`
+  defaults to `()`, and `release_due` returns "" while it is empty
+  (an explicit `exports = []` too); otherwise unchanged (no
+  `prog.py.release`, a new `release`, or a deleted record).
+* `SETTINGS_TEMPLATE`: the releases paragraph says they are off until
+  a `#` goes from an `exports` entry; `exports` comes before
+  `release`, as Wayne's README draft has it, written `exports = [` ...
+  `]` left open (valid TOML, the empty default) with one commented
+  line per form, so each form is one `#` to remove.  No
+  `exclude-newer` setting (the code reads none).
+* Tests: `test_deleting_the_release_file_builds_the_next_release`
+  starts from the template (no release, no record, no folder), then
+  uncomments its entries (1.0.0, every form).
+  `test_a_newer_bootstrap_is_told_once_and_replaced_at_release` now
+  sets `exports = ["zipapp"]`, whose build fails in that harness
+  (nothing from a cache), so it checks the bootstrap and `ezpkg`
+  entry replaced and "was not released", no longer `released`.
+  `read_settings` case `exports = []`.
+  `test_a_release_happens_once_per_value` and
+  `test_a_source_ezpkg_leaves_the_ezpkg_entry_alone` add `exports =
+  ["email"]` (no pasted bootstrap, so nothing is built).  Quick suite:
+  318 tests OK (16 skipped).
+* `email_check.py build`: an empty `prog.py.toml`, a run that fills it
+  and builds nothing, then the template's `exports` entries
+  uncommented, a run that builds 1.0.0, and one that only runs.
+  Passed locally (pypi.org, `uv` fetched).
+* `ux/drive.py` sets `exports` only in its release step, so its
+  other developer steps again build nothing (not rerun).  README is
+  Wayne's.
+
+## 2026-10-21: The run that fills `prog.py.toml` edits nothing
+
+* Wayne: never edit a developer's code before telling them ("How DARE
+  you edit my code").  The run that fills an empty `prog.py.toml`
+  (`EZPkg.filled`) writes no `dependencies`, `checksums` or date into
+  the program; `reconcile` still fetches the new imports' packages for
+  that run.  The template's `{note}` beside `auto-dependencies`
+  (`first_run_note`) says what the next run changes, naming the
+  additions (`name_the_additions` rewrites it in that run, only if the
+  file is unchanged), and says to delete it.  One printed line points
+  to it.  Tests `test_an_empty_settings_file_is_filled`,
+  `test_the_filling_run_names_what_the_next_run_adds`; quick suite 319
+  OK; `email_check.py build` passed locally.
+* Open: `auto-dependencies = false` stops `dependencies` edits only;
+  `checksums` and the date are still recorded (Claude's #3, moving
+  them to release time, not yet discussed).
+
+## 2026-10-21: Design (Wayne): the developer's `prog.py` is never edited
+
+Decided, being built.  Supersedes the first-run note above.
+
+* `EZPkg` keeps what it works out in the program's development record
+  in `~/.ezpkg/develop/` (the stash), never in `prog.py` or the `.toml`:
+  the entries for imports Part 1 does not declare, the `checksums`
+  (and `tag:`s), the frozen date, the last released version.
+* Part 1 is the developer's own input: hand-written entries (ranges,
+  comment-kept ones) are read, never written or removed.  A developer
+  run asks for Part 1's entries plus the stash's (by name, Part 1
+  wins); `reconcile` and `record_approvals` write the stash; no
+  restart is needed.
+* No stash (deleted `~/.ezpkg`, another computer, a moved program):
+  seed it from the newest release in `prog_builds/` (its `email` copy
+  holds `dependencies`, `checksums`, date), else start fresh.
+* Upgrade: a `.toml` setting, `upgrade = true`: every run fetches the
+  newest versions; comment it out again to freeze at that run's date.
+  Replaces "delete the `exclude-newer` line".
+* A release writes only its copies, never `prog.py` (Wayne: release
+  copies only): merged Part 1 with ranges for bare entries,
+  `checksums`, date, and a current bootstrap where `bootstrap =
+  "update"`.  The version record moves to the stash (fallback: the
+  newest `prog_builds/` folder).
+* The first-run note (`first_run_note`, `filled`) goes: nothing is
+  edited, so there is nothing to announce.
+* End users are unchanged: they run a release copy, whose Part 1 is
+  complete.  The working `prog.py` runs only for its developer.

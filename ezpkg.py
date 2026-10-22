@@ -523,6 +523,25 @@ class Declined(RuntimeError):
         self.said: str = said
 
 
+class Unapproved(RuntimeError):
+    """A wheel arrived that Part 1's `checksums` do not name.
+
+    Usually an author sent the `prog.py` they work on, not its release,
+    and this computer needs a package theirs never fetched (`colorama`
+    on Windows).  A `RuntimeError`, as it always was; the end user's
+    line comes from `pin` (`T.ee`).
+
+    Attributes:
+    * `pin` (`str`):
+      The wheel's name and version, such as `colorama==0.4.6`.
+    """
+
+    def __init__(self, message: str, pin: str) -> None:
+        """Keep the pin beside the message."""
+        super().__init__(message)
+        self.pin: str = pin
+
+
 def shown(path: Path) -> str:
     """Return a path as a person reads it: `~/.ezpkg`, not `/home/...`.
 
@@ -848,7 +867,9 @@ def main_source() -> tuple[Path, str] | None:
 
 
 # What an empty `prog.py.toml` is filled with: every setting, commented
-# out at its default (`T.abfd`).  `{name}` is the program's file name.
+# out at its default (`T.abfd`), except `exports`, whose empty list is
+# left open so that each form is one `#` to remove (Wayne, 2026-10-21).
+# `{name}` is the program's file name, `{stem}` it without `.py`.
 SETTINGS_TEMPLATE: str = """\
 # {name}.toml: EZPkg settings for {name}.
 #
@@ -865,26 +886,28 @@ SETTINGS_TEMPLATE: str = """\
 # with a version range, and an entry whose import is gone is removed.
 # An entry with a comment after it is always kept.
 # auto-dependencies = true
+{note}
 
 # How much ezpkg says: "none", "low", "medium" or "high".
 # verbosity = "low"
 
-# Releases: a run with no {name}.release beside {name} builds a
+# Releases are off until you remove the `#` from at least one entry of
+# `exports`.  Then a run with no {name}.release beside {name} builds a
 # release into {stem}_builds/VERSION/ and writes {name}.release, then
 # {name} runs as usual.  So to build the next release, delete
 # {name}.release and run {name}.  Each release checks the imports and
 # the bootstrap, and gives each entry without a version a range (write
 # a range or `==` yourself to choose one).
+exports = [  # Remove the `#`s of the forms each release builds.
+#   "email",   # A `.py` to send, ready for every computer.
+#   "zipapp",  # A `.pyz` that needs no network (pure Python only).
+#   "uv",      # A `-uv.py` and its lock, for `uv run`.
+]
 
 # The version of the next release.  Without it, the first release is
 # 1.0.0 and each one after adds 1 to the last number (1.0.1, ...).
 # Change it whenever you like, even to go back to 1.0.0.
 # release = "1.0.0"
-
-# What a release builds: "email" (a `.py` to send, ready for every
-# computer), "zipapp" (a `.pyz` that needs no network, skipped when a
-# package is compiled) and "uv" (a `-uv.py` for `uv run`).
-# exports = ["email", "zipapp", "uv"]
 
 # The bootstrap {name} carries: "update" replaces an older one at the
 # next release; a name, such as "nopip8", keeps exactly that one.
@@ -895,13 +918,50 @@ SETTINGS_TEMPLATE: str = """\
 # to move everything to today's versions.
 """
 
+def first_run_note(name: str, adding: Sequence[str] | None) -> str:
+    """Return the note a filled `prog.py.toml` carries beside its
+    `auto-dependencies` line.
+
+    The run that fills the file edits nothing in the program, so the
+    developer is told before anything is changed, and can say no in the
+    file first (Wayne, 2026-10-21).  The file is never written again, so
+    the note says to delete it once it has done its job.
+
+    Arguments:
+    * `name` (`str`):
+      The program's file name, such as `prog.py`.
+    * `adding` (`Sequence[str] | None`):
+      The entries the next run would add, or `None` when that is not
+      known (the imports were not looked at).
+
+    Returns:
+    * (`str`): The note's comment lines, without a final newline.
+    """
+    # What the next run does, then how to stop it.
+    quoted: list[str] = [f'"{one}"' for one in adding or ()]
+    now: str = ("" if adding is None else
+                " (right now nothing needs adding)" if not adding else
+                f" (right now that means adding "
+                f"{and_list(quoted)})")
+    text: str = (
+        f"First run ({time.strftime('%Y-%m-%d')}): ezpkg has not edited "
+        f"{name}.  From the next run, it keeps the `dependencies` in "
+        f"{name}'s Part 1 matching the imports{now}, and records there the "
+        f"versions {name} ran with.  To stop the `dependencies` edits, set "
+        f"`auto-dependencies = false` above before running {name} again.  "
+        f"Once {name} has run again, this note has done its job: delete it.")
+    return textwrap.fill(text, 72, initial_indent="# ",
+                         subsequent_indent="# ", break_on_hyphens=False)
+
+
 # How many of a developer's finished runs `EZPkg.note_loaded` remembers,
 # newest last.  An entry nothing imports goes once one of them declared
 # it and none loaded its package (Wayne, 2026-10-20; `T.abfd`).
 RUNS_KEPT: int = 10
 
-# What a release can build, in the order it builds them, which is also
-# what it builds when `exports` is not set (Wayne, 2026-10-21).
+# What a release can build, in the order it builds them.  `exports`
+# names none of them until the developer turns releases on (Wayne,
+# 2026-10-21: no `prog_builds/` on a first run).
 EXPORT_FORMS: tuple[str, ...] = ("email", "zipapp", "uv")
 
 # The values of `verbosity`, quietest first, so that each one's index is
@@ -926,8 +986,8 @@ class Settings:
       The version of the next release, such as `"1.0.0"`, or `None`
       to count on from the last one (`next_release`).
     * `exports` (`tuple[str, ...]`):
-      What a release builds, from `EXPORT_FORMS`; all of them unless
-      the file says otherwise.
+      What a release builds, from `EXPORT_FORMS`; none unless the file
+      says otherwise, and with none there are no releases.
     * `bootstrap` (`str`):
       `update`, or the short name of the published bootstrap the
       program must carry, such as `nopip7` (Wayne, S5.1).
@@ -936,7 +996,7 @@ class Settings:
     auto_dependencies: bool = True
     verbosity: str = "low"
     release: str | None = None
-    exports: tuple[str, ...] = EXPORT_FORMS
+    exports: tuple[str, ...] = ()
     bootstrap: str = "update"
 
 
@@ -959,8 +1019,8 @@ def release_path(program: Path) -> Path:
     """Return a program's release record: `prog.py.release` beside it.
 
     `EZPkg.release` writes it; while it is missing, a developer's run
-    builds a release (Wayne, 2026-10-21: deleting a file is the one
-    gesture every computer makes easily).
+    builds a release, once `exports` names a form (Wayne, 2026-10-21:
+    deleting a file is the one gesture every computer makes easily).
 
     Arguments:
     * `program` (`Path`):
@@ -3449,6 +3509,10 @@ class EZPkg:
         self.declined: bool = False  # `n` to `reconcile`, this run.
         self.reported: set[str] = set()  # Modules `reconcile` named.
         self.edited: bool = False  # Was the program's file changed?
+        # The `prog.py.toml` this run filled, and what it wrote, so that
+        # nothing in the program is edited until the next run.
+        self.filled: tuple[Path, str] | None = None
+        self.adding: list[str] | None = None  # The note's additions.
         self.restarted: bool = False  # Is this run a `restart`'s?
         self.root = Path.home() / ".ezpkg" if root is None else root
         # A first run: `nopip7` says so with `pip`'s output; `nopip8`
@@ -4204,6 +4268,15 @@ class EZPkg:
                 ranged[package] = package
         final = [ranged.get(entry, entry) for entry in final]
 
+        # The run that filled `prog.py.toml` only says what it would add
+        # (`first_run_note`); what arrived serves this run.
+        if self.filled is not None:
+            for doubt in doubts:
+                self.say(1, doubt)
+            self.adding = [ranged.get(package, package)
+                           for package in modules]
+            return final
+
         # Written once.  What was just fetched answers the request the
         # ranges make, so the next run does not fetch it all again.
         made: tuple[str, str, bool, str, str] | str = self.edit_for(
@@ -4512,8 +4585,10 @@ class EZPkg:
 
         An empty file (or one of blank lines) is an invitation: it is
         filled with `SETTINGS_TEMPLATE`, every setting commented out at
-        its default, and one line says so.  After that `ezpkg` never
-        writes it.
+        its default, and one line says so.  That run edits nothing in
+        the program (`filled`), and the file's note (`first_run_note`)
+        says what the next run will change.  After that run `ezpkg`
+        never writes the file.
 
         Returns:
         * (`Settings | None`): The settings, or `None` for an end user's
@@ -4540,12 +4615,16 @@ class EZPkg:
             raise SystemExit(f"{path.name}: {error}") from None
         if not text.strip():
             try:
-                path.write_text(SETTINGS_TEMPLATE.format(
-                    name=program.name, stem=program.stem), encoding="utf-8")
+                filling: str = SETTINGS_TEMPLATE.format(
+                    name=program.name, stem=program.stem,
+                    note=first_run_note(program.name, None))
+                path.write_text(filling, encoding="utf-8")
+                self.filled = (path, filling)
                 print(wrapped(
-                    f"`{path.name}` was empty, so `ezpkg` filled it with "
-                    f"every setting, commented out at its default.",
-                    columns(sys.stderr)), file=sys.stderr)
+                    f"`{path.name}` was empty, so `ezpkg` filled it in "
+                    f"and left `{program.name}` as it is; the note under "
+                    f"`auto-dependencies` says what changes from the next "
+                    f"run.", columns(sys.stderr)), file=sys.stderr)
             except OSError:
                 pass  # Empty is every default anyway.
         try:
@@ -4553,6 +4632,31 @@ class EZPkg:
         except ValueError as error:
             raise SystemExit(str(error)) from None
         return self.chosen_settings
+
+    def name_the_additions(self) -> None:
+        """Rewrite the note of a just-filled `prog.py.toml` with names.
+
+        Only in the run that filled it, and only if nobody has changed
+        it since, so it is still `ezpkg`'s own first write (`settings`).
+        """
+        # Nothing filled, or the file is no longer what was written.
+        if self.filled is None:
+            return
+        path: Path
+        written: str
+        path, written = self.filled
+        program: Path | None = main_path()
+        if program is None:
+            return
+        named: str = written.replace(
+            first_run_note(program.name, None),
+            first_run_note(program.name, self.adding or []))
+        try:
+            if named != written and path.read_text(
+                    encoding="utf-8") == written:
+                path.write_text(named, encoding="utf-8")
+        except OSError:
+            pass  # The note without names still says what happens.
 
     def developing(self) -> bool:
         """Say whether the running program is its developer's.
@@ -5899,9 +6003,11 @@ class EZPkg:
           Through `verify`, if a wheel is unapproved or altered, or if
           the person asked declines.
         """
-        # The developer's run records what arrived, and dates it.
+        # The developer's run records what arrived, and dates it, but
+        # not on the run that filled `prog.py.toml` (`settings`).
         if self.developing():
-            self.record_approvals(wheels)
+            if self.filled is None:
+                self.record_approvals(wheels)
             return
 
         # Approvals are checked, never skipped; then the program's end
@@ -6108,10 +6214,10 @@ class EZPkg:
             actual: str = self.digest(wheel)[:ID_DIGITS]
             pin: str = normal_pin(wheel_pin(wheel.name))
             if pin not in named:
-                raise RuntimeError(
+                raise Unapproved(
                     f"{wheel.name} is not in the `checksums` of {where}; "
                     f"running the program as its developer brings them up "
-                    f"to date")
+                    f"to date", pin)
             if pin in built and built[pin] != wheel_tag(wheel.name):
                 self.say(3, f"ezpkg: {wheel.name}: approved for "
                          f"{built[pin]} only, so its version is checked "
@@ -6610,12 +6716,14 @@ class EZPkg:
     def release_due(self, settings: Settings | None) -> str:
         """Return the version to release now, or empty for none.
 
-        Only a developer's run releases.  It does when `prog.py.release`
-        is missing, which is so on the first run with a `prog.py.toml`
-        and whenever the developer deletes it, or when `release` names a
-        version other than the last one released, which is how a
-        developer chooses a number, even an older one (Wayne,
-        2026-10-21).  The version is `release` when it is new, else the
+        Only a developer's run releases, and only once `exports` names a
+        form: releases are off until the developer turns them on, so a
+        first run leaves no `prog_builds/` (Wayne, 2026-10-21).  Then it
+        does when `prog.py.release` is missing, which is so on the first
+        run after `exports` is set and whenever the developer deletes
+        it, or when `release` names a version other than the last one
+        released, which is how a developer chooses a number, even an
+        older one.  The version is `release` when it is new, else the
         one after the last (`next_release`).
 
         Arguments:
@@ -6625,9 +6733,10 @@ class EZPkg:
         Returns:
         * (`str`): Such as `1.0.1`, or empty.
         """
-        # Nothing for an end user, or without the program's file.
+        # Nothing for an end user, without the program's file, or with
+        # releases off.
         program: Path | None = main_path()
-        if settings is None or program is None:
+        if settings is None or program is None or not settings.exports:
             return ""
         last: str = self.released()
         chosen: bool = settings.release not in (None, last)
@@ -7045,7 +7154,8 @@ class EZPkg:
         the end user can send it on (Wayne, 2026-10-17: never put the
         problem on the end user's plate).  The cases are `I.ffspo`'s:
         no network; a pinned version the index no longer has; nothing
-        that runs on this machine; and anything else, with `pip`'s
+        that runs on this machine; a package the author did not approve
+        (`Unapproved`); and anything else, with `pip`'s
         `ERROR:` reason, never its warnings.
 
         Arguments:
@@ -7070,6 +7180,11 @@ class EZPkg:
             kept = ""
 
         # The cases, most likely first.
+        if isinstance(error, Unapproved):
+            return (f"{name} needs {error.pin.replace('==', ' ')} on this "
+                    f"computer, which its author did not approve, so "
+                    f"{name} did not run.  Ask its author for its "
+                    f"release, and try again.{kept}")
         if NO_NETWORK.search(text):
             return (f"{name} needs software packages from the internet, "
                     f"but the internet could not be reached, so {name} "
@@ -7181,6 +7296,7 @@ class EZPkg:
         if settings is not None and settings.auto_dependencies:
             asked = self.sync_dependencies(asked, argv)
             self.scan_imports(asked)
+        self.name_the_additions()
 
         # A missing `prog.py.release`, or a new `release` value, builds
         # a release on the edited file, which then starts again and runs

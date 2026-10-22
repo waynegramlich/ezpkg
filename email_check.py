@@ -8,9 +8,12 @@ adds those packages (`T.ee`).  This shows both halves:
 
 * `./email_check.py build DIR`: as a developer on this computer, writes
   `prog.py` (the Quick Start's Parts 1-3, needing `tqdm`) and an empty
-  `prog.py.toml`, and runs it: that first developer run must build
-  release 1.0.0 into `prog_builds/1.0.0/`, write `prog.py.release` and
-  run the program; the next run must build nothing.  It leaves
+  `prog.py.toml`, and runs it: that first developer run must fill the
+  file and run the program, building nothing, since releases are off
+  until `exports` is set.  With the `#`s removed from the filled file's
+  `exports` entries, the next run must build release 1.0.0 into
+  `prog_builds/1.0.0/`, write `prog.py.release` and run the program;
+  the run after that must build nothing.  It leaves
   `DIR/out/prog.py`, `DIR/out/prog-1.0.0.py` and
   `DIR/out/prog-1.0.0.pyz`.  The runs pass over any installed `uv`
   (`EZPKG_UV=fetch`), so `ezpkg` must fetch the `uv` wheel for this
@@ -29,6 +32,7 @@ nobody is asked.  Exit 0 means every expectation held.  See
 
 import os
 import pathlib
+import re
 import shutil
 import subprocess
 import sys
@@ -109,12 +113,31 @@ def build(directory: pathlib.Path) -> int:
     home: pathlib.Path = directory / "home"
     seed_home(home)
 
-    # The first developer run releases and runs; the next only runs.
-    (work / "prog.py.toml").write_text("", encoding="utf-8")
+    # The first developer run fills `prog.py.toml` and only runs, since
+    # releases are off until `exports` is set.
+    settings: pathlib.Path = work / "prog.py.toml"
+    settings.write_text("", encoding="utf-8")
+    filling: subprocess.CompletedProcess[str] = run(program, home,
+                                                    EZPKG_UV="fetch")
+    if filling.returncode or "tqdm " not in filling.stdout:
+        print("FAIL: the filling developer run did not run prog.py")
+        return 1
+    if ((work / "prog_builds").exists()
+            or (work / "prog.py.release").exists()
+            or '#   "email",' not in settings.read_text(encoding="utf-8")):
+        print("FAIL: the filling run released, or left no `exports`")
+        return 1
+
+    # Every `exports` entry uncommented: the next run releases and runs;
+    # the one after only runs.
+    settings.write_text(re.sub(
+        r'^#( +"(?:email|zipapp|uv)",)', r" \1",
+        settings.read_text(encoding="utf-8"), flags=re.MULTILINE),
+        encoding="utf-8")
     first: subprocess.CompletedProcess[str] = run(program, home,
                                                   EZPKG_UV="fetch")
     if first.returncode or "tqdm " not in first.stdout:
-        print("FAIL: the first developer run did not run prog.py")
+        print("FAIL: the first releasing run did not run prog.py")
         return 1
     folder: pathlib.Path = work / "prog_builds" / "1.0.0"
     copy: pathlib.Path = folder / "prog-1.0.0.py"

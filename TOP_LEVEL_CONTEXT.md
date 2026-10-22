@@ -102,11 +102,15 @@ entry chooses which `ezpkg` runs it (`T.eui`).
 A `prog.py.toml` beside `prog.py` makes it its developer's: no
 questions, `dependencies` kept in step with the imports silently, the
 versions frozen by `exclude-newer` and the `[tool.ezpkg] checksums`
-`ezpkg` writes into Part 1.  A developer's run with no
-`prog.py.release` beside it builds a release (all of `email`,
-`zipapp`, `uv` by default) into `prog_builds/X.Y.Z/`, writes
-`prog.py.release`, and then runs the program; so the first developer
-run builds 1.0.0, and deleting the file builds the next patch number.
+`ezpkg` writes into Part 1.  Releases are off until `exports` in
+`prog.py.toml` names a form (the template leaves `exports = [` open
+with each form's line commented out, so each is one `#` to remove;
+Wayne, 2026-10-21: no `prog_builds/` on a first run).  Then a
+developer's run with no `prog.py.release` beside it builds a release
+(the forms `exports` names, in `EXPORT_FORMS` order: `email`,
+`zipapp`, `uv`) into `prog_builds/X.Y.Z/`, writes `prog.py.release`,
+and then runs the program; so the first run after `exports` is set
+builds 1.0.0, and deleting the file builds the next patch number.
 `release = "X.Y.Z"` chooses a version (any time, even an older one).
 The test suite gives developer programs a placeholder
 `prog.py.release` (`no_release`) unless a test sets `self.releasing`.  An entry nothing imports goes once the latest recorded run

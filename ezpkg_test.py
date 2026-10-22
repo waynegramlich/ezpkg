@@ -3300,8 +3300,9 @@ class InstallTest(unittest.TestCase):
         """Run one of those programs against the local index.
 
         A developer's program (one with a `prog.py.toml`) is given a
-        `prog.py.release`, so that its run does not build a release,
-        unless the test sets `self.releasing` to see that it does.
+        `prog.py.release`, so that its run does not build a release when
+        its `exports` names a form, unless the test sets
+        `self.releasing` to see that it does.
 
         Arguments:
         * `program` (`Path`):
@@ -5417,13 +5418,15 @@ class InstallTest(unittest.TestCase):
         self.assertEqual(done.stdout.strip(), "1.0.0")
 
     def test_deleting_the_release_file_builds_the_next_release(self) -> None:
-        """No `prog.py.release` means a release, and the program runs.
+        """Once `exports` is set, no `prog.py.release` means a release.
 
-        The first developer run builds 1.0.0, every form, into
-        `prog_builds/1.0.0/`, writes `prog.py.release` and runs the
-        program; the next run builds nothing; deleting the file builds
-        1.0.1; and `release` chooses a version, even an older one
-        (Wayne, 2026-10-21).
+        Releases are off until the developer removes the `#`s from the
+        template's `exports` entries, so the first developer run builds
+        nothing and writes no `prog.py.release`.  Then the next run
+        builds 1.0.0, every form, into `prog_builds/1.0.0/`, writes
+        `prog.py.release` and runs the program; the next run builds
+        nothing; deleting the file builds 1.0.1; and `release` chooses a
+        version, even an older one (Wayne, 2026-10-21).
         """
         # `uv` does the resolving for every computer.
         if ezpkg.find_uv() is None:
@@ -5435,7 +5438,9 @@ class InstallTest(unittest.TestCase):
             "trigger", 'dependencies = ["paned"]',
             "import paned\nprint(paned.__version__)")
         settings: Path = self.developer_settings(
-            program, "auto-dependencies = false\n")
+            program, ezpkg.SETTINGS_TEMPLATE.format(
+                name="prog.py", stem="prog", note="").replace(
+                    "# auto-dependencies = true", "auto-dependencies = false"))
         record: Path = ezpkg.release_path(program)
         builds: Path = program.with_name("prog_builds")
 
@@ -5447,8 +5452,20 @@ class InstallTest(unittest.TestCase):
             self.assertEqual(done.stdout.strip(), "1.0.0")
             return " ".join(done.stderr.split())
 
-        # The first run: everything, then the program.
+        # The template as it comes: no release at all.
         said: str = run()
+        self.assertNotIn("Released", said)
+        self.assertFalse(record.exists())
+        self.assertFalse(builds.exists())
+
+        # Its `exports` entries uncommented: everything, then the
+        # program.
+        settings.write_text(re.sub(
+            r'^#( +"(?:email|zipapp|uv)",)', r" \1", settings.read_text(),
+            flags=re.MULTILINE))
+        self.assertEqual(ezpkg.read_settings(settings).exports,
+                         ezpkg.EXPORT_FORMS)
+        said = run()
         self.assertIn("Released `prog.py` 1.0.0 into "
                       "`prog_builds/1.0.0`", said)
         self.assertEqual(
@@ -5840,13 +5857,15 @@ class InstallTest(unittest.TestCase):
 
         Every release gives bare entries ranges (S5.1b); Part 1 records
         `released`; the next run with the same value just runs
-        (`T.abfd`).
+        (`T.abfd`).  `exports` names a form, since without one there are
+        no releases; with no pasted bootstrap, none is built.
         """
         # Released: ranged, recorded, and run.
         program: Path = self.declaring_program(
             "released", 'dependencies = ["widget", "sprocket>=1"]',
             "import widget\nimport sprocket\nprint('ran')")
-        self.developer_settings(program, 'release = "1.0.0"\n')
+        self.developer_settings(program,
+                                'release = "1.0.0"\nexports = ["email"]\n')
         done: subprocess.CompletedProcess[str] = self.run_program(program)
         self.assertEqual(done.returncode, 0, done.stderr[-400:])
         self.assertEqual(done.stdout, "ran\n")
@@ -5876,7 +5895,8 @@ class InstallTest(unittest.TestCase):
             "sourced",
             'dependencies = ["ezpkg>=0.0.1.dev0,<0.1", "widget"]',
             "import widget\nprint('ran')")
-        self.developer_settings(program, 'release = "1.0.0"\n')
+        self.developer_settings(program,
+                                'release = "1.0.0"\nexports = ["email"]\n')
         done: subprocess.CompletedProcess[str] = self.run_program(program)
         self.assertEqual(done.returncode, 0, done.stderr[-400:])
         self.assertEqual(self.declared_now(program),
@@ -5886,25 +5906,58 @@ class InstallTest(unittest.TestCase):
         """An empty `prog.py.toml` is filled with the template, once.
 
         Every setting commented out at its default, and one line saying
-        so; after that, `ezpkg` never writes it (`T.abfd`).
+        so; after that, `ezpkg` never writes it (`T.abfd`).  That run
+        edits nothing in the program, and the file's note says what the
+        next run will (Wayne, 2026-10-21).
         """
         # Blank lines count as empty.
         program: Path = self.declaring_program(
             "filled", 'dependencies = ["widget"]',
             "import widget\nprint('ran')")
+        before: str = program.read_text()
         settings: Path = self.developer_settings(program, "\n\n")
         done: subprocess.CompletedProcess[str] = self.run_program(program)
         self.assertEqual(done.returncode, 0, done.stderr[-400:])
+        self.assertEqual(done.stdout, "ran\n")
         self.assertIn("`prog.py.toml` was empty, so `ezpkg` filled it",
                       done.stderr)
-        self.assertEqual(settings.read_text(encoding="utf-8"),
-                         ezpkg.SETTINGS_TEMPLATE.format(name="prog.py",
-                                                       stem="prog"))
+        self.assertEqual(program.read_text(), before)
+        filled: str = settings.read_text(encoding="utf-8")
+        self.assertEqual(filled, ezpkg.SETTINGS_TEMPLATE.format(
+            name="prog.py", stem="prog",
+            note=ezpkg.first_run_note("prog.py", [])))
+        self.assertIn("(right now nothing needs adding)", filled)
 
-        # Filled, it is every default, and left alone.
+        # Filled, it is every default, and left alone; now the program
+        # records its versions.
         self.assertEqual(ezpkg.read_settings(settings), ezpkg.Settings())
         done = self.run_program(program)
         self.assertEqual((done.stdout, done.stderr), ("ran\n", ""))
+        self.assertIn("checksums", program.read_text())
+        self.assertEqual(settings.read_text(encoding="utf-8"), filled)
+
+    def test_the_filling_run_names_what_the_next_run_adds(self) -> None:
+        """A new import is fetched for the filling run, but not written.
+
+        The note beside `auto-dependencies` names the entry, and the
+        next run adds it (Wayne, 2026-10-21).
+        """
+        # Nothing declared, `widget` imported.
+        program: Path = self.declaring_program(
+            "named", "dependencies = []",
+            "import widget\nprint('ran')")
+        before: str = program.read_text()
+        settings: Path = self.developer_settings(program, "")
+        done: subprocess.CompletedProcess[str] = self.run_program(program)
+        self.assertEqual(done.returncode, 0, done.stderr[-400:])
+        self.assertEqual(done.stdout, "ran\n")
+        self.assertEqual(program.read_text(), before)
+        self.assertIn('adding "widget', settings.read_text(encoding="utf-8"))
+
+        # The next run writes it.
+        done = self.run_program(program)
+        self.assertEqual(done.returncode, 0, done.stderr[-400:])
+        self.assertIn('"widget', program.read_text())
 
     def test_a_misspelt_setting_stops_the_run(self) -> None:
         """A setting `ezpkg` does not know stops the program at once.
@@ -6793,18 +6846,20 @@ class BootstrapCheckTest(unittest.TestCase):
                       "`prog.py` carries `nopip6`.",
                       " ".join(wrong.stderr.split()))
 
-        # A release replaces it, indented as it was, and runs.  Nothing
-        # is exported: this `ezpkg` is not a wheel any export could pin.
+        # A release replaces it, indented as it was, and runs.  A release
+        # needs an `exports` form, and this one's fails, since nothing
+        # came from a cache for a `.pyz` to carry; but the bootstrap and
+        # the `ezpkg` entry come first, so both are brought up to date.
         settings.write_text('auto-dependencies = false\nrelease = "1.0.0"\n'
-                            'exports = []\n')
+                            'exports = ["zipapp"]\n')
         released: subprocess.CompletedProcess[str] = run()
         self.assertEqual((released.returncode, released.stdout),
                          (0, "ran\n"), released.stderr)
         flat: str = " ".join(released.stderr.split())
         self.assertRegex(flat, r"Replaced the bootstrap `nopip6` \(lines "
                          r"6-\d+ of `prog\.py`\) with `nopip8`\.")
-        self.assertIn("Released `prog.py` 1.0.0 into `prog_builds/1.0.0`.",
-                      flat)
+        self.assertIn("`prog.py` 1.0.0 was not released: the declared "
+                      "packages did not come from the cache", flat)
         text: str = program.read_text()
         self.assertIn("if False:\n    try:", text)
         self.assertEqual(ezpkg.bootstrap_name(
@@ -6814,7 +6869,7 @@ class BootstrapCheckTest(unittest.TestCase):
         assert metadata is not None
         self.assertEqual(metadata["dependencies"],
                          [ezpkg.version_range("ezpkg", ezpkg.__version__)])
-        self.assertEqual(metadata["tool"]["ezpkg"]["released"], "1.0.0")
+        self.assertNotIn("released", metadata.get("tool", {}).get("ezpkg", {}))
 
     def test_an_edit_is_refused_where_it_is(self) -> None:
         """An edited bootstrap is refused, naming the line, indented or not.
@@ -8005,6 +8060,7 @@ class MetadataTest(unittest.TestCase):
             path: Path = Path(scratch) / "prog.py.toml"
             cases: list[tuple[str, str | ezpkg.Settings]] = [
                 ("", ezpkg.Settings()),
+                ("exports = []\n", ezpkg.Settings(exports=())),
                 (('verbosity = "high"\nrelease = "1.2.0"\nexports = ["uv"]\n'
                  'auto-dependencies = false\nbootstrap = "nopip6"\n'),
                  ezpkg.Settings(False, "high", "1.2.0", ("uv",), "nopip6")),
@@ -8126,6 +8182,16 @@ class MetadataTest(unittest.TestCase):
                         (Path(scratch) / "last_failure.txt").read_text(
                             encoding="utf-8").split("\n", 2)[2].strip(),
                         text)
+
+            # A package the author never approved: sent the `.py`, not
+            # its release (`T.ee`).
+            line = venv.end_user_failure(ezpkg.Unapproved(
+                "colorama-0.4.6-py2.py3-none-any.whl is not in the "
+                "`checksums` of Part 1", "colorama==0.4.6"))
+            self.assertIn("needs colorama 0.4.6 on this computer, which its "
+                          "author did not approve, so `ezpkg_test.py` did "
+                          "not run.  Ask its author for its release", line)
+            self.assertNotIn("checksums", line)
 
     def test_only_the_real_cache_fetches_its_own_pip(self) -> None:
         """A cache a caller names keeps the interpreter's `pip` (`I.ffspo`)."""
