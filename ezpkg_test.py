@@ -5150,7 +5150,7 @@ class InstallTest(unittest.TestCase):
         Returns:
         * (`tuple[Path, Path]`): The program written, and its HOME.
         """
-        # Part 1, Part 2's three shared imports, Part 3, then the rest.
+        # Part 1, three of Part 2's imports, its `try`, then the rest.
         where: Path = self.root / name
         home: Path = where / "home"
         (home / ".ezpkg").mkdir(parents=True)
@@ -5593,9 +5593,8 @@ class InstallTest(unittest.TestCase):
             "trigger", 'dependencies = ["paned"]',
             "import paned\nprint(paned.__version__)")
         settings: Path = self.developer_settings(
-            program, ezpkg.SETTINGS_TEMPLATE.format(
-                name="prog.py", stem="prog", note="").replace(
-                    "# auto-dependencies = true", "auto-dependencies = false"))
+            program, ezpkg.SETTINGS_TEMPLATE.replace(
+                "# auto-dependencies = true", "auto-dependencies = false"))
 
         def run() -> str:
             # One developer run, which must run the program too.
@@ -6242,9 +6241,9 @@ class InstallTest(unittest.TestCase):
                       done.stderr)
         self.assertEqual(program.read_text(), before)
         filled: str = settings.read_text(encoding="utf-8")
-        self.assertEqual(filled, ezpkg.SETTINGS_TEMPLATE.format(
-            name="prog.py", stem="prog",
-            note="\n" + ezpkg.first_run_note("prog.py", [])))
+        self.assertEqual(filled, ezpkg.SETTINGS_TEMPLATE.replace(
+            ezpkg.AUTO_DEPENDENCIES_LINE, ezpkg.AUTO_DEPENDENCIES_LINE
+            + ezpkg.first_run_note("prog.py", []) + "\n", 1))
         self.assertIn("(right now nothing needs adding)", filled)
 
         # Filled, it is every default, and left alone; now the program
@@ -7020,7 +7019,7 @@ class BootstrapCheckTest(unittest.TestCase):
         copy in `README.md`, the file beside it, and `QUICK_START`, which
         the cache receives, must not drift apart, and the bootstrap in
         all of them must be the one that ships.  The program's `# Part`
-        comments must also run 1 to 5 in order.
+        comments must also run 1 to 4 in order.
         """
         # The file is the authority, and the page must carry it verbatim.
         here: Path = Path(__file__).resolve().parent
@@ -7035,13 +7034,30 @@ class BootstrapCheckTest(unittest.TestCase):
         landmarks: list[str] = [line[2:] for line in program.splitlines()
                                 if line.startswith("# Part ")]
         self.assertEqual([landmark.split(":")[0] for landmark in landmarks],
-                         [f"Part {n}" for n in range(1, 6)])
+                         [f"Part {n}" for n in range(1, 5)])
 
         # Found the way a running program's would be.
         block: str | None = ezpkg.find_bootstrap(program)
         assert block is not None
         self.assertEqual(ezpkg.bootstrap_fingerprint(block),
                          list(ezpkg.BOOTSTRAPS)[-1])
+
+    def test_the_settings_template_is_current(self) -> None:
+        """`README.md` shows `SETTINGS_TEMPLATE` exactly, in short lines.
+
+        The template explains itself, and `README.md` shows it rather
+        than saying it again, so the two must not drift apart (Wayne,
+        2026-10-22).  No line may be wider than 79 columns, so that it
+        does not wrap in a typical editor.
+        """
+        # Verbatim in the page, and narrow.
+        here: Path = Path(__file__).resolve().parent
+        readme: str = (here / "README.md").read_text(encoding="utf-8")
+        self.assertIn(f"```toml\n{ezpkg.SETTINGS_TEMPLATE}```\n", readme)
+        wide: list[str] = [line for line in
+                           ezpkg.SETTINGS_TEMPLATE.splitlines()
+                           if len(line) > 79]
+        self.assertEqual(wide, [])
 
     def test_layout_and_comments_do_not_change_the_fingerprint(self) -> None:
         """Re-indenting, re-wrapping and commenting leave it the same."""
@@ -8384,6 +8400,147 @@ class MetadataTest(unittest.TestCase):
             runs.append({"declared": ["b"], "loaded": []})
             self.assertEqual(venv.unused_lately({"runs": runs}), set())
 
+    def test_platform_guards_give_markers(self) -> None:
+        """An import under a plain platform test needs its package there."""
+        # Each form read, and the ones that are not.
+        text: str = textwrap.dedent("""\
+            import os, platform, sys
+            if sys.platform == "win32":
+                import win32api
+            else:
+                import termios_helper
+            if "darwin" != sys.platform and os.name == "posix":
+                import both
+            if not platform.system() == "Linux":
+                import negated
+            if sys.platform.startswith("linux"):
+                import linuxish
+                import twice
+            import twice
+            if sys.version_info >= (3, 12):
+                import unread
+            """)
+        self.assertEqual(ezpkg.import_markers(text), {
+            "win32api": "sys_platform == 'win32'",
+            "termios_helper": "sys_platform != 'win32'",
+            "both": "sys_platform != 'darwin' and os_name == 'posix'",
+            "negated": "platform_system != 'Linux'",
+            "linuxish": "sys_platform == 'linux'"})
+
+        # Judged on this computer, and nothing without a marker.
+        here: str = f"sys_platform == '{sys.platform}'"
+        self.assertTrue(ezpkg.marker_holds(here))
+        self.assertFalse(ezpkg.marker_holds(here.replace("==", "!=")))
+        self.assertTrue(ezpkg.holds_here("cowsay"))
+        self.assertFalse(ezpkg.holds_here("pywin32; sys_platform == 'none'"))
+
+    def test_the_python_floors(self) -> None:
+        """A program's syntax and a package's metadata each set a floor."""
+        # Never below 3.11; newer syntax raises it.
+        self.assertEqual(ezpkg.syntax_floor("x = 1\n"), (3, 11))
+        if sys.version_info >= (3, 12):
+            self.assertEqual(ezpkg.syntax_floor("type Pair = tuple\n"),
+                             (3, 12))
+
+        # The highest lower bound of a package's `Requires-Python`.
+        self.assertEqual(ezpkg.package_floor(">=3.9,<4"), (3, 9))
+        self.assertEqual(ezpkg.package_floor(">3.10, >=3.12"), (3, 12))
+        self.assertIsNone(ezpkg.package_floor("!=3.0.*"))
+
+    def test_a_release_copy_gets_a_part_1(self) -> None:
+        """A program without Part 1 gets one, after its first lines."""
+        # After the `#!` and encoding lines; a block is left alone.
+        text: str = ("#!/usr/bin/env python3\n# -*- coding: utf-8 -*-\n"
+                     '"""Doc."""\nimport x\n')
+        given: str = ezpkg.with_script_block(text)
+        self.assertTrue(given.startswith(
+            "#!/usr/bin/env python3\n# -*- coding: utf-8 -*-\n"
+            "# Part 1: The packages this program needs, written by ezpkg.\n"
+            "# /// script\n# dependencies = []\n# ///\n"))
+        self.assertEqual(ezpkg.script_metadata(given), {"dependencies": []})
+        self.assertEqual(ezpkg.with_script_block(given), given)
+
+        # `requires-python` first, or in place.
+        self.assertEqual(ezpkg.with_requires_python(
+            'dependencies = []\n\n[tool.uv]\nx = "y"', ">=3.12"),
+            'requires-python = ">=3.12"\ndependencies = []\n\n'
+            '[tool.uv]\nx = "y"')
+        self.assertEqual(ezpkg.with_requires_python(
+            'requires-python = ">=3.11"\ndependencies = []', ">=3.13"),
+            'requires-python = ">=3.13"\ndependencies = []')
+
+    def test_settings_dependencies_join_part_1s(self) -> None:
+        """`dependencies` in `prog.py.toml` follows Part 1's, which win."""
+        # Part 1's `cowsay` wins over the setting's.
+        settings: ezpkg.Settings = ezpkg.Settings(
+            dependencies=("numpy>=2", "Cowsay==6.0"))
+        with (tempfile.TemporaryDirectory() as scratch,
+              unittest.mock.patch.object(ezpkg.EZPkg, "settings",
+                                         return_value=settings),
+              unittest.mock.patch.object(ezpkg.EZPkg, "part1_entries",
+                                         return_value=["cowsay>=6"])):
+            venv: ezpkg.EZPkg = ezpkg.EZPkg(Path(scratch) / "cache")
+            self.assertEqual(venv.written(), ["cowsay>=6", "numpy>=2"])
+
+    def test_a_release_works_out_its_python(self) -> None:
+        """`requires-python` is the setting, Part 1's, or the floor."""
+        # Worked out, with no packages and no record to compare.
+        with (tempfile.TemporaryDirectory() as scratch,
+              unittest.mock.patch.object(ezpkg, "main_path",
+                                         return_value=None)):
+            venv: ezpkg.EZPkg = ezpkg.EZPkg(Path(scratch) / "cache")
+            with unittest.mock.patch.object(
+                    ezpkg.EZPkg, "settings", return_value=ezpkg.Settings()):
+                self.assertEqual(venv.python_range("x = 1\n", []), ">=3.11")
+                self.assertIsNone(venv.python_range(
+                    '# /// script\n# requires-python = ">=3.12"\n# ///\n',
+                    []))
+            with unittest.mock.patch.object(
+                    ezpkg.EZPkg, "settings", return_value=ezpkg.Settings(
+                        requires_python=">=3.13")):
+                self.assertEqual(venv.python_range("x = 1\n", []), ">=3.13")
+
+    def test_a_missing_module_adds_its_package(self) -> None:
+        """A developer's program that stops for a module gains its package."""
+        # A program that imports nothing but `importlib`.
+        with tempfile.TemporaryDirectory() as scratch:
+            program: Path = Path(scratch) / "prog.py"
+            text: str = "import importlib\nimportlib.import_module(name)\n"
+            program.write_text(text)
+            venv: ezpkg.EZPkg = ezpkg.EZPkg(Path(scratch) / "cache")
+            stashed: dict[str, Any] = {"dependencies": ["cowsay"]}
+            error: ModuleNotFoundError = ModuleNotFoundError(
+                "No module named 'socks'", name="socks")
+            told: io.StringIO = io.StringIO()
+            with (unittest.mock.patch.object(
+                      ezpkg, "main_source", return_value=(program, text)),
+                  unittest.mock.patch.object(
+                      ezpkg.EZPkg, "declared", return_value=["cowsay"]),
+                  unittest.mock.patch.object(
+                      ezpkg.EZPkg, "prove", return_value="") as proved,
+                  unittest.mock.patch.object(
+                      ezpkg.EZPkg, "stash", return_value=stashed),
+                  unittest.mock.patch.object(
+                      ezpkg.EZPkg, "put_stash") as put,
+                  contextlib.redirect_stderr(told)):
+                self.assertTrue(venv.add_missing(program, error, None))
+                proved.assert_called_once_with("PySocks", "socks")
+                put.assert_called_once_with(
+                    dependencies=["cowsay", "PySocks"])
+                self.assertIn("`prog.py` needed `socks`, so `ezpkg` added "
+                              "`PySocks`", told.getvalue())
+
+                # Not for an import the source makes, the standard
+                # library, a declared package, or another error.
+                for module in ("importlib", "json"):
+                    self.assertFalse(venv.add_missing(program,
+                        ModuleNotFoundError("", name=module), None))
+                self.assertFalse(venv.add_missing(
+                    program, ModuleNotFoundError("", name="cowsay"), None))
+                self.assertFalse(venv.add_missing(
+                    program, ValueError("socks"), None))
+                self.assertEqual(put.call_count, 1)
+
     def test_dependency_comments_survive_a_rewrite(self) -> None:
         """Each entry keeps its comment when `dependencies` is rewritten."""
         # One commented entry, then another added and marked.
@@ -8426,7 +8583,8 @@ class MetadataTest(unittest.TestCase):
                 ("\n\n[colour]\nx = 1\n",
                  ("prog.py.toml line 3: unknown setting `colour` (the "
                  "settings are `auto-dependencies`, `verbosity`, `release`, "
-                 "`exports`, `bootstrap`, `upgrade` and `cull-days`)")),
+                 "`exports`, `bootstrap`, `upgrade`, `cull-days`, "
+                 "`dependencies` and `requires-python`)")),
                 ('auto-dependencies = "yes"\n',
                  ("prog.py.toml line 1: `auto-dependencies` must be `true` "
                   "or `false`")),
@@ -9104,10 +9262,15 @@ class MetadataTest(unittest.TestCase):
               self.assertRaisesRegex(SystemExit, "give `dependencies`")):
             upgrading.give_ranges(["widget"])
 
-        # No block at all: no copy.
+        # No block at all: the copy gets one, as a developer writes none
+        # (Wayne, 2026-10-22).
         program.write_text("import widget\n")
-        with self.assertRaisesRegex(RuntimeError, "script block of a copy"):
-            ezpkg.EZPkg(venv.root).staged([])
+        copy: str = ezpkg.EZPkg(venv.root).staged(["widget"])[0]
+        declared: dict[str, Any] | None = ezpkg.script_metadata(copy)
+        assert declared is not None
+        self.assertEqual(declared["dependencies"], ["widget"])
+        self.assertEqual(declared["requires-python"], ">=3.11")
+        self.assertTrue(copy.endswith("# ///\nimport widget\n"))
 
     def test_import_problems_name_each_kind_once(self) -> None:
         """Undeclared, from no package, not importable, above the bootstrap.

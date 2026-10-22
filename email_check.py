@@ -9,7 +9,7 @@ never edited (Wayne, 2026-10-22): the `checksums` are kept in
 `~/.ezpkg`, and only the releases carry them.  This shows both halves:
 
 * `./email_check.py build DIR`: as a developer on this computer, writes
-  `prog.py` (the Quick Start's Parts 1-3, needing `tqdm`) and an empty
+  `prog.py` (the Quick Start's Parts 1-2, needing `tqdm`) and an empty
   `prog.py.toml`, and runs it: that first developer run must fill the
   file and run the program, building nothing, since releases are off
   until `exports` and `release` are set.  With the `#`s removed from
@@ -100,16 +100,16 @@ def build(directory: pathlib.Path) -> int:
     Returns:
     * (`int`): The exit status.
     """
-    # The Quick Start's Parts 1-3, needing `tqdm` instead of `cowsay`.
+    # The Quick Start's Parts 1-2, needing `tqdm` instead of `cowsay`.
     quick: str = (HERE / "quick_start.py").read_text(encoding="utf-8")
-    head: str = quick.partition("# Part 4:")[0]
+    head: str = quick.partition("# Part 3:")[0]
     head = head.replace('"cowsay"]', '"tqdm"]')
     work: pathlib.Path = directory / "work"
     work.mkdir(parents=True)
     program: pathlib.Path = work / "prog.py"
     program.write_text(
-        head + "# Part 4: Your imports, all after the bootstrap.\n"
-        "import tqdm\n\n# Part 5: The program itself.\n"
+        head + "# Part 3: Your imports, all after the bootstrap.\n"
+        "import tqdm\n\n# Part 4: The program itself.\n"
         "print(f'tqdm {tqdm.__version__}')\n", encoding="utf-8")
     home: pathlib.Path = directory / "home"
     seed_home(home)

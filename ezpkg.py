@@ -260,8 +260,9 @@ QUICK_START: str = '''#!/usr/bin/env python3
 \x23 ///
 """Try `EZPkg`: fetch the `cowsay` package on first use, then run."""
 
-# Part 2: EZPkg required imports are immediately below.
-# A `from __future__ import ...` line, if any, goes above Part 2.
+# Part 2: The EZPkg bootstrap.  Paste all of it, `# Begin` to `# End`,
+# below your docstring and any `from __future__` lines.
+# Begin the EZPkg bootstrap.  Never edit it.
 import hashlib
 import importlib
 import json
@@ -269,10 +270,6 @@ import pathlib
 import subprocess
 import sys
 import urllib.request as req
-
-# All other imports are added after the EZPkg bootstrap.
-
-# Part 3: The EZPkg bootstrap.  Never edit it.
 try:  # Do not edit try block!  See https://pypi.org/project/ezpkg/
     s = "find ezpkg"; t = pathlib.Path.home()/".ezpkg"; w = t/"ezpkg.whl"
     def g(u):  # Fetch u, with curl if this Python has no certificates.
@@ -297,11 +294,12 @@ try:  # Do not edit try block!  See https://pypi.org/project/ezpkg/
     s = "fetch packages"; m.EZPkg().install(bootstrap="nopip8")
 except Exception as x:
     raise SystemExit(f"ezpkg: {s} failed: {x!r}")  # Do not edit try block!
+# End the EZPkg bootstrap.  Your imports go below it.
 
-# Part 4: Your imports, all after the bootstrap.
+# Part 3: Your imports, all after the bootstrap.
 import cowsay  # type: ignore[import-not-found]  # For mypy.
 
-# Part 5: The program itself.
+# Part 4: The program itself.
 cowsay.cow("EZPkg works!")
 print(f"The cow above was drawn by cowsay {cowsay.__version__}.")
 '''
@@ -942,61 +940,98 @@ def main_source() -> tuple[Path, str] | None:
 # What an empty `prog.py.toml` is filled with: every setting, commented
 # out at its default (`T.abfd`), except `exports`, whose empty list is
 # left open so that each form is one `#` to remove (Wayne, 2026-10-21).
-# `{name}` is the program's file name, `{stem}` it without `.py`, and
-# `{note}` empty, or `first_run_note`'s lines after a newline when
-# `EDIT_PROGRAM` is on.
+# `README.md` shows it verbatim, so it names no particular program:
+# `PROG_NAME` is the README's word for one (Wayne, 2026-10-22).  With
+# `EDIT_PROGRAM` on, `first_run_note` follows `AUTO_DEPENDENCIES_LINE`.
 SETTINGS_TEMPLATE: str = """\
-# {name}.toml: EZPkg settings for {name}.
+# PROG_NAME.py.toml: EZPkg settings for PROG_NAME.py, the program
+# beside this file.  More: https://pypi.org/project/ezpkg/
 #
-# This file makes you {name}'s developer.  ezpkg asks you nothing,
-# works out the packages {name}'s imports need, and remembers them and
-# the versions you ran in ~/.ezpkg, never in {name} itself.  Each
-# release writes them into its copies, so that whoever you send a
-# release to gets exactly those.  Without this file, {name} is an end
-# user's: they are asked once, on its first run, and {name} is never
-# edited.
+# This file makes you the program's developer.  If you delete this file,
+# you are no longer treated as a developer.  This file is the only place
+# where your development decisions get recorded (i.e. there are no unexpected
+# text prompts when the program runs.)  All information that EZPkg collects
+# is stored in files in the `~/.ezpkg/` directory (not this file.)
 #
-# Each setting is shown at its default.  Remove a `#` to change one.
-# More: https://pypi.org/project/ezpkg/
+# Wayne has edited to here.
+#
+# to control what EZPkg does.  
+# ezpkg asks you nothing,
+# fetches the packages the program's imports need, and remembers them
+# and the versions you ran in ~/.ezpkg, never in the program itself.  A
+# release writes them into the copies it makes, so that whoever you
+# send a release to gets exactly those.  Without this file, the program
+# is an end user's: they are asked once, on its first run, and the
+# program is never edited.
+#
+# Each setting is shown at its default, after a `#`.  To change one,
+# remove its `#` and edit its value.  A misspelt setting or a wrong
+# value stops the program, naming the line.  To see this text again,
+# empty this file and run the program.
 
-# Keep the packages matching the imports: a new import gets one, with
-# a version range, and one whose import is gone is dropped.  What you
-# write in `dependencies` yourself is always kept.
-# auto-dependencies = true{note}
+# Keep the packages matching the imports: a new import gets a package,
+# with a version range, and one whose import is gone is dropped.  With
+# `false`, ezpkg fetches only what `dependencies` (at the end of this
+# file) lists, with the program's own Part 1, if it has one.
+# auto-dependencies = true
 
 # How much ezpkg says: "none", "low", "medium" or "high".
 # verbosity = "low"
 
-# Releases are off until you remove the `#` from at least one entry of
-# `exports` and from `release` below.  Then each run where `release`
-# differs from the last one released builds that release beside {name}
-# ({stem}-VERSION.py, ...), in place of the last one's files, adds it
-# to {name}.releases, and runs {name} as usual.  Each release checks
-# the imports and the bootstrap, and gives each entry without a
-# version a range (write a range or `==` yourself to choose one).
+# The versions are frozen at the date of the program's first run, so
+# they never change by themselves.  With `upgrade = true`, every run
+# takes the newest versions; put the `#` back to freeze them at the
+# last run's date.
+# upgrade = false
+
+# How many days the packages the program uses may go unused before
+# ezpkg removes them from ~/.ezpkg (they are fetched again if needed).
+# cull-days = 30
+
+# Releases: a release builds the copies you send to others, beside the
+# program, and records each one in PROG_NAME.py.releases.  Releases are
+# off until you remove the `#` from at least one entry of `exports` and
+# from `release` below.  Then each run where `release` differs from the
+# last one released builds that release, in place of the last one's
+# files, and then runs the program as usual.  Each release checks the
+# imports and the bootstrap, and gives each package without a version
+# a range.
 exports = [  # Remove the `#`s of the forms each release builds.
-#   "email",   # A `.py` to send, ready for every computer.
-#   "zipapp",  # A `.pyz` that needs no network (pure Python only).
-#   "uv",      # A `-uv.py` and its lock, for `uv run`.
+#   "email",   # PROG_NAME-VERSION.py, to send; for every computer.
+#   "zipapp",  # PROG_NAME-VERSION.pyz, no network; pure Python only.
+#   "uv",      # PROG_NAME-VERSION-uv.py and its lock, for `uv run`.
 ]
 
 # The version of the next release.  Change it whenever you like, even
 # to go back to an older number.
 # release = "1.0.0"
 
-# The bootstrap {name} carries: "update" replaces an older one at the
-# next release; a name, such as "nopip8", keeps exactly that one.
+# The bootstrap the program carries: "update" replaces an older one at
+# the next release; a name, such as "nopip8", keeps exactly that one.
 # bootstrap = "update"
 
-# Upgrading: {name}'s versions are frozen at the date of its first
-# run.  With `upgrade = true`, every run takes the newest versions;
-# put the `#` back to freeze them at the last run's date.
-# upgrade = false
+# Rarely needed: ezpkg works these out, and you set them only when it
+# gets one wrong.
 
-# How many days the packages {name} uses may go unused before ezpkg
-# removes them from ~/.ezpkg (they are fetched again if needed).
-# cull-days = 30
+# The Pythons the program runs on.  Each release works this out from
+# the program's syntax and its packages (never older than 3.11, which
+# ezpkg needs), and says so when it is older than every Python you have
+# run the program on.  Set it if the program needs a newer Python.
+# requires-python = ">=3.11"
+
+# Packages ezpkg cannot work out.  It finds a package for each import,
+# with a range from the version you ran, takes a marker from a guard
+# such as `if sys.platform == "win32":`, and adds a package when the
+# program stops because one is missing.  For anything else, write an
+# entry such as "numpy>=2.1" or "requests[socks]", a Python "dependency
+# specifier", as explained at
+# https://packaging.python.org/en/latest/specifications/dependency-specifiers/
+# An entry here wins over the one ezpkg would choose for that package.
+# dependencies = []
 """
+
+# The template's line that `first_run_note` follows, when it is used.
+AUTO_DEPENDENCIES_LINE: str = "# auto-dependencies = true\n"
 
 def first_run_note(name: str, adding: Sequence[str] | None) -> str:
     """Return the note a filled `prog.py.toml` carries beside its
@@ -1087,6 +1122,13 @@ class Settings:
     * `cull_days` (`int | None`):
       How many days what the program holds may go unused before `cull`
       takes it, or `None` for `CULL_DAYS` (`cull_seconds`).
+    * `dependencies` (`tuple[str, ...]`):
+      The developer's own requirements, for what the imports cannot say
+      (an extra, an exact version), declared with Part 1's and kept as
+      they are (`EZPkg.written`).
+    * `requires_python` (`str | None`):
+      The Pythons a release's Part 1 admits, or `None` for the floor
+      the release works out (`EZPkg.python_range`).
     """
 
     auto_dependencies: bool = True
@@ -1096,6 +1138,8 @@ class Settings:
     bootstrap: str = "update"
     upgrade: bool = False
     cull_days: int | None = None
+    dependencies: tuple[str, ...] = ()
+    requires_python: str | None = None
 
 
 def settings_path(program: Path) -> Path:
@@ -1403,6 +1447,16 @@ def read_settings(path: Path) -> Settings:
                 wrong = ("a list of " + and_list(
                     [f'"{one}"' for one in EXPORT_FORMS], "or")
                     + ", each at most once")
+        elif key == "dependencies":
+            if isinstance(value, list) and all(
+                    isinstance(one, str) and requirement_name(one)
+                    for one in value):
+                value = tuple(value)
+            else:
+                wrong = 'a list of requirements in quotes, such as "numpy>=2"'
+        elif key == "requires-python":
+            if not (isinstance(value, str) and python_floor(value)):
+                wrong = 'a Python version range in quotes, such as ">=3.11"'
         elif not isinstance(value, bool):
             wrong = "`true` or `false`"
         if wrong:
@@ -2874,10 +2928,19 @@ MODULE_PACKAGES: dict[str, str] = {
     "OpenSSL": "pyOpenSSL",
     "PIL": "Pillow",
     "pptx": "python-pptx",
+    "pythoncom": "pywin32",
+    "pywintypes": "pywin32",
     "serial": "pyserial",
     "skimage": "scikit-image",
     "sklearn": "scikit-learn",
+    "socks": "PySocks",
     "usb": "pyusb",
+    "win32api": "pywin32",
+    "win32com": "pywin32",
+    "win32con": "pywin32",
+    "win32file": "pywin32",
+    "win32gui": "pywin32",
+    "win32process": "pywin32",
     "yaml": "PyYAML",
 }
 
@@ -2926,6 +2989,290 @@ def providing(module: str, providers: Mapping[str, list[str]]) -> list[str]:
 # `if sys.platform == "win32": import winreg`.  See `program_imports`.
 PLATFORM_NAMES: frozenset[str] = frozenset(
     {"sys.platform", "os.name", "platform.system", "sys_platform"})
+
+# The platform tests `platform_marker` turns into PEP 508 markers: the
+# test's own spelling, and the marker variable it means.
+MARKER_VARIABLES: dict[str, str] = {
+    "sys.platform": "sys_platform",
+    "os.name": "os_name",
+    "platform.system()": "platform_system",
+}
+
+# The values `sys.platform.startswith(...)` can test that are whole
+# `sys.platform` values under Python 3, so that `==` says the same.
+WHOLE_PLATFORMS: frozenset[str] = frozenset(
+    {"win32", "darwin", "linux", "cygwin", "emscripten", "wasi"})
+
+
+def platform_marker(test: ast.expr, negate: bool = False) -> str | None:
+    """Return the PEP 508 marker an `if` test on the platform means.
+
+    Only the plain forms are read: `sys.platform == "win32"` (or `!=`,
+    either way round), `sys.platform.startswith("linux")`, `os.name ==
+    "nt"`, `platform.system() == "Windows"`, `not` before one of them,
+    and `and` between them.  Anything else has no marker, rather than a
+    guessed one (Wayne, 2026-10-22).
+
+    Arguments:
+    * `test` (`ast.expr`):
+      The `if` statement's test.
+    * `negate` (`bool`):
+      True for the `else` branch, which runs when the test fails.
+
+    Returns:
+    * (`str | None`): Such as `sys_platform == 'win32'`, or `None`;
+      single quotes, since the entry goes inside TOML's double ones.
+    """
+    # `not` flips the test, and `and` joins tests (which cannot be
+    # negated as one marker).
+    if isinstance(test, ast.UnaryOp) and isinstance(test.op, ast.Not):
+        return platform_marker(test.operand, not negate)
+    if isinstance(test, ast.BoolOp) and isinstance(test.op, ast.And):
+        if negate:
+            return None
+        parts: list[str | None] = [platform_marker(one)
+                                   for one in test.values]
+        if None in parts:
+            return None
+        return " and ".join(one for one in parts if one is not None)
+
+    # `sys.platform.startswith("linux")` is `==` for a whole value.
+    if (isinstance(test, ast.Call) and isinstance(test.func, ast.Attribute)
+            and test.func.attr == "startswith"
+            and ast.unparse(test.func.value) == "sys.platform"
+            and len(test.args) == 1 and not test.keywords
+            and isinstance(test.args[0], ast.Constant)
+            and test.args[0].value in WHOLE_PLATFORMS):
+        return (f'sys_platform {"!=" if negate else "=="} '
+                f"'{test.args[0].value}'")
+
+    # A comparison of one of `MARKER_VARIABLES` with a string.
+    if not (isinstance(test, ast.Compare) and len(test.ops) == 1
+            and isinstance(test.ops[0], ast.Eq | ast.NotEq)):
+        return None
+    sides: list[ast.expr] = [test.left, test.comparators[0]]
+    variable: str | None = next(
+        (MARKER_VARIABLES[ast.unparse(side)] for side in sides
+         if ast.unparse(side) in MARKER_VARIABLES), None)
+    value: object = next(
+        (side.value for side in sides if isinstance(side, ast.Constant)),
+        None)
+    if variable is None or not isinstance(value, str) or "'" in value:
+        return None
+    equal: bool = isinstance(test.ops[0], ast.Eq) != negate
+    return f"{variable} {'==' if equal else '!='} '{value}'"
+
+
+def import_markers(text: str) -> dict[str, str]:
+    """Return the platform marker each guarded import implies.
+
+    A module every import of which sits under the same platform test
+    (`platform_marker`), such as `win32api` under `if sys.platform ==
+    "win32":`, needs its package only there, so its entry gets that
+    marker: `pywin32; sys_platform == 'win32'` (Wayne, 2026-10-22).  A
+    module imported anywhere else, or under a test this cannot read,
+    gets none.
+
+    Arguments:
+    * `text` (`str`):
+      The program's source.
+
+    Returns:
+    * (`dict[str, str]`): The marker of each guarded top-level module.
+
+    Raises:
+    * `SyntaxError`:
+      If the program does not parse.
+    """
+    # The marker over each import, "" for none, by module.
+    seen: dict[str, set[str]] = {}
+
+    def visit(nodes: list[ast.stmt], over: list[str | None]) -> None:
+        """Note the imports in `nodes`, under the markers `over`."""
+        node: ast.stmt
+        for node in nodes:
+            names: list[str] = []
+            if isinstance(node, ast.Import):
+                names = [alias.name for alias in node.names]
+            elif isinstance(node, ast.ImportFrom) and not node.level:
+                names = [node.module or ""]
+            known: bool = bool(over) and None not in over
+            marker: str = (" and ".join(one for one in over if one)
+                           if known else "")
+            name: str
+            for name in names:
+                if name:
+                    seen.setdefault(name.split(".")[0], set()).add(marker)
+            if isinstance(node, ast.If):
+                visit(node.body, [*over, platform_marker(node.test)])
+                visit(node.orelse,
+                      [*over, platform_marker(node.test, negate=True)])
+                continue
+            field: str
+            for field in ("body", "orelse", "finalbody"):
+                inner: Any = getattr(node, field, None)
+                if isinstance(inner, list):
+                    visit(inner, over)
+            if isinstance(node, ast.Try | ast.TryStar):
+                handler: ast.ExceptHandler
+                for handler in node.handlers:
+                    visit(handler.body, over)
+            if isinstance(node, ast.Match):
+                case: ast.match_case
+                for case in node.cases:
+                    visit(case.body, over)
+
+    visit(ast.parse(text).body, [])
+    return {module: next(iter(markers)) for module, markers in seen.items()
+            if len(markers) == 1 and "" not in markers}
+
+
+def marker_holds(marker: str) -> bool:
+    """Say whether a marker `platform_marker` wrote holds on this computer.
+
+    Arguments:
+    * `marker` (`str`):
+      Clauses such as `sys_platform == 'win32'`, joined by ` and `.
+
+    Returns:
+    * (`bool`): True when every clause holds here.
+    """
+    # Each clause is `variable op "value"`.
+    here: dict[str, str] = {"sys_platform": sys.platform,
+                            "os_name": os.name,
+                            "platform_system": platform.system()}
+    clause: str
+    for clause in marker.split(" and "):
+        variable, operator, value = clause.split(" ", 2)
+        if (here.get(variable) == value.strip("'\"")) != (operator == "=="):
+            return False
+    return True
+
+
+def holds_here(entry: str) -> bool:
+    """Say whether an entry with a `platform_marker` applies here.
+
+    Arguments:
+    * `entry` (`str`):
+      A requirement, such as `pywin32; sys_platform == 'win32'`.
+
+    Returns:
+    * (`bool`): True with no marker, or one that holds on this computer.
+    """
+    # Only the markers `import_markers` writes are read.
+    marker: str = entry.partition(";")[2].strip()
+    return not marker or marker_holds(marker)
+
+
+def syntax_floor(text: str) -> tuple[int, int]:
+    """Return the oldest Python, 3.11 or newer, whose syntax a program uses.
+
+    Python's own parser is asked to accept only each version's grammar
+    in turn (`feature_version`), which catches most new syntax, such as
+    3.12's `type` statement, though not all of it (Wayne, 2026-10-22).
+
+    Arguments:
+    * `text` (`str`):
+      The program's source.
+
+    Returns:
+    * (`tuple[int, int]`): Such as `(3, 11)`; the running Python's own
+      when no older grammar parses it.
+    """
+    # The oldest first; this Python's own parses whatever it runs.
+    minor: int
+    for minor in range(11, sys.version_info.minor):
+        try:
+            ast.parse(text, feature_version=(3, minor))
+            return 3, minor
+        except SyntaxError:
+            continue
+    return 3, sys.version_info.minor
+
+
+def package_floor(specifier: str) -> tuple[int, ...] | None:
+    """Return the floor of a package's `Requires-Python`, if it has one.
+
+    Unlike `python_floor`, which reads a program's own `requires-python`
+    and refuses anything but one clause, this takes the highest `>=` (or
+    `>`, `==`, `~=`) clause of a list such as `>=3.9,<4`, since only the
+    floor matters for a release's Part 1.
+
+    Arguments:
+    * `specifier` (`str`):
+      A distribution's `Requires-Python`, such as `>=3.9`.
+
+    Returns:
+    * (`tuple[int, ...] | None`): The floor, or `None` for none.
+    """
+    # Every lower-bound clause, the highest wins.
+    floors: list[tuple[int, ...]] = [
+        tuple(int(part) for part in found.group(1).split("."))
+        for found in re.finditer(r"(?:>=|>|==|~=)\s*(\d+(?:\.\d+)*)",
+                                 specifier)]
+    return max(floors) if floors else None
+
+
+def with_script_block(text: str) -> str:
+    """Return a program with an empty `script` block, if it had none.
+
+    A developer writes no Part 1 (Wayne, 2026-10-22), so a release puts
+    one into its copy, after the `#!` line and any encoding line, where
+    `quick_start.py` has its own.
+
+    Arguments:
+    * `text` (`str`):
+      The program's source.
+
+    Returns:
+    * (`str`): The program, with a block declaring no packages.
+    """
+    # Already there, or after the lines that must stay first.
+    if script_toml(text) is not None:
+        return text
+    lines: list[str] = text.splitlines(keepends=True)
+    at: int = 0
+    while at < min(len(lines), 2) and (
+            (at == 0 and lines[0].startswith("#!"))
+            or re.match(r"^[ \t\f]*#.*?coding[:=]", lines[at])):
+        at += 1
+    block: str = ("# Part 1: The packages this program needs, written by "
+                  "ezpkg.\n# /// script\n# dependencies = []\n# ///\n")
+    return "".join(lines[:at]) + block + "".join(lines[at:])
+
+
+def with_requires_python(toml: str, value: str) -> str | None:
+    """Return a block's TOML with its top-level `requires-python` set.
+
+    Arguments:
+    * `toml` (`str`):
+      The block's TOML, as `script_toml` returns it.
+    * `value` (`str`):
+      Such as `>=3.11`, without quotes.
+
+    Returns:
+    * (`str | None`): The new TOML, or `None` when this cannot set it
+      safely.
+    """
+    # In place, or first, since a key after a table would be the table's.
+    setting: str = f'requires-python = "{value}"'
+    lines: list[str] = toml.split("\n")
+    existing: int | None = next(
+        (index for index, line in enumerate(lines)
+         if re.match(r"\s*requires-python\s*=", line)), None)
+    if existing is None:
+        lines.insert(0, setting)
+    else:
+        lines[existing] = setting
+    result: str = "\n".join(lines)
+    try:
+        expected: dict[str, Any] = tomllib.loads(toml)
+        expected["requires-python"] = value
+        if tomllib.loads(result) != expected:
+            return None
+    except tomllib.TOMLDecodeError:
+        return None
+    return result
 
 
 def program_imports(text: str) -> list[tuple[str, int, bool]]:
@@ -3574,7 +3921,8 @@ class Discrepancy:
         # The entries the imports place, and the additions.
         return sorted({normal_name(requirement_name(self.entries[index]))
                        for index in self.placed_by}
-                      | {normal_name(package) for package in added})
+                      | {normal_name(requirement_name(package))
+                         for package in added})
 
     def target(self) -> list[str]:
         """Return the `dependencies` with every change made.
@@ -4217,8 +4565,10 @@ class EZPkg:
         encoding: str
         crlf: bool
         text, encoding, crlf = read_program(where)
-        listed: str | None = (with_dependency_list(text, list(asking))
-                              if list(asking) != self.written() else text)
+        text = with_script_block(text)
+        listed: str | None = (
+            with_dependency_list(text, list(asking))
+            if list(asking) != self.part1_entries() else text)
         block: tuple[re.Match[str], str] | None = (
             None if listed is None else script_toml(listed))
         if listed is None or block is None:
@@ -4234,10 +4584,72 @@ class EZPkg:
             stashed.get("exclude-newer") or "")
         if dated and toml is not None:
             toml = uv_setting(toml, "exclude-newer", f'"{dated}"', "uv")
+        wanted: str | None = self.python_range(text, asking)
+        if wanted and toml is not None:
+            toml = with_requires_python(toml, wanted)
         if toml is None:
             raise RuntimeError(f"cannot edit the script block of a copy "
                                f"of {where.name}")
         return with_script_toml(listed, block[0], toml), encoding, crlf
+
+    def python_range(self, text: str, asking: Sequence[str]) -> str | None:
+        """Return the `requires-python` a release's Part 1 should say.
+
+        `requires-python` in `prog.py.toml` when it is set; otherwise
+        Part 1's own, left alone, when it has one; otherwise the floor
+        worked out here: the highest of 3.11 (which `ezpkg` needs), the
+        program's syntax (`syntax_floor`) and each package's own
+        `Requires-Python` (`package_floor`).  A worked-out floor older
+        than every Python the developer has run the program on is said,
+        in one line, since a library function newer than the floor would
+        not show in the source (Wayne, 2026-10-22).
+
+        Arguments:
+        * `text` (`str`):
+          The program's source.
+        * `asking` (`Sequence[str]`):
+          The requirements it declared, already provided.
+
+        Returns:
+        * (`str | None`): Such as `>=3.12`, or `None` to leave Part 1's.
+        """
+        # Chosen by the developer, in either place.
+        settings: Settings | None = self.settings()
+        if settings is not None and settings.requires_python:
+            return settings.requires_python
+        if "requires-python" in (script_metadata(text) or {}):
+            return None
+
+        # Otherwise the highest floor of three.
+        floor: tuple[int, ...] = max((3, 11), syntax_floor(text))
+        entry: str
+        for entry in asking:
+            try:
+                stated: list[str] = importlib.metadata.metadata(
+                    requirement_name(entry)).get_all("Requires-Python") or []
+            except (importlib.metadata.PackageNotFoundError, ValueError):
+                continue
+            found: tuple[int, ...] | None = package_floor(",".join(stated))
+            if found is not None:
+                floor = max(floor, found[:2])
+        wanted: str = ">=" + ".".join(str(part) for part in floor)
+
+        # Said when nobody has run it on a Python that old.
+        program: Path | None = main_path()
+        if program is not None:
+            ran: object = self.development_record(program)[1].get("pythons")
+            tried: list[tuple[int, ...]] = sorted(
+                tuple(int(part) for part in one.split("."))
+                for one in (ran if isinstance(ran, list) else [])
+                if isinstance(one, str) and re.fullmatch(r"\d+\.\d+", one))
+            if tried and floor[:2] < tried[0]:
+                self.say(1, f"`{program.name}` is released for Python "
+                         f"{wanted}, but you have run it only on "
+                         + and_list(["Python " + ".".join(map(str, one))
+                                     for one in tried])
+                         + f".  If it needs a newer Python, set "
+                         f"`requires-python` in `{program.name}.toml`.")
+        return wanted
 
     def give_ranges(self, asking: Sequence[str]) -> list[str]:
         """Give each bare entry in Part 1 a range from its approved version.
@@ -4572,8 +4984,11 @@ class EZPkg:
         module: str
         package: str
         for line, module, package in found.additions:
-            problem: str = (self.prove(package, module, argv)
-                            if package in found.guessed else "")
+            # A package for another platform cannot be fetched here.
+            problem: str = (
+                self.prove(requirement_name(package), module, argv)
+                if package in found.guessed and holds_here(package)
+                else "")
             if problem:
                 doubts.append(
                     f"`{program.name}` line {line}: `import {module}` "
@@ -4608,9 +5023,10 @@ class EZPkg:
         # that arrive decide what is written.
         fetching: list[str] = self.fetching(final)
         try:
-            self.provide(fetching, argv, {normal_name(package): module
-                                          for package, module
-                                          in modules.items()})
+            self.provide(fetching, argv, {
+                normal_name(requirement_name(package)): module
+                for package, module in modules.items()
+                if holds_here(package)})
         except Declined:
             raise
         except (RuntimeError, ValueError) as error:
@@ -4627,9 +5043,15 @@ class EZPkg:
             self.request_for(fetching))
         ranged: dict[str, str] = {}
         for package in modules:
+            # A marker follows the range; another platform's has none.
+            name: str = requirement_name(package)
+            marker: str = package.partition(";")[2].strip()
             try:
+                if not holds_here(package):
+                    raise importlib.metadata.PackageNotFoundError(name)
                 ranged[package] = version_range(
-                    package, importlib.metadata.version(package))
+                    name, importlib.metadata.version(name)) + (
+                        f"; {marker}" if marker else "")
             except importlib.metadata.PackageNotFoundError:
                 ranged[package] = package
         final = [ranged.get(entry, entry) for entry in final]
@@ -4862,9 +5284,14 @@ class EZPkg:
                   for name in providers.get(top, [])} - imported) & declared)
             runs: object = kept.get("runs")
             earlier: list[Any] = runs if isinstance(runs, list) else []
+            # And the Python it ran on, for `python_range`.
+            pythons: object = kept.get("pythons")
+            this: str = f"{sys.version_info.major}.{sys.version_info.minor}"
             self.keep(record, kept, runs=[
                 *earlier[-(RUNS_KEPT - 1):],
-                {"declared": sorted(declared), "loaded": behind}])
+                {"declared": sorted(declared), "loaded": behind}],
+                pythons=sorted({*(pythons if isinstance(pythons, list)
+                                  else []), this}))
         except (OSError, ValueError, TypeError, KeyError) as error:
             self.say(3, f"ezpkg: this run's packages were not noted "
                      f"({error!r})")
@@ -4900,6 +5327,7 @@ class EZPkg:
         # `ezpkg` that runs it (`T.eui`).
         try:
             imports: list[tuple[str, int, bool]] = every_import(text)
+            markers: dict[str, str] = import_markers(text)
         except SyntaxError:
             return None
         bootstrap: ast.Try | None = bootstrap_node(text)
@@ -4973,9 +5401,15 @@ class EZPkg:
             if optional or normal & approved or len(packages) != 1:
                 continue
             if normal_name(packages[0]) not in adding:
+                # Under a platform test, only for that platform.
                 adding.add(normal_name(packages[0]))
-                order.append(("add", 0, packages[0]))
-                additions.append((line, module, packages[0]))
+                package: str = packages[0]
+                if module in markers:
+                    package = f"{package}; {markers[module]}"
+                    if packages[0] in guessed:
+                        guessed.add(package)
+                order.append(("add", 0, package))
+                additions.append((line, module, package))
 
         # Unused only when its modules are known and it is not kept.
         removals: list[int] = [
@@ -5035,10 +5469,10 @@ class EZPkg:
             raise SystemExit(f"{path.name}: {error}") from None
         if not text.strip():
             try:
-                filling: str = SETTINGS_TEMPLATE.format(
-                    name=program.name, stem=program.stem,
-                    note="\n" + first_run_note(program.name, None)
-                    if EDIT_PROGRAM else "")
+                filling: str = SETTINGS_TEMPLATE if not EDIT_PROGRAM else (
+                    SETTINGS_TEMPLATE.replace(
+                        AUTO_DEPENDENCIES_LINE, AUTO_DEPENDENCIES_LINE
+                        + first_run_note(program.name, None) + "\n", 1))
                 path.write_text(filling, encoding="utf-8")
                 if EDIT_PROGRAM:
                     self.filled = (path, filling)
@@ -5990,9 +6424,18 @@ class EZPkg:
           If Part 1 cannot be pinned, `uv` fails, or its lock disagrees
           with the approvals.
         """
-        # Pinned, so `uv` resolves to what was approved.
-        pinned: str | None = pin_dependencies(
-            stripped, for_export(self.pins(), stripped))
+        # Pinned, so `uv` resolves to what was approved, with the
+        # entries nothing here fetched, such as another platform's
+        # (`pywin32; sys_platform == 'win32'`), kept as they are.
+        pins: list[str] = for_export(self.pins(), stripped)
+        named: set[str] = {normal_name(requirement_name(pin))
+                           for pin in pins} | {"ezpkg"}
+        listed: object = (script_metadata(stripped) or {}).get(
+            "dependencies")
+        pinned: str | None = pin_dependencies(stripped, pins + [
+            entry for entry in (listed if isinstance(listed, list) else [])
+            if isinstance(entry, str)
+            and normal_name(requirement_name(entry)) not in named])
         if pinned is None:
             raise RuntimeError(
                 "cannot find the dependencies in Part 1 to pin")
@@ -7894,10 +8337,106 @@ class EZPkg:
 
         # What the developer's run loads behind the scenes keeps its
         # entries (`reconcile`), so it is noted as the program ends.
+        # And a module the program stops for want of gets its package
+        # for the next run.
         program: Path | None = main_path()
         if (settings is not None and settings.auto_dependencies
                 and program is not None):
             atexit.register(self.note_loaded, program, list(asked))
+            if self.stashing():
+                self.catch_missing(program)
+
+    def catch_missing(self, program: Path) -> None:
+        """Have a developer's program that stops for a module add its package.
+
+        `sys.excepthook` sees an uncaught `ModuleNotFoundError` before
+        the traceback is printed, and `add_missing` gets the chance to
+        explain it in one line instead.  Only uncaught ones: a library
+        that tries an optional module (`try: import ujson`) catches its
+        own (Wayne, 2026-10-22).
+
+        Arguments:
+        * `program` (`Path`):
+          The program.
+        """
+        # Whatever was there before still prints the rest.
+        previous: Any = sys.excepthook
+
+        def hook(kind: type[BaseException], error: BaseException,
+                 trace: Any) -> None:
+            """Explain a missing module, or pass the error on."""
+            if not self.add_missing(program, error, trace):
+                previous(kind, error, trace)
+
+        sys.excepthook = hook
+
+    def add_missing(self, program: Path, error: BaseException,
+                    trace: Any) -> bool:
+        """Add the package of a module a developer's program stopped for.
+
+        A module the program loads without importing it in its source,
+        such as `requests`'s `socks` for a SOCKS proxy, or a plugin, is
+        found the way an import's package is (`MODULE_PACKAGES`, else
+        the module's own name, then `prove`), added to the stash's
+        `dependencies`, and said in one line; the developer runs the
+        program again.  It is not restarted, since it may already have
+        done something (Wayne, 2026-10-22).  A module the source imports
+        is `reconcile`'s, and a package already declared, or none to be
+        found, leaves the traceback to say the rest.
+
+        Arguments:
+        * `program` (`Path`):
+          The program.
+        * `error` (`BaseException`):
+          What stopped it.
+        * `trace` (`Any`):
+          Its traceback, for who wanted the module.
+
+        Returns:
+        * (`bool`): True when the package was added and said.
+        """
+        # A missing module the source does not import, and no package
+        # yet for it.
+        if not isinstance(error, ModuleNotFoundError) or not error.name:
+            return False
+        top: str = error.name.partition(".")[0]
+        source: tuple[Path, str] | None = main_source()
+        if source is None or self.exempt(program, top):
+            return False
+        try:
+            if top in {module for module, _, _ in every_import(source[1])}:
+                return False
+            declared: set[str] = {normal_name(requirement_name(entry))
+                                  for entry in self.declared()}
+        except (SyntaxError, ValueError, TypeError):
+            return False
+        package: str = MODULE_PACKAGES.get(top, top)
+        if normal_name(package) in declared:
+            return False
+        problem: str = self.prove(package, top)
+        if problem:
+            self.say(1, f"`{program.name}` stopped for want of `{top}`, "
+                     f"and no package for it was added: {problem}.")
+            return False
+
+        # Who wanted it: the last frame outside the import machinery.
+        wanting: str = program.name
+        while trace is not None:
+            name: object = trace.tb_frame.f_globals.get("__name__")
+            if (isinstance(name, str) and name != "__main__"
+                    and not name.startswith("importlib")):
+                wanting = name.partition(".")[0]
+            elif name == "__main__":
+                wanting = program.name
+            trace = trace.tb_next
+        held: object = self.stash().get("dependencies")
+        self.put_stash(dependencies=[
+            *(held if isinstance(held, list) else []), package])
+        print(wrapped(f"`{wanting}` needed `{top}`, so `ezpkg` added "
+                      f"`{package}` to `{program.name}`'s packages; run "
+                      f"`{program.name}` again.", columns(sys.stderr)),
+              file=sys.stderr)
+        return True
 
     @overload
     def install(self, *, bootstrap: str = "") -> None: ...
@@ -8212,10 +8751,36 @@ class EZPkg:
             and normal_name(requirement_name(entry)) not in names]
 
     def written(self) -> list[str]:
-        """Return the requirements Part 1 itself declares.
+        """Return the requirements the developer wrote, never `ezpkg`'s.
+
+        Part 1's own (`part1_entries`), then, for a developer, those of
+        `dependencies` in `prog.py.toml` that Part 1 does not name
+        (Wayne, 2026-10-22).  Both are kept as written: no entry of
+        either is removed, and the imports add only what they lack.
 
         Returns:
         * (`list[str]`): As `declared` says, but never the stash's.
+
+        Raises:
+        * `ValueError`, `TypeError`:
+          As `declared` says.
+        """
+        # Part 1's win by name.
+        own: list[str] = self.part1_entries()
+        settings: Settings | None = self.settings()
+        if settings is None:
+            return own
+        names: set[str] = {normal_name(requirement_name(entry))
+                           for entry in own}
+        return own + [entry for entry in settings.dependencies
+                      if normal_name(requirement_name(entry)) not in names]
+
+    def part1_entries(self) -> list[str]:
+        """Return the requirements Part 1 itself declares.
+
+        Returns:
+        * (`list[str]`): As `declared` says, but neither the stash's nor
+          `prog.py.toml`'s.
 
         Raises:
         * `ValueError`, `TypeError`:

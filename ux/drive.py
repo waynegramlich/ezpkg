@@ -383,9 +383,9 @@ def with_imports(text: str, names: list[str]) -> str:
     """
     lines: list[str] = text.splitlines(keepends=True)
     start: int = next(index for index, line in enumerate(lines)
-                      if line.startswith("# Part 4"))
+                      if line.startswith("# Part 3"))
     end: int = next(index for index, line in enumerate(lines)
-                    if line.startswith("# Part 5"))
+                    if line.startswith("# Part 4"))
     existing: dict[str, str] = {
         line.split()[1]: line for line in lines[start:end]
         if line.startswith("import ")}

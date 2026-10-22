@@ -6,8 +6,9 @@
 # ///
 """Try `EZPkg`: fetch the `cowsay` package on first use, then run."""
 
-# Part 2: EZPkg required imports are immediately below.
-# A `from __future__ import ...` line, if any, goes above Part 2.
+# Part 2: The EZPkg bootstrap.  Paste all of it, `# Begin` to `# End`,
+# below your docstring and any `from __future__` lines.
+# Begin the EZPkg bootstrap.  Never edit it.
 import hashlib
 import importlib
 import json
@@ -15,10 +16,6 @@ import pathlib
 import subprocess
 import sys
 import urllib.request as req
-
-# All other imports are added after the EZPkg bootstrap.
-
-# Part 3: The EZPkg bootstrap.  Never edit it.
 try:  # Do not edit try block!  See https://pypi.org/project/ezpkg/
     s = "find ezpkg"; t = pathlib.Path.home()/".ezpkg"; w = t/"ezpkg.whl"
     def g(u):  # Fetch u, with curl if this Python has no certificates.
@@ -43,10 +40,11 @@ try:  # Do not edit try block!  See https://pypi.org/project/ezpkg/
     s = "fetch packages"; m.EZPkg().install(bootstrap="nopip8")
 except Exception as x:
     raise SystemExit(f"ezpkg: {s} failed: {x!r}")  # Do not edit try block!
+# End the EZPkg bootstrap.  Your imports go below it.
 
-# Part 4: Your imports, all after the bootstrap.
+# Part 3: Your imports, all after the bootstrap.
 import cowsay  # type: ignore[import-not-found]  # For mypy.
 
-# Part 5: The program itself.
+# Part 4: The program itself.
 cowsay.cow("EZPkg works!")
 print(f"The cow above was drawn by cowsay {cowsay.__version__}.")
