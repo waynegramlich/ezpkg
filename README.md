@@ -282,6 +282,127 @@ the following references:
 
 ### `prog.py.toml` Settings
 
+<!-- Claude: (2026-10-21, proposal; not built yet) The section starts with
+what an empty `prog.py.toml` is filled with, then one bullet per setting.
+Releases are off until `exports` loses its `#` (Wayne: no
+`prog_builds/` on the first run).
+
+When the program is run and `PROG_NAME.py.toml` is empty, it is filled with
+the following content which is meant to be self documenting.
+
+```toml
+# `PROG_NAME.py.toml`: EZPkg settings for PROG_NAME.py.
+#
+# The existence of this file in the same directory as `PROG_NAME.py` causes
+# `EZPkg` to treat you as a first class developer of `PROG_NAME.py`.  It is
+# initially created as an empty file as follows:
+# * Windows (PowerShell): `ni PROG_NAME.py.toml`
+# * Windows (`cmd.exe`): `type nul > PROG_NAME.py.toml`
+# * Linux/macOS: `touch PROG_NAME.py.toml`
+
+# Whenever `EZPkg` finds an completely empty `PROG_NAME.py.toml`, it fills it
+# in with this exact content.  After that, it never touches the file again
+# unless you completely empty it again.  If you entirely remove
+# `PROG_NAME.py.toml`, `EZPkg` no longer treats you as a developer.
+
+# In general, the way a feature is enabled is by removing the `# ` from the
+# feature line question.  Obviously, adding `# ` back will disable the feature.
+
+# auto-dependencies = true  # [true|false]
+# * If `true`, `EZPkg` ensures that each `import` in `PROG_NAME.py` has a
+#   corresponding value(s) in the `dependencies=` section of the inline meta
+#   data.  Whenever the developer deletes an `import` statement, the
+#   corresponding information is also removed from the `dependencies=` inline
+#   meta data.
+# * If a program import statement is followed by a comment, it is treated
+#   as metadata to be added into `dependencies=` section.  For example:
+#   * `import cowsay  # python>=3.8`
+#   This will enforce the requirement Python be at version 3.8 or greater for
+#   the `cowsay` package.
+
+# verbosity = "low"  # ["none"|"low"|"medium"|"high"]
+# * This controls the verbosity level of `EZPkg`.
+
+exports = [  # Enable/disable export generation.
+#   "email",   # Enable an email release
+#   "zipapp",  # Enable a zipapp release
+#   "uv",      # Enable a uv release
+]
+# `Releases are off until you remove the `#` from `exports` below.  Then
+# a run with no prog.py.release beside prog.py builds a release into
+# prog_builds/VERSION/, writes prog.py.release, and runs prog.py as
+# usual.  To build the next release, delete prog.py.release and run
+# prog.py.
+
+# What a release builds: "email" (a `.py` to send, ready for every
+# computer), "zipapp" (a `.pyz` that needs no network, skipped when a
+# package is compiled) and "uv" (a `-uv.py` for `uv run`).
+
+# release = "1.0.0"  # Usually  Major.Minor.BugFix 
+# The version of the next release.  Without it, the first release is
+# 1.0.0 and each one after adds 1 to the last number (1.0.1, ...).
+# Change it whenever you like, even back to 1.0.0.  If not specified,
+# the first release starts a `1.0.0` and increments from there.
+
+# bootstrap = "update"  # Currently the only option is "update'.
+# When enabled, `EZPkg` will notice whenever the `EZPkg` bootstrap in
+# `PROG_NAME.py` is out of date and replace it with the most recent one.
+
+# exclude_newer = "YYYY-MM-DD:HH:MM:SS ZZZ"  # Fill the date and time.
+# Upgrading: `YOUR_PROG.py` versions are frozen at the date on the
+# `exclude-newer` line.  If not enabled, the most current date is always used.
+```
+
+`EZPkg` writes this file only once, when it is empty; after that it only
+reads it.  It is meant to be self documenting.
+
+<!-- Wayne: The intention is that the document above be self documenting.
+I do ***NOT*** want to reproduce the same text twice in `README .md`.
+Feel free to insert HTML comments into the `.toml` file above.  The text in
+this HTML comment will eventually be deleted.
+
+* The opening comment:
+  Says that the file's presence makes you the developer, and what that
+  means, compared with an end user.  An empty file is enough; to see the
+  template again, empty the file and run `prog.py`.
+* `auto-dependencies = true`:
+  `EZPkg` keeps the `dependencies` list in Part 1 matching your imports.
+  A new import gets an entry with a version range, such as
+  `"cowsay>=6.1,<7"`.  An entry nothing imports is removed once recent
+  runs show the program never loaded it; a comment after an entry keeps
+  it (`"pyqt6",  # matplotlib's backend`).  `false` leaves
+  `dependencies` to you.
+* `verbosity = "low"`:
+  How much `EZPkg` says: `"none"`, `"low"`, `"medium"` or `"high"`.
+* The releases comment:
+  Releases are off by default, so nothing is built until you ask.
+* `exports = ["email", "zipapp", "uv"]`:
+  Removing the `#` turns releases on, and the list says which forms to
+  build.  The next run builds release 1.0.0 into `prog_builds/1.0.0/`,
+  writes `prog.py.release` saying what it built, and then runs `prog.py`
+  as usual.  To build the next release, delete `prog.py.release`
+  (`del prog.py.release` on Windows, `rm prog.py.release` on Linux and
+  macOS) and run `prog.py`.  Each release checks the imports and the
+  bootstrap, gives each entry without a version a range, and fetches
+  `uv` if your computer lacks a recent one.  Take a form out of the list
+  to stop building it; see [Releasing a Packaged
+  Program](#releasing-a-packaged-program) for the three forms.
+* `release = "1.0.0"`:
+  The version of the next release.  Without it, the first release is
+  1.0.0 and each one after adds one to the last number: 1.0.1, 1.0.2,
+  and so on.  You can change it whenever you like, even back to
+  `"1.0.0"`, which rebuilds `prog_builds/1.0.0/`.  The numbers are
+  yours: only a release published somewhere public, such as PyPI,
+  needs a number that was never used before.
+* `bootstrap = "update"`:
+  At a release, an older bootstrap in `prog.py` is replaced by the
+  current one.  Naming one, such as `"nopip8"`, keeps exactly that
+  bootstrap.
+* The upgrading comment:
+  Not a setting.  The versions `prog.py` runs are frozen at the date on
+  Part 1's `exclude-newer` line, so they never change by themselves.
+  Delete that line and run `prog.py` to move to today's versions.
+
 On the first run, `EZPkg` fills the empty `prog.py.toml` with every
 setting, each commented out, with a line saying what it does.  Remove the
 `#` to change one; a misspelt setting stops the program.  The settings, as
@@ -316,150 +437,35 @@ the file shows them, are:
 * `bootstrap = "update"`:
   At a release, replace an older bootstrap with the current one.  A
   bootstrap's name, such as `"nopip8"`, keeps exactly that one.
+-->
 
 ## Releasing a Packaged Program
 
 Once you are satisfied with your program, you may choose to release it in
-a more durable single file package.  Currently two formats are supported:
-* *`zipapp`*:
+a more durable single file package.  Currently thee formats are supported:
+* **`email`**:
+  Email format is just a single Python file (e.g. `YOUR_PROG.py`) that has
+  had all of its inline meta data dependencies updated.  When emailed to a
+  another person, the `EZPkg` bootstrap ensures that all of the required
+  packages are downloaded prior to running the program.
+* **`zipapp`**:
   This works for pure Python programs (i.e. no packages with C, C++, Rust,
   etc.) and produces a `.pyz` file.  The file can be quite large since it
   includes all of the needed code.  All that the recipient needs is a Python
   interpreter; no network is needed.  It produces a file
   `YOUR_PROG-X.Y.Z.pyz`, where `YOUR_PROG` is the program name and `X.Y.Z`
   is the version number.
-* *`uv`*:
-  `uv` is a popular packaging system written in Rust.  It handles
-  compiled packages too.  The recipient must have `uv` installed, and
-  `uv` fetches the packages over the network on the first run.
-
-To build both, ensure that `YOUR_PROG.py.toml` has both `release =` and
-`exports =` enabled:
-
-```toml
-release = "1.0.0"
-exports = ["zipapp", "uv"]
-```
-
-Then run the program once.  That run does not run your program; instead,
-`YOUR_PROG-1.0.0.pyz`, `YOUR_PROG-1.0.0-uv.py` and
-`YOUR_PROG-1.0.0-uv.py.lock` appear beside it, and `EZPkg` says so.  This
-happens once per version: later runs run your program as usual.  To make
-the next release, change `release` to the next number.
-
-<!-- Claude: Proposed replacement for lines from "Once you are satisfied"
-to here:
-
-(Revised 2026-10-21 for the `prog.py.release` trigger; built.)
-
-A release is the copy of your program that you send to other people.
-`EZPkg` makes one for you without being asked: the first time you run
-your program as its developer, it builds release 1.0.0, and then your
-program runs as usual.  A release comes in three forms:
-* *`email`*:
-  Your program itself, as `YOUR_PROG-X.Y.Z.py`, ready to email.  Your
-  own runs approve only the packages your computer needs; this copy also
-  approves the ones other computers need, such as the `colorama` that
-  `tqdm` uses on Windows only.  The recipient needs only Python.
-* *`zipapp`*:
-  (as now)
-* *`uv`*:
-  (as now)
-
-All three are built into the folder `YOUR_PROG_builds/1.0.0/`:
-`YOUR_PROG-1.0.0.py`, `YOUR_PROG-1.0.0.pyz`, `YOUR_PROG-1.0.0-uv.py` and
-`YOUR_PROG-1.0.0-uv.py.lock`.  A `zipapp` is skipped, with a line saying
-why, when your program needs a compiled package.  Beside your program,
-`YOUR_PROG.py.release` records what was built.
-
-**To build the next release, delete `YOUR_PROG.py.release` and run your
-program.**  Release 1.0.1 is built, then 1.0.2, and so on, each in a
-folder of its own, and your program runs as usual each time:
-* Windows (PowerShell or `cmd.exe`): `del YOUR_PROG.py.release`
-* Linux/macOS: `rm YOUR_PROG.py.release`
-* Or delete it in Explorer or Finder.
-
-The version numbers are yours to change at any time: set `release =
-"2.0.0"` in `YOUR_PROG.py.toml` (even back to `"1.0.0"`), and the next
-run builds that version.  They only need care once you publish your
-program somewhere that remembers them, such as PyPI, which never accepts
-the same version twice.  To build fewer forms, set `exports`, such as
-`exports = ["email"]`.
-
-A release also checks your imports, gives each entry in `dependencies`
-without a version a range, and puts in the current bootstrap.  To find
-what other kinds of computer need, it uses `uv`, which `EZPkg` fetches
-by itself if your computer does not have it.  The first release takes
-some seconds longer for that; after that, each takes a second or two.
-
-### Using `email`
-
-Send `prog-1.0.0.py` to your friend, who runs it as [Running a Program
-That Uses `EZPkg`](#running-a-program-that-uses-ezpkg) shows:
-* Linux/macOS: `python3 prog-1.0.0.py`
-* Windows: `py prog-1.0.0.py`
-
-Send this copy rather than `prog.py`: on another kind of computer,
-`prog.py` can need a package yours never fetched, and `EZPkg` refuses
-any package its author did not approve.
--->
-
-### Using `zipapp`
-
-Your friend runs the `.pyz` with:
-* Linux/macOS: `python3 prog-1.0.0.pyz`
-* Windows: `py prog-1.0.0.pyz`
-
-If their Python is older than your `requires-python`, it says so and
-stops.  `EZPkg` refuses to build a `.pyz` with a compiled package, such
-as `numpy`, since Python cannot run one from inside a zip file; take
-`"zipapp"` out of `exports` and use `uv` instead.
-
-<!-- Claude: (2026-10-21, built) Proposed new paragraph:
-
-The `.pyz` also carries the packages that only other kinds of computer
-need, such as the `colorama` that `tqdm` uses on Windows, so it runs on
-Windows, macOS and Linux alike.
--->
-
-<!-- Claude: (2026-10-21, built) Proposed new paragraph for How
-`EZPkg` Actually Works, or wherever a release is explained:
-
-To find what other kinds of computer need, a release uses
-[`uv`](https://docs.astral.sh/uv/), which works this out for every
-computer at once.  You never install it: a `uv` already on your
-computer is used if it is recent enough, and otherwise `EZPkg` fetches
-`uv` from PyPI into `~/.ezpkg`, as it does any package, the first time
-you make a release.
--->
-
-### Using `uv`
-
-[`uv`](https://docs.astral.sh/uv/) must be installed on your computer
-and on your friend's.  `"uv"` in `exports` builds two files:
-* `prog-1.0.0-uv.py`:
-  Your program with the bootstrap taken out, since `uv` takes its place,
-  and the exact versions your program ran with.
-* `prog-1.0.0-uv.py.lock`:
-  The lock file, written by `uv lock --script`, which names the files of
-  each of those versions for every kind of computer.  `EZPkg` checks that
-  it names the same files your program ran with.
-
-Without `uv` on your computer, only the `-uv.py` is written, and `EZPkg`
-prints the `uv lock` command that writes the lock.
-<!-- Claude: (2026-10-21) `EZPkg` now fetches `uv` when it is not
-installed, so the sentence above applies only when that fetch fails
-(no network).  Proposed: delete it, and start this section with "`uv`
-must be installed on your friend's computer (`EZPkg` provides it on
-yours)." -->
-
-Send both files to your friend, who puts them in the same directory and
-runs:
-* Linux/macOS/Windows: `uv run prog-1.0.0-uv.py`
-
-`uv` finds the lock beside the script, fetches the packages it names
-(compiled ones, such as `numpy`, included) into its own cache, and runs
-the program.  Only the first run needs the network.
+* **`uv`**:
+  `uv` is a popular packaging system written in Rust.  It handles both
+  compiled and pure Python packages together.  The recipient must have `uv`
+  installed, and `uv` fetches the packages over the network on the first run.
+  
+The requirement is that the requirement is that at least one of the values
+for `exports = [ ... ]` is enabled (i.e. `email`, `zipapp`, or `uv`.)
+Once your program `exports = [ ... ]` is set, run your program.  As a side
+effect of running your program the appropriate files are generated.  Whenever
+an import is added or removed, the appropriate generated files are
+(re)generated.
 
 ## The Bootstrap
 
@@ -471,8 +477,6 @@ bootstrap.
 An older bootstrap that has not been edited still runs, so a program that
 nobody maintains keeps working.  When you are the developer, `EZPkg` tells
 you once about each newer bootstrap, and the next release replaces it.
-
-<!-- Claude: Proposed new section:
 
 ## Security
 
@@ -494,7 +498,6 @@ are trusting:
 * **Nothing outside `~/.ezpkg`**:
   No administrator rights are needed, and your Python and its `pip` are
   never changed.
--->
 
 ## Miscellaneous
 
@@ -575,24 +578,21 @@ others refuse to let it install into the system's Python
 
 ## Conclusion
 
-No more remembering which virtual environment is active.  Paste the
-bootstrap, and each program quietly gets its own packages, with nothing to
-create or activate, while `EZPkg` keeps its dependencies list in step with
-its imports.  What you are left with is a single file you can email to
-somebody who has nothing but Python 3.11 (or greater), and it will just
-work.  You can also trivially package it up in either `zipapp` (pure Python
-only) or `uv` (includes compiled packages like `numpy`).
+`EZPkg` does all of the package downloading and dependency checking for you.
+When you are done, you can literally Email someone one of the following
+results:
+* **`email`**:
+  A single `.py` file with the `EZPkg` bootstrap embedded in it.
+  The resulting program needs network access to download needed packages.
+  After they are downloaded, the network is no longer needed.
+* **`zipapp`**:
+  A single `.pyz` file that can be directly executed by Python interpreter.
+  `zipapp` requires that all packages be pure Python without any packages
+  that contain non Python code (e.g. C, C++, rust, etc.).  No network access
+  is need for a `zipapp` `.pyz` file.
+* **`uv`**:
+  In addition to having `uv` installed, the user needs to files:
+  * A `.zip` file contains all of the data.
+  * A `uv.lock` file that is used to unlock everything.
 
-<!-- Claude: (2026-10-21, replaces the earlier proposal here)
-Proposed replacement from "What you are left with" to the end of the
-paragraph:
-
-What you are left with is a single file, the `email` release, that you
-can email to somebody with Python 3.11 or newer and an internet
-connection, on Linux, Windows or macOS.  It works whenever each package
-has a version for their computer, which pure-Python packages always do
-and popular compiled ones such as `numpy` nearly always do.  You can
-also package it up as a `zipapp` (pure Python only, and no network
-needed) or for `uv` (compiled packages included).
--->
-
+All of the hassle of managing packages is handled by `EZPkg`.
