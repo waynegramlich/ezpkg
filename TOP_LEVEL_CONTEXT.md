@@ -137,7 +137,15 @@ program, ever, and the program is never edited.  `prog.ezpkg`,
   `EZPKG_TEST=NONE ./ezpkg_test.py`.  A single class or method can be
   named after it.
 * The full suite (`./ezpkg_test.py`, or `EZPKG_TEST=COMPLETE` for every
-  `bootstrap.py` case) runs only when Wayne asks.
+  `bootstrap.py` case) runs only when Wayne asks.  Its default
+  (`FAST_CASES`) is `nopip8` alone (Wayne, 2026-10-22).
+* Coverage: `./ezpkg_coverage.py --children DIR` (about 23 minutes,
+  in the background, scratch `HOME`) annotates into `DIR` and lists the
+  unrun lines not marked `# pragma: no cover` in `DIR/missing.txt`.
+  Keep pragmas few (Wayne).  `ezpkg.py` was 97% on 2026-10-22.
+* Tests of the old Part 1 editing are marked `@editing`
+  (`EZPKG_EDIT_PROGRAM=on`); `run_as_developer` edits too, so end-user
+  tests find approvals in Part 1.
 * The date tests need a `pip` 26 or newer in `~/.ezpkg`, and skip
   without one.  This machine has no `~/.ezpkg`, so run the suite with
   `HOME` set to a scratch home whose `.ezpkg/pip.whl` is a current

@@ -1236,6 +1236,27 @@ def with_path(*entries: Path) -> str:
     return os.pathsep.join(wanted)
 
 
+def holds(venv: ezpkg.EZPkg, package: str) -> bool:
+    """Say whether a cache holds an importable package.
+
+    Every unpacked tree under `versions` is searched, as either a
+    directory or a single module.  Nothing under `pending` counts, since
+    a wheel there has not been approved; see 6.3.1 of `T.vcbow`.
+
+    Arguments:
+    * `venv` (`ezpkg.EZPkg`):
+      The cache.
+    * `package` (`str`):
+      The import name to look for.
+
+    Returns:
+    * (`bool`): True if some approved tree holds it.
+    """
+    # Either spelling, in any version directory, counts as present.
+    return any((tree / package).is_dir() or (tree / f"{package}.py").is_file()
+               for tree in venv.paths()[2].iterdir())
+
+
 def editing(test: Callable[..., None]) -> Callable[..., None]:
     """Run a test with `ezpkg.EDIT_PROGRAM` on, here and in its children.
 
@@ -2533,7 +2554,7 @@ class InstallTest(unittest.TestCase):
             module = venv.install("widget")
         self.assertEqual(module.__name__, "widget")
         self.assertEqual(module.__version__, "1.2.3")
-        self.assertTrue(venv.contains("widget"))
+        self.assertTrue(holds(venv, "widget"))
 
     def test_install_in_process_reports_a_failure(self) -> None:
         """A package the index lacks raises with pip's own reason."""
@@ -4105,7 +4126,7 @@ class InstallTest(unittest.TestCase):
                                   "Red \x1b[31mtext\x1b[0m here.",
                                   self.root / "escaping-dist")
         venv: ezpkg.EZPkg = ezpkg.EZPkg(self.root / "escaping-cache")
-        told: str = venv.summary(wheel)
+        told: str = venv.metadata(wheel).get("Summary", "")
         self.assertIn("Red", told)
         self.assertNotIn("\x1b", told)
         self.assertTrue(told.isprintable(), repr(told))
@@ -4138,18 +4159,18 @@ class InstallTest(unittest.TestCase):
         with zipfile.ZipFile(bare, "w") as archive:
             archive.writestr("bare-1.0.0.dist-info/METADATA",
                              "Metadata-Version: 2.1\nName: bare\n")
-        self.assertEqual(venv.summary(bare), "")
+        self.assertEqual(venv.metadata(bare).get("Summary", ""), "")
 
         # And something that is not a zip at all.
         broken: Path = self.root / "quiet" / "broken.whl"
         broken.write_text("this is not a wheel\n")
-        self.assertEqual(venv.summary(broken), "")
+        self.assertEqual(venv.metadata(broken).get("Summary", ""), "")
 
         # And a wheel with no `.dist-info` in it.
         empty: Path = self.root / "quiet" / "empty.whl"
         with zipfile.ZipFile(empty, "w") as archive:
             archive.writestr("nothing.py", "x = 1\n")
-        self.assertEqual(venv.summary(empty), "")
+        self.assertEqual(venv.metadata(empty).get("Summary", ""), "")
 
     def test_asking_gives_up_eventually(self) -> None:
         """Nonsense does not keep the question alive forever.
@@ -4981,9 +5002,9 @@ class InstallTest(unittest.TestCase):
         # A single module counts, not only a package directory.
         target: Path = self.root / "contains"
         venv: ezpkg.EZPkg = ezpkg.EZPkg(target)
-        self.assertFalse(venv.contains("widget"))
+        self.assertFalse(holds(venv, "widget"))
         self.install(target, "widget")
-        self.assertTrue(venv.contains("widget"))
+        self.assertTrue(holds(venv, "widget"))
 
 
     def declaring_program(self, name: str, block: str | None,
@@ -7599,6 +7620,21 @@ class CoverageToolTest(unittest.TestCase):
         text: str = ezpkg_coverage.compare(self.root)
         self.assertIn(f"No counts for: baseline, {SHIPPING}.", text)
 
+    def test_a_marked_line_or_block_is_not_missing(self) -> None:
+        """`# pragma: no cover` hides its line, and the block it opens."""
+        # Margins as `trace` writes them.
+        annotated: list[str] = [
+            "    1: def f(x):",
+            ">>>>>>     if x:  # pragma: no cover",
+            ">>>>>>         return 1",
+            "",
+            ">>>>>>         return 2",
+            ">>>>>>     y = 3  # pragma: no cover",
+            ">>>>>>     return 4",
+        ]
+        self.assertEqual(ezpkg_coverage.unmarked_misses(annotated),
+                         [(7, "return 4")])
+
     def test_report_keeps_the_counts(self) -> None:
         """`report` saves what `compare` later reads back."""
         # Counts set by hand, so no second tracer is ever started.  The
@@ -8462,6 +8498,8 @@ class MetadataTest(unittest.TestCase):
                         "satisfies the requirement cowsay==6.1 (from "
                         "versions: 6.0, 6.2)\nERROR: No matching "
                         "distribution found for cowsay==6.1")
+        # The running program's name, which is another under coverage.
+        name: str = ezpkg.name_of(ezpkg.program_name())
         cases: list[tuple[str, list[str] | None, str]] = [
             (noise + "WARNING: Retrying ... NewConnectionError(...: "
              "Failed to establish a new connection)\nERROR: No matching "
@@ -8471,7 +8509,7 @@ class MetadataTest(unittest.TestCase):
             (missing, ["cowsay-6.0-py3-none-any.whl",
                        "cowsay-6.2-py3-none-any.whl"],
              ("needs cowsay 6.1, which PyPI (https://pypi.org) no longer "
-             "offers, so `ezpkg_test.py` did not run.  Request an "
+             f"offers, so {name} did not run.  Request an "
              "updated version of")),
             (missing, ["cowsay-6.1-cp312-cp312-win_amd64.whl",
                        "cowsay-6.1.tar.gz"],
@@ -8505,7 +8543,7 @@ class MetadataTest(unittest.TestCase):
                 "colorama-0.4.6-py2.py3-none-any.whl is not in the "
                 "`checksums` of Part 1", "colorama==0.4.6"))
             self.assertIn("needs colorama 0.4.6 on this computer, which its "
-                          "author did not approve, so `ezpkg_test.py` did "
+                          f"author did not approve, so {name} did "
                           "not run.  Ask its author for its release", line)
             self.assertNotIn("checksums", line)
 
@@ -8775,8 +8813,745 @@ class MetadataTest(unittest.TestCase):
             '[\n  "b",\n  "c",\n]', "ezpkg"),
             '[tool.ezpkg]\napproved = [\n  "b",\n  "c",\n]\nx = 1\n')
 
-    def test_stamp_keeps_encoding_and_line_endings(self) -> None:
-        """A latin-1 program with CRLF lines is dated and otherwise kept."""
+    def test_commit_of_names_the_commit_and_a_changed_program(self) -> None:
+        """`git`'s short hash, `+` when the program differs, else nothing."""
+        # A repository holding one committed program.
+        with tempfile.TemporaryDirectory() as scratch:
+            here: Path = Path(scratch)
+            program: Path = here / "prog.py"
+            self.assertEqual(ezpkg.commit_of(program), "")
+            program.write_text("print('ran')\n")
+            git: list[str] = ["git", "-c", "user.name=t", "-c",
+                              "user.email=t@example.com"]
+            for command in (["init", "-q"], ["add", "prog.py"],
+                            ["commit", "-q", "-m", "one"]):
+                subprocess.run([*git, *command], cwd=here, check=True,
+                               capture_output=True)
+            named: str = ezpkg.commit_of(program)
+            self.assertRegex(named, r"^git [0-9a-f]{7,}$")
+            program.write_text("print('changed')\n")
+            self.assertEqual(ezpkg.commit_of(program), named + "+")
+
+    def test_a_release_entry_reads_back(self) -> None:
+        """`release_entry` writes TOML that `read_releases` reads."""
+        # Two entries, the second with a commit and no date.
+        with tempfile.TemporaryDirectory() as scratch:
+            program: Path = Path(scratch) / "prog.py"
+            ezpkg.releases_path(program).write_text(
+                ezpkg.release_entry("1.0.0", "2026-10-22T00:00:00Z",
+                                    ["widget>=1.2.3,<2"], "")
+                + ezpkg.release_entry("1.0.1", "", [], "git abc1234+"),
+                encoding="utf-8")
+            entries: list[dict[str, Any]] = ezpkg.read_releases(program)
+            self.assertEqual(
+                [(one["version"], one.get("exclude-newer"),
+                  one.get("commit"), one["dependencies"])
+                 for one in entries],
+                [("1.0.0", "2026-10-22T00:00:00Z", None,
+                  ["widget>=1.2.3,<2"]),
+                 ("1.0.1", None, "git abc1234+", [])])
+
+            # A broken file is named, and `cull` reads past a broken
+            # settings file.
+            ezpkg.releases_path(program).write_text("[[release]\n")
+            with self.assertRaisesRegex(ValueError, r"^prog\.py\.releases: "):
+                ezpkg.read_releases(program)
+            ezpkg.settings_path(program).write_text("cull-days = 0\n")
+            self.assertEqual(ezpkg.cull_seconds(program, 7.0), 7.0)
+            ezpkg.settings_path(program).write_text("cull-days = 2\n")
+            self.assertEqual(ezpkg.cull_seconds(program, 7.0), 2 * 86400.0)
+
+    def test_part1_helpers_refuse_what_they_cannot_edit_safely(self) -> None:
+        """A block these cannot read, or edit without changing more, is `None`.
+
+        Each is a way a hand-written Part 1 can go wrong: a string or
+        comment left open, an array not closed, a key written dotted, or
+        an entry whose characters TOML would read differently.
+        """
+        # One line per case, each wrapped in a script block.
+        def block(*lines: str) -> str:
+            # The program's text around those TOML lines.
+            return "# /// script\n" + "".join(f"# {one}\n" for one in lines) \
+                + "# ///\n"
+
+        self.assertIsNone(ezpkg.uv_setting("x = [", "k", "1"))
+        self.assertIsNone(ezpkg.uv_setting("tool.uv.k = 1\n", "k", None))
+        for toml in ('dependencies = ["a', "dependencies = [ # c",
+                     'dependencies = [\n "a",\n'):
+            with self.subTest(toml=toml):
+                self.assertIsNone(ezpkg.dependencies_span(toml))
+        self.assertEqual(ezpkg.dependencies_span('dependencies = [["a"]]'),
+                         (0, 22))
+        self.assertIsNone(ezpkg.with_dependency_list(
+            block("dependencies = [", "x ="), ["b"]))
+        self.assertIsNone(ezpkg.with_dependency_list(
+            block('dependencies = "a"'), ["b"]))
+        for entry in ('a\\tb', 'a"b'):
+            with self.subTest(entry=entry):
+                self.assertIsNone(ezpkg.with_dependency_list(
+                    block("dependencies = []"), [entry]))
+                self.assertIsNone(ezpkg.pin_dependencies(
+                    block('dependencies = ["a"]'), [entry]))
+        self.assertIsNone(ezpkg.dependency_lines(
+            block('dependencies = ["a", 1]')))
+        self.assertIsNone(ezpkg.dependency_lines(
+            block('dependencies = ["a"]', "x =")))
+        self.assertIsNone(ezpkg.pin_dependencies(
+            block('dependencies = ["a"]', "x ="), ["a==1"]))
+        self.assertIsNone(ezpkg.pin_dependencies(
+            block('dependencies = ["a"]', "tool.uv.x = 1"), ["a==1"]))
+        self.assertIsNone(ezpkg.pin_dependencies(
+            block('dependencies = ["a"]', "tool.uv.no-build = true",
+                  'tool.uv.exclude-newer = "d"'), ["a==1"]))
+
+    def test_small_helpers_at_their_edges(self) -> None:
+        """The branches ordinary runs never take, one call each."""
+        # Paths, settings lines, approvals and imports.
+        root: Path = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        inside: Path = Path.home() / "x"
+        with unittest.mock.patch.object(ezpkg.os, "name", "nt"):
+            self.assertEqual(ezpkg.shown(inside), str(inside))
+        self.assertEqual(ezpkg.setting_line("x = 1\n", "y"), 0)
+        self.assertIsNone(ezpkg.approval_fields(
+            "# /// script\n# x = [\n# ///\n"))
+        self.assertEqual(ezpkg.for_export(["a==1"], "def ("), ["a==1"])
+        self.assertEqual(ezpkg.with_type_ignores('x = """', {"m"}, set()),
+                         ('x = """', []))
+        self.assertEqual(ezpkg.every_import(
+            "try:\n import x\nexcept:\n pass\n"), [("x", 2, True)])
+        self.assertEqual(ezpkg.every_import(
+            "match a:\n    case 1:\n        import y\n"), [("y", 3, False)])
+        self.assertIsNone(ezpkg.uv_version(str(root / "no-uv")))
+
+        # A `uv` found only in `~/.local/bin`.
+        with (unittest.mock.patch.object(ezpkg.shutil, "which",
+                                         side_effect=[None, "/x/uv"]),
+              unittest.mock.patch.object(ezpkg, "uv_version",
+                                         return_value=(9, 0))):
+            self.assertEqual(ezpkg.find_uv(), "/x/uv")
+
+        # A wheel that is no zip is no wheel's `ezpkg`.
+        fake: Path = root / "bad.whl"
+        fake.write_text("not a zip")
+        with unittest.mock.patch.object(ezpkg, "__file__",
+                                        str(fake / "ezpkg.py")):
+            self.assertFalse(ezpkg.from_wheel())
+
+    def test_the_index_helpers_with_no_index_named(self) -> None:
+        """PyPI by default; a failed page is not known; `curl` steps in."""
+        # The defaults, with `PIP_INDEX_URL` empty.
+        root: Path = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        refused: urllib.error.HTTPError = urllib.error.HTTPError(
+            "https://pypi.org/simple/x/", 500, "down", cast(Any, {}), None)
+        with (unittest.mock.patch.dict(os.environ, {"PIP_INDEX_URL": "",
+                                                    "PIP_EXTRA_INDEX_URL": ""}),
+              unittest.mock.patch.object(ezpkg.urllib.request, "urlopen",
+                                         side_effect=refused) as opened):
+            self.assertEqual(ezpkg.json_api("pip"),
+                             "https://pypi.org/pypi/pip/json")
+            self.assertIsNone(ezpkg.index_files("x"))
+            self.assertEqual(opened.call_args[0][0],
+                             "https://pypi.org/simple/x/")
+
+        # `unavailable` without `pip`'s line, or without the index.
+        self.assertEqual(ezpkg.unavailable("ERROR: other", {}), ("", ""))
+        said: str = ("Could not find a version that satisfies the "
+                     "requirement cowsay (from versions: 6.0)")
+        with unittest.mock.patch.object(ezpkg, "index_files",
+                                        return_value=None):
+            self.assertEqual(ezpkg.unavailable(said, {"cowsay": "6.1"}),
+                             ("", ""))
+        with unittest.mock.patch.object(
+                ezpkg, "index_files",
+                return_value=["cowsay-6.0-py3-none-any.whl"]):
+            self.assertEqual(ezpkg.unavailable(said, {}), ("", ""))
+
+        # `urllib` refused: `curl` fetches, or `urllib`'s error stands.
+        body: Path = root / "body.txt"
+        body.write_bytes(b"moo")
+        failed: urllib.error.URLError = urllib.error.URLError("no certs")
+        with unittest.mock.patch.object(ezpkg.urllib.request, "urlopen",
+                                        side_effect=failed):
+            self.assertEqual(ezpkg.fetch_url(body.as_uri()), b"moo")
+            with self.assertRaises(urllib.error.URLError):
+                ezpkg.fetch_url((root / "gone.txt").as_uri())
+
+    def developer_here(self, block: str = 'dependencies = ["widget"]',
+                       settings: str = "auto-dependencies = false\n"
+                       ) -> tuple[Path, ezpkg.EZPkg]:
+        """Make a developer's program, as the running one, and a cache.
+
+        Arguments:
+        * `block` (`str`):
+          Part 1's TOML, one line each.
+        * `settings` (`str`):
+          Its `prog.py.toml`.
+
+        Returns:
+        * (`tuple[Path, ezpkg.EZPkg]`): The program, and a fresh cache
+          object for it.
+        """
+        # Written in a scratch directory, which `main_path` names.
+        root: Path = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        program: Path = root / "prog.py"
+        program.write_text("# /// script\n" + "".join(
+            f"# {line}\n" for line in block.splitlines())
+            + "# ///\nimport widget\n")
+        ezpkg.settings_path(program).write_text(settings)
+        self.enterContext(unittest.mock.patch.object(
+            ezpkg, "main_path", return_value=program))
+        return program, ezpkg.EZPkg(root / "cache")
+
+    def test_the_stash_and_its_records_at_their_edges(self) -> None:
+        """No program, an unreadable record, a date TOML left unquoted."""
+        # An unquoted date in Part 1 seeds the stash as text, and wins.
+        program: Path
+        venv: ezpkg.EZPkg
+        program, venv = self.developer_here(
+            'dependencies = ["widget"]\n[tool.uv]\n'
+            "exclude-newer = 2026-10-22T00:00:00Z")
+        self.assertEqual(venv.stash()["exclude-newer"],
+                         "2026-10-22T00:00:00+00:00")
+        self.assertEqual(venv.declared_date(), "2026-10-22T00:00:00+00:00")
+        with self.assertRaisesRegex(RuntimeError, "no approvals to pin"):
+            venv.pins()
+
+        # A broken `prog.py.releases` stops a release, and seeds nothing.
+        ezpkg.releases_path(program).write_text("[[release]\n")
+        with self.assertRaisesRegex(SystemExit, "prog.py.releases"):
+            venv.released()
+        self.assertEqual(venv.seed_from_releases(program), {})
+
+        # A record that cannot be written is let go.
+        with unittest.mock.patch.object(ezpkg.tempfile, "mkstemp",
+                                        side_effect=OSError("full")):
+            venv.put_stash(dependencies=["x"])
+        self.assertEqual(venv.stash()["dependencies"], ["x"])
+
+        # A block that will not parse has no date and no values.
+        program.write_text("# /// script\n# x = [\n# ///\n")
+        fresh: ezpkg.EZPkg = ezpkg.EZPkg(venv.root)
+        self.assertEqual(fresh.part1_value("uv", "exclude-newer"), None)
+        self.assertEqual(ezpkg.EZPkg(venv.root).declared_date(), "")
+
+        # No program at all: nothing to stash, release or read.
+        with unittest.mock.patch.object(ezpkg, "main_path",
+                                        return_value=None):
+            nobody: ezpkg.EZPkg = ezpkg.EZPkg(venv.root)
+            self.assertEqual(nobody.stash(), {})
+            nobody.put_stash(dependencies=["y"])
+            self.assertEqual(nobody.released(), "")
+            with self.assertRaisesRegex(RuntimeError, "own file"):
+                nobody.staged([])
+
+    def test_a_settings_file_that_cannot_be_read_or_filled(self) -> None:
+        """Unreadable is a stop; unwritable when empty is every default."""
+        # Not UTF-8: stopped, naming the file.
+        program: Path
+        venv: ezpkg.EZPkg
+        program, venv = self.developer_here()
+        ezpkg.settings_path(program).write_bytes(b"\xff\n")
+        with self.assertRaisesRegex(SystemExit, r"^prog\.py\.toml: "):
+            venv.settings()
+
+        # Empty and unwritable: the defaults, said nowhere.
+        ezpkg.settings_path(program).write_text("")
+        with (unittest.mock.patch.object(Path, "write_text",
+                                         side_effect=OSError("read-only")),
+              contextlib.redirect_stderr(io.StringIO()) as said):
+            self.assertEqual(ezpkg.EZPkg(venv.root).settings(),
+                             ezpkg.Settings())
+        self.assertEqual(said.getvalue(), "")
+
+        # The edit-mode note: nothing to name without the program, and
+        # a file gone since is left alone.
+        venv.filled = (ezpkg.settings_path(program), "x")
+        with unittest.mock.patch.object(ezpkg, "main_path",
+                                        return_value=None):
+            venv.name_the_additions()
+        ezpkg.settings_path(program).unlink()
+        venv.name_the_additions()
+        self.assertFalse(ezpkg.settings_path(program).exists())
+
+    def test_a_staged_copy_and_its_ranges_at_their_edges(self) -> None:
+        """No block, a block it cannot edit, upgrading, a file gone."""
+        # Approved, so the copy needs `checksums`, which a dotted
+        # `[tool.ezpkg]` key leaves no safe place for.
+        program: Path
+        venv: ezpkg.EZPkg
+        program, venv = self.developer_here(
+            'dependencies = ["widget"]\ntool.ezpkg.x = 1')
+        venv.put_stash(checksums={"widget==1.2.3": "0" * 16},
+                       **{"exclude-newer": "2026-10-22T00:00:00Z"})
+        with self.assertRaisesRegex(RuntimeError, "script block of a copy"):
+            venv.staged(["widget"])
+
+        # Upgrading: the stash's date of this run still goes in.
+        program.write_text('# /// script\n# dependencies = ["widget"]\n'
+                           "# ///\nimport widget\n")
+        ezpkg.settings_path(program).write_text("upgrade = true\n")
+        upgrading: ezpkg.EZPkg = ezpkg.EZPkg(venv.root)
+        self.assertIn('# exclude-newer = "2026-10-22T00:00:00Z"\n',
+                      upgrading.staged(["widget"])[0])
+
+        # Ranges: a file that cannot be read keeps them as they are;
+        # one that cannot be edited stops.
+        with unittest.mock.patch.object(upgrading, "program_text",
+                                        side_effect=OSError("gone")):
+            self.assertEqual(upgrading.give_ranges(["widget"]), ["widget"])
+        with (unittest.mock.patch.object(ezpkg, "with_dependency_list",
+                                         return_value=None),
+              self.assertRaisesRegex(SystemExit, "give `dependencies`")):
+            upgrading.give_ranges(["widget"])
+
+        # No block at all: no copy.
+        program.write_text("import widget\n")
+        with self.assertRaisesRegex(RuntimeError, "script block of a copy"):
+            ezpkg.EZPkg(venv.root).staged([])
+
+    def test_import_problems_name_each_kind_once(self) -> None:
+        """Undeclared, from no package, not importable, above the bootstrap.
+
+        `scan_imports` says them all once, and then nothing until they
+        change; a record it cannot write only means saying them again.
+        """
+        # Two modules on `sys.path` but not beside the program, one of
+        # them a distribution's, and one whose spec cannot be had.
+        root: Path = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        lib: Path = root / "lib"
+        lib.mkdir()
+        (lib / "loose.py").write_text("")
+        (lib / "owned.py").write_text("")
+        specless: ModuleType = ModuleType("specless")
+        specless.__spec__ = None
+        self.enterContext(unittest.mock.patch.object(
+            sys, "path", [str(lib), *sys.path]))
+        self.enterContext(unittest.mock.patch.dict(
+            sys.modules, {"specless": specless}))
+        importlib.invalidate_caches()
+        self.enterContext(unittest.mock.patch.object(
+            importlib.metadata, "packages_distributions",
+            return_value={"owned": ["owned-dist"]}))
+        program: Path = root / "prog" / "prog.py"
+        program.parent.mkdir()
+        program.write_text(
+            "print(1)\n" + bootstrap.pasted(SHIPPING)
+            + "import loose\nimport owned\nimport specless\n")
+        self.enterContext(unittest.mock.patch.object(
+            ezpkg, "main_path", return_value=program))
+        venv: ezpkg.EZPkg = ezpkg.EZPkg(root / "cache")
+        found: tuple[Path, list[str]] | None = venv.import_problems([])
+        assert found is not None
+        said: str = "\n".join(found[1])
+        self.assertIn("line 1: this runs before the bootstrap", said)
+        self.assertIn(f"`loose` comes from {lib / 'loose.py'}, which no "
+                      f"package provides", said)
+        self.assertIn("`owned` comes from owned-dist, which Part 1 does "
+                      "not declare", said)
+        self.assertIn("`specless` is not importable here", said)
+        self.assertEqual(venv.module_origin("specless"), "somewhere")
+
+        # Said once, with how long for, then remembered.
+        with contextlib.redirect_stderr(io.StringIO()) as told:
+            self.assertEqual(len(venv.scan_imports([])), 4)
+        self.assertIn("prog.py: shown once", told.getvalue())
+        self.assertEqual(venv.scan_imports([]), [])
+
+        # A record that cannot be written: said, and said again.
+        shutil.rmtree(root / "cache" / "scans")
+        with (unittest.mock.patch.object(ezpkg.tempfile, "mkstemp",
+                                         side_effect=OSError("full")),
+              contextlib.redirect_stderr(io.StringIO())):
+            self.assertEqual(len(venv.scan_imports([])), 4)
+            self.assertEqual(len(venv.scan_imports([])), 4)
+
+        # Not Python, or no program: nothing to say.
+        program.write_text("def (\n")
+        self.assertIsNone(venv.import_problems([]))
+        self.assertEqual(venv.scan_imports([]), [])
+        with unittest.mock.patch.object(ezpkg, "main_path",
+                                        return_value=None):
+            self.assertIsNone(venv.import_problems([]))
+            self.assertEqual(venv.scan_imports([]), [])
+
+    def reconciling(self, settings: str = "verbosity = \"medium\"\n"
+                    ) -> tuple[ezpkg.EZPkg, Callable[[], list[str]]]:
+        """Set up `reconcile` on a program with one good and one bad import.
+
+        `sprocket` proves itself, `bogus` does not; nothing is fetched,
+        since `provide` and `remember` are for each test to decide.
+
+        Arguments:
+        * `settings` (`str`):
+          The program's `prog.py.toml`.
+
+        Returns:
+        * (`tuple[ezpkg.EZPkg, Callable[[], list[str]]]`): The cache, and
+          a call of `reconcile` that returns what it returns.
+        """
+        # The program, its discrepancy, and the guesses' proofs.
+        program: Path
+        venv: ezpkg.EZPkg
+        program, venv = self.developer_here(settings=settings)
+        program.write_text(program.read_text()
+                           + "import sprocket\nimport bogus\n")
+        self.enterContext(unittest.mock.patch.object(
+            importlib.metadata, "packages_distributions",
+            return_value={"widget": ["widget"]}))
+        self.enterContext(unittest.mock.patch.object(
+            venv, "prove", side_effect=lambda package, module, argv: (
+                "" if package == "sprocket" else "PyPI has none called "
+                "`bogus`")))
+        self.enterContext(unittest.mock.patch.object(venv, "too_new"))
+        self.enterContext(unittest.mock.patch.object(
+            venv, "remember", return_value=None))
+        found: ezpkg.Discrepancy | None = venv.discrepancy(
+            program, program.read_text(), ["widget"])
+        assert found is not None
+        record: Path
+        kept: dict[str, Any]
+        record, kept = venv.development_record(program)
+
+        def run() -> list[str]:
+            # One reconciliation.
+            return venv.reconcile(found, ["widget"], (), record, kept, "fp",
+                                  set())
+        return venv, run
+
+    def test_reconcile_when_a_fetch_or_an_edit_fails(self) -> None:
+        """A failed fetch leaves `dependencies` alone and says why.
+
+        A no is passed on; a failed guess is said each time; with the
+        stash, each change is said at `medium`.  With the program edited,
+        an edit that cannot be worked out or written is said, not made.
+        """
+        # Fetching fails, or is declined.
+        venv: ezpkg.EZPkg
+        run: Callable[[], list[str]]
+        venv, run = self.reconciling()
+        with (unittest.mock.patch.object(
+                venv, "provide",
+                side_effect=RuntimeError("could not fetch: ERROR: nope")),
+              contextlib.redirect_stderr(io.StringIO()) as said):
+            self.assertEqual(run(), ["widget"])
+        flat: str = " ".join(said.getvalue().split())
+        self.assertIn("PyPI has none called `bogus`", flat)
+        self.assertIn("`dependencies` is left as it is: ERROR: nope", flat)
+        with (unittest.mock.patch.object(
+                venv, "provide", side_effect=ezpkg.Declined("no", "No.")),
+              self.assertRaises(ezpkg.Declined)):
+            run()
+
+        # Fetched: stashed and said, the doubt too, even when the
+        # program cannot be read back for the fingerprint.
+        with (unittest.mock.patch.object(venv, "provide", return_value=[]),
+              unittest.mock.patch.object(ezpkg, "read_program",
+                                         side_effect=OSError("gone")),
+              contextlib.redirect_stderr(io.StringIO()) as said):
+            self.assertEqual(run(), ["widget", "sprocket"])
+        flat = " ".join(said.getvalue().split())
+        self.assertIn("Added sprocket for `prog.py`.", flat)
+        self.assertIn("PyPI has none called `bogus`", flat)
+        self.assertEqual(venv.stash()["dependencies"], ["sprocket"])
+
+    @editing
+    def test_reconcile_when_an_edit_cannot_be_made(self) -> None:
+        """Worked out or written, a failed edit is said, and not made."""
+        # The edit cannot be worked out, then cannot be written.
+        venv: ezpkg.EZPkg
+        run: Callable[[], list[str]]
+        venv, run = self.reconciling()
+        self.enterContext(unittest.mock.patch.object(venv, "provide",
+                                                     return_value=[]))
+        with (unittest.mock.patch.object(venv, "edit_for",
+                                         return_value="prog.py: no edit"),
+              contextlib.redirect_stderr(io.StringIO()) as said):
+            self.assertEqual(run(), ["widget"])
+        self.assertIn("prog.py: no edit", said.getvalue())
+        self.assertIn("`bogus`", said.getvalue())
+        with (unittest.mock.patch.object(ezpkg, "write_program",
+                                         side_effect=OSError("read-only")),
+              contextlib.redirect_stderr(io.StringIO()) as said):
+            self.assertEqual(run(), ["widget"])
+        self.assertIn("`dependencies` is left as it is: read-only",
+                      " ".join(said.getvalue().split()))
+
+        # The run that filled `prog.py.toml` only notes what it would
+        # add; a written edit settles, even unfingerprinted.
+        venv.filled = (Path("prog.py.toml"), "")
+        with contextlib.redirect_stderr(io.StringIO()):
+            self.assertEqual(run(), ["widget", "sprocket"])
+        self.assertEqual(venv.adding, ["sprocket"])
+        venv.filled = None
+        with (unittest.mock.patch.object(ezpkg, "dependency_fingerprint",
+                                         side_effect=SyntaxError("x")),
+              contextlib.redirect_stderr(io.StringIO())):
+            self.assertEqual(run(), ["widget", "sprocket"])
+        self.assertTrue(venv.edited)
+
+    def test_the_reconciling_helpers_at_their_edges(self) -> None:
+        """`discrepancy`, `too_new`, `prove`, `edit_for` and the rest.
+
+        The branches an ordinary run never takes: a program that is not
+        Python, an import with no package or under a guard, a package
+        the index lacks, an edit that cannot be made.
+        """
+        # Imports with no package, from no spec, and guarded.
+        venv: ezpkg.EZPkg
+        venv, _ = self.reconciling()
+        program: Path = cast(Path, ezpkg.main_path())
+        root: Path = program.parent
+        lib: Path = root / "lib"
+        lib.mkdir()
+        (lib / "loose.py").write_text("")
+        specless: ModuleType = ModuleType("specless")
+        specless.__spec__ = None
+        self.enterContext(unittest.mock.patch.object(
+            sys, "path", [str(lib), *sys.path]))
+        self.enterContext(unittest.mock.patch.dict(
+            sys.modules, {"specless": specless}))
+        importlib.invalidate_caches()
+        text: str = ("import loose\nimport specless\ntry:\n    import widget2"
+                     "\nexcept ImportError:\n    pass\n")
+        with unittest.mock.patch.object(
+                importlib.metadata, "packages_distributions",
+                return_value={"widget2": ["widget2"]}):
+            found: ezpkg.Discrepancy | None = venv.discrepancy(
+                program, text, [])
+        assert found is not None
+        self.assertEqual(found.additions, [(2, "specless", "specless")])
+        self.assertIsNone(venv.discrepancy(program, "def (\n", []))
+
+        # `too_new`: nothing without a date; a package not added, or
+        # not on the index at all, is passed over; one there before
+        # the date is fine.
+        found = venv.discrepancy(program, program.read_text(), ["widget"])
+        assert found is not None
+        venv.put_stash(**{"exclude-newer": "2019-01-01T00:00:00Z"})
+        held: Path = root / "held"
+
+        def download(asking: Sequence[str], *rest: Any) -> list[Path]:
+            # `bogus` is on no index; `sprocket` arrives into `held`.
+            if asking == ["bogus"]:
+                raise RuntimeError("no such package")
+            held.mkdir(exist_ok=True)
+            return [held / "sprocket-1.0.0-py3-none-any.whl"]
+
+        with unittest.mock.patch.object(venv, "download",
+                                        side_effect=download):
+            venv.too_new(found, {"sprocket": "sprocket", "bogus": "bogus"},
+                         ())
+            venv.too_new(found, {}, ())
+            self.assertFalse(held.exists())
+            with unittest.mock.patch.object(venv, "cutoff",
+                                            return_value=""):
+                venv.too_new(found, {"sprocket": "sprocket"}, ())
+
+            # `prove`: a fetch that brings everything but the package.
+            with unittest.mock.patch.object(
+                    ezpkg, "index_files",
+                    return_value=["other-1.0-py3-none-any.whl"]):
+                self.assertEqual(ezpkg.EZPkg.prove(venv, "other", "other",
+                                                   ()),
+                                 '"other" could not be fetched')
+
+        # `edit_for`: a program gone, or a block it cannot edit.
+        with unittest.mock.patch.object(ezpkg, "read_program",
+                                        side_effect=OSError("gone")):
+            self.assertIn("prog.py: cannot read it: gone",
+                          venv.edit_for(found, ["widget"], set(), False))
+        with unittest.mock.patch.object(ezpkg, "with_dependency_list",
+                                        return_value=None):
+            self.assertIn("cannot edit its script block",
+                          venv.edit_for(found, ["widget"], set(), False))
+
+        # `sync_dependencies`: no program, not Python, nothing to read.
+        with unittest.mock.patch.object(ezpkg, "main_source",
+                                        return_value=None):
+            self.assertEqual(venv.sync_dependencies(["widget"]), ["widget"])
+        with unittest.mock.patch.object(ezpkg, "dependency_fingerprint",
+                                        side_effect=SyntaxError("x")):
+            self.assertEqual(venv.sync_dependencies(["widget"]), ["widget"])
+        with unittest.mock.patch.object(venv, "discrepancy",
+                                        return_value=None):
+            self.assertEqual(venv.sync_dependencies(["widget"]), ["widget"])
+
+        # `note_loaded`: a run whose loads cannot be traced is not noted.
+        with (unittest.mock.patch.object(
+                importlib.metadata, "packages_distributions",
+                side_effect=ValueError("odd")),
+              unittest.mock.patch.object(venv, "say") as said):
+            venv.note_loaded(program, ["widget"])
+        self.assertIn("were not noted", said.call_args[0][1])
+
+    def test_the_builders_refuse_what_they_cannot_build(self) -> None:
+        """No program, no bootstrap, no `uv`, a `.pth`, a lock that differs.
+
+        Each says why; a `uv` script without `uv` says how to finish.
+        """
+        # A developer's program with the real bootstrap, approved.
+        program: Path
+        venv: ezpkg.EZPkg
+        program, venv = self.developer_here()
+        program.write_text('# /// script\n# dependencies = ["t"]\n# ///\n'
+                           "import importlib\nimport pathlib\nimport sys\n"
+                           + bootstrap.pasted(SHIPPING) + "import t\n")
+        venv.put_stash(checksums={"t==1.0": "0" * 16})
+        built: Path = program.parent / "built"
+        built.mkdir()
+
+        # No program file: none of them can start.
+        builds: list[Callable[[], Path]] = [
+            lambda: venv.build_zipapp([]), venv.build_uv, venv.build_email]
+        build: Callable[[], Path]
+        with unittest.mock.patch.object(ezpkg, "main_path",
+                                        return_value=None):
+            for build in builds:
+                with self.assertRaisesRegex(RuntimeError, "own file"):
+                    build()
+
+        # A zipapp of nothing is built, with this computer's packages
+        # only; one whose tree runs a `.pth` is refused.
+        with (unittest.mock.patch.object(venv, "uv", return_value=None),
+              contextlib.redirect_stderr(io.StringIO()) as said):
+            venv.build_zipapp([], built / "empty.pyz")
+        self.assertTrue((built / "empty.pyz").is_file())
+        self.assertIn("carries only the packages this computer needed",
+                      " ".join(said.getvalue().split()))
+        tree: Path = venv.paths()[2] / "t-1"
+        tree.mkdir()
+        (tree / "hook.pth").write_text("import os\n")
+        with (unittest.mock.patch.object(
+                venv, "remember",
+                return_value=(["t-1"], ["t-1.0-py3-none-any.whl"])),
+              self.assertRaisesRegex(RuntimeError, r"cannot bundle hook\.pth")):
+            venv.build_zipapp(["t"], built / "hooked.pyz")
+
+        # `uv`: without it, the script and how to finish; a lock that
+        # disagrees, or a Part 1 that cannot be pinned, is refused.
+        with (unittest.mock.patch.object(venv, "uv", return_value=None),
+              contextlib.redirect_stdout(io.StringIO()) as told):
+            venv.build_uv(built / "prog-uv.py")
+        self.assertIn("uv lock --script", told.getvalue())
+        with (unittest.mock.patch.object(venv, "uv", return_value="uv"),
+              unittest.mock.patch.object(venv, "lock_script",
+                                         return_value={}),
+              self.assertRaisesRegex(RuntimeError, "lock disagrees")):
+            venv.build_uv(built / "prog-uv.py")
+        with (unittest.mock.patch.object(ezpkg, "pin_dependencies",
+                                         return_value=None),
+              self.assertRaisesRegex(RuntimeError, "cannot find the dep")):
+            venv.build_uv(built / "prog-uv.py")
+        with (unittest.mock.patch.object(ezpkg, "pin_dependencies",
+                                         return_value=None),
+              self.assertRaisesRegex(RuntimeError, "cannot find the dep")):
+            venv.lock_everywhere("uv", "prog.py", "import t\n", "utf-8", {})
+        with (unittest.mock.patch.object(venv, "lock_script",
+                                         return_value={}),
+              self.assertRaisesRegex(RuntimeError, "lock disagrees")):
+            venv.lock_everywhere(
+                "uv", "prog.py",
+                '# /// script\n# dependencies = ["t"]\n# ///\nimport t\n',
+                "utf-8", {"t==1.0": "0" * 16})
+
+        # `email`: no `uv`, or a Part 1 the checksums cannot go into.
+        with (unittest.mock.patch.object(venv, "uv", return_value=None),
+              self.assertRaisesRegex(RuntimeError, "needs `uv`")):
+            venv.build_email(built / "prog-email.py")
+        with (unittest.mock.patch.object(venv, "uv", return_value="uv"),
+              unittest.mock.patch.object(venv, "lock_everywhere",
+                                         return_value={}),
+              unittest.mock.patch.object(ezpkg, "uv_setting",
+                                         return_value=None),
+              self.assertRaisesRegex(RuntimeError, "cannot write the chec")):
+            venv.build_email(built / "prog-email.py")
+
+        # Without the pasted bootstrap, none of the three.
+        program.write_text('# /// script\n# dependencies = ["t"]\n# ///\n'
+                           "import t\n")
+        with unittest.mock.patch.object(venv, "uv", return_value="uv"):
+            for build in builds:
+                with self.assertRaisesRegex(RuntimeError, "bootstrap"):
+                    build()
+
+        # `uv lock` failing is said.
+        failing: Path = program.parent / "fails"
+        failing.write_text("#!/bin/sh\necho broken >&2\nexit 1\n")
+        failing.chmod(0o755)
+        with self.assertRaisesRegex(RuntimeError, "uv lock failed: broken"):
+            venv.lock_script(str(failing), program)
+
+    def test_elsewhere_trees_names_compiled_and_refuses_altered(self) -> None:
+        """A compiled package only others need is named; a bad hash stops."""
+        # A lock adding one compiled-only package and one pure one whose
+        # file is not the one the lock names.
+        program: Path
+        venv: ezpkg.EZPkg
+        program, venv = self.developer_here()
+        wheel: Path = program.parent / "pure-1.0-py3-none-any.whl"
+        wheel.write_bytes(b"not the file")
+        lock: dict[str, Any] = {"package": [
+            {"wheels": [{"url": "https://x/cmod-1.0-cp312-cp312-win_amd64.whl",
+                         "hash": "sha256:" + "0" * 64}]},
+            {"wheels": [{"url": wheel.as_uri(),
+                         "hash": "sha256:" + "1" * 64}]}]}
+        with (unittest.mock.patch.object(venv, "uv", return_value="uv"),
+              unittest.mock.patch.object(venv, "lock_everywhere",
+                                         return_value=lock),
+              unittest.mock.patch.object(venv, "say") as said,
+              self.assertRaisesRegex(RuntimeError, "is not the file")):
+            venv.elsewhere_trees("", "utf-8", {}, program.with_suffix(".pyz"))
+        lock["package"].pop()
+        with (unittest.mock.patch.object(venv, "uv", return_value="uv"),
+              unittest.mock.patch.object(venv, "lock_everywhere",
+                                         return_value=lock),
+              unittest.mock.patch.object(venv, "say") as said):
+            self.assertEqual(venv.elsewhere_trees(
+                "", "utf-8", {}, program.with_suffix(".pyz")), [])
+        self.assertIn("cannot carry cmod==1.0", said.call_args[0][1])
+
+    def test_uv_is_fetched_or_said_to_be_missing(self) -> None:
+        """No wheel, a failed fetch, or a wheel without the program."""
+        # Nothing installed, nothing in the cache.
+        program: Path
+        venv: ezpkg.EZPkg
+        program, venv = self.developer_here()
+        self.enterContext(unittest.mock.patch.object(ezpkg, "find_uv",
+                                                     return_value=None))
+        held: Path = program.parent / "held"
+        held.mkdir()
+        other: Path = held / "other-1.0-py3-none-any.whl"
+        other.write_bytes(b"")
+        with (unittest.mock.patch.object(venv, "download",
+                                         return_value=[other]),
+              unittest.mock.patch.object(venv, "say") as said):
+            self.assertIsNone(venv.uv())
+        self.assertIn("no uv wheel arrived", said.call_args[0][1])
+        with (unittest.mock.patch.object(venv, "download",
+                                         side_effect=RuntimeError("down")),
+              unittest.mock.patch.object(venv, "say") as said):
+            self.assertIsNone(venv.uv())
+        self.assertIn("could not be fetched", said.call_args[0][1])
+
+        # A `uv` wheel with no `uv` inside it.
+        empty: Path = venv.paths()[2] / "uv-0.9.0-x"
+        empty.mkdir()
+        held.mkdir(exist_ok=True)
+        shell: Path = held / "uv-0.9.0-py3-none-any.whl"
+        shell.write_bytes(b"")
+        with (unittest.mock.patch.object(venv, "download",
+                                         return_value=[shell]),
+              unittest.mock.patch.object(venv, "unpack", return_value=empty),
+              unittest.mock.patch.object(venv, "say") as said):
+            self.assertIsNone(venv.uv())
+        self.assertIn("has no uv", said.call_args[0][1])
+
+    def test_edit_part1_keeps_encoding_and_line_endings(self) -> None:
+        """A latin-1 program with CRLF lines is dated and otherwise kept.
+
+        And each way an edit cannot be made says why, or nothing when
+        there is nothing to edit.
+        """
         # Latin-1, CRLF, and a byte that is not valid UTF-8.
         where: Path = Path(self.enterContext(tempfile.TemporaryDirectory()))
         venv: ezpkg.EZPkg = ezpkg.EZPkg(where / "cache")
@@ -8784,20 +9559,37 @@ class MetadataTest(unittest.TestCase):
         source: str = ("# -*- coding: latin-1 -*-\r\n# /// script\r\n"
                        "# dependencies = []\r\n# ///\r\nprint('caf\u00e9')\r\n")
         program.write_bytes(source.encode("latin-1"))
-        with unittest.mock.patch.object(ezpkg, "main_path",
-                                        return_value=program):
-            said: str = venv.stamp("2026-10-12T19:05:41Z")
-        self.assertEqual(said, "")
+        dated: list[tuple[str, str, str | None]] = [
+            ("uv", "exclude-newer", '"2026-10-12T19:05:41Z"')]
+        self.enterContext(unittest.mock.patch.object(
+            ezpkg, "main_path", return_value=program))
+        self.assertEqual(venv.edit_part1(dated), "")
         raw: bytes = program.read_bytes()
         self.assertIn(b"caf\xe9", raw)
         self.assertNotIn(b"\n", raw.replace(b"\r\n", b""))
         self.assertIn(b'# exclude-newer = "2026-10-12T19:05:41Z"\r\n', raw)
 
-        # No block is no date and nothing said.
+        # The same again changes nothing; a key that cannot be set, or
+        # a file that cannot be written, says why.
+        self.assertEqual(venv.edit_part1(dated), "")
+        self.assertEqual(program.read_bytes(), raw)
+        self.assertIn("could not set `exclude-newer` in `[tool.x.y]`",
+                      venv.edit_part1([("x.y", "exclude-newer", '"z"')]))
+        with unittest.mock.patch.object(ezpkg, "write_program",
+                                        side_effect=OSError("full")):
+            self.assertEqual(
+                venv.edit_part1([("uv", "exclude-newer", '"later"')]),
+                "could not write prog.py (full)")
+
+        # No block, no file, or an unreadable one: nothing said.
         program.write_text("print('no block')\n")
+        self.assertEqual(venv.edit_part1(dated), "")
+        with unittest.mock.patch.object(ezpkg, "read_program",
+                                        side_effect=OSError("gone")):
+            self.assertEqual(venv.edit_part1(dated), "")
         with unittest.mock.patch.object(ezpkg, "main_path",
-                                        return_value=program):
-            self.assertEqual(venv.stamp("2026-10-12T19:05:41Z"), "")
+                                        return_value=None):
+            self.assertEqual(venv.edit_part1(dated), "")
 
     def test_lock_mismatches_checks_the_approved_wheels(self) -> None:
         """A wheel missing from the lock, or listed differently, is named.

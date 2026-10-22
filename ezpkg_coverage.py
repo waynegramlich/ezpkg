@@ -93,6 +93,7 @@ import threading
 import time
 import trace
 import unittest
+from collections.abc import Sequence
 from pathlib import Path
 from types import FrameType
 from typing import Any, cast
@@ -223,6 +224,12 @@ class ByCode(trace.Trace):
         return None
 
 
+# The comment that marks code no test can reasonably reach, and the file
+# `report` lists the rest in.
+PRAGMA: str = "# pragma: no cover"
+MISSING: str = "missing.txt"
+
+
 def build_tracer() -> trace.Trace:
     """Return a tracer that counts lines in this project only.
 
@@ -337,6 +344,59 @@ def report(tracer: trace.Trace, coverdir: Path) -> None:
     results.write_results(show_missing=True, summary=True,
                           coverdir=str(coverdir))
     print(f"\nannotated sources in {coverdir}", file=sys.stderr)
+
+    # What is left once `# pragma: no cover` is honoured, listed in
+    # `MISSING` for working through (Wayne, 2026-10-22).
+    listed: list[str] = []
+    name: str
+    for name in MEASURED:
+        annotated: Path = coverdir / (Path(name).stem.replace("/", ".")
+                                      + ".cover")
+        if not annotated.is_file():
+            continue
+        missed: list[tuple[int, str]] = unmarked_misses(
+            annotated.read_text(encoding="utf-8").splitlines())
+        listed += [f"{name}:{number}: {line}" for number, line in missed]
+        print(f"{name}: {len(missed)} line(s) not run and not marked "
+              f"`{PRAGMA}`", file=sys.stderr)
+    (coverdir / MISSING).write_text("".join(f"{one}\n" for one in listed),
+                                    encoding="utf-8")
+
+
+def unmarked_misses(annotated: Sequence[str]) -> list[tuple[int, str]]:
+    """Return the lines `trace` marks as never run, less the marked ones.
+
+    A line carrying `PRAGMA` is left out, and when it opens a block
+    (it ends in `:` once its comment is gone), so is everything indented
+    under it, as `coverage` treats the same comment.
+
+    Arguments:
+    * `annotated` (`Sequence[str]`):
+      The lines of a `.cover` file, each source line behind a seven
+      character margin, `>>>>>> ` for a line never run.
+
+    Returns:
+    * (`list[tuple[int, str]]`): Each line's number and text.
+    """
+    # The margin off, then each block a marked line opens.
+    found: list[tuple[int, str]] = []
+    skipping: int | None = None
+    number: int
+    raw: str
+    for number, raw in enumerate(annotated, 1):
+        text: str = raw[7:]
+        indent: int = len(text) - len(text.lstrip())
+        if skipping is not None:
+            if not text.strip() or indent > skipping:
+                continue
+            skipping = None
+        if PRAGMA in text:
+            if text.split("#", 1)[0].rstrip().endswith(":"):
+                skipping = indent
+            continue
+        if raw.startswith(">>>>>>"):
+            found.append((number, text.strip()))
+    return found
 
 
 def trace_children(counts: Path) -> None:

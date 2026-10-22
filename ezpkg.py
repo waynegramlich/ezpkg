@@ -4144,23 +4144,6 @@ class EZPkg:
             return when
         return stashed if isinstance(stashed, str) else ""
 
-    def stamp(self, resolved: str) -> str:
-        """Write the resolution date into the program's Part 1.
-
-        As `exclude-newer` in the `[tool.uv]` table, so that `uv run`
-        and `cutoff` read the same line.  Only on a developer's run,
-        which never asks (`T.abfd`); see `edit_part1`.
-
-        Arguments:
-        * `resolved` (`str`):
-          The date, such as `2026-10-19T12:00:00Z`.
-
-        Returns:
-        * (`str`): Why it could not be written, or an empty string.
-        """
-        # One key, in the table `uv` reads.
-        return self.edit_part1([("uv", "exclude-newer", f'"{resolved}"')])
-
     def program_text(self, where: Path) -> tuple[str, str, bool]:
         """Read the program as a release sees it.
 
@@ -6199,30 +6182,6 @@ class EZPkg:
                  f"{len(rows) - len(approved)} more package(s) that "
                  f"other computers need")
         return target
-
-    def summary(self, wheel: Path) -> str:
-        """Return what a wheel says about itself, in one safe line.
-
-        Read from the `METADATA` inside the archive, so no network call
-        and no unpacking: the wheel is still an inert zip when this runs.
-
-        The text is written by whoever uploaded the package, which is the
-        adversary in the case this is meant to help with, so a
-        typosquat's summary reads exactly like the real one.  It is
-        offered as description, never as evidence, and everything
-        unprintable is removed: a summary may contain escape sequences,
-        and printing those beside a question lets them rewrite the
-        question.
-
-        Arguments:
-        * `wheel` (`Path`):
-          A wheel to look inside.
-
-        Returns:
-        * (`str`): The summary, or an empty string if it has none.
-        """
-        # `Summary` is one header among many, and nominally one line.
-        return self.metadata(wheel).get("Summary", "")
 
     def metadata(self, wheel: Path) -> dict[str, str]:
         """Return a wheel's `Name`, `Version` and `Summary`, made safe.
@@ -8767,30 +8726,3 @@ class EZPkg:
             return None
         return ([str(key) for key in found],
                 [str(one) for one in came] if isinstance(came, list) else [])
-
-    def contains(self, package: str) -> bool:
-        """Report whether the cache holds an importable package.
-
-        Every unpacked tree under `versions` is searched, because there
-        is one per distribution and version and a package may sit in
-        any of them.  A package arrives either as a directory or as a
-        single module, so both spellings count.
-
-        Nothing under `pending` is looked at.  A wheel there has not
-        been approved, so as far as the rest of the world is concerned
-        it is not in the cache at all; see 6.3.1 of `T.vcbow`.
-
-        Arguments:
-        * `package` (`str`):
-          The import name to look for.
-
-        Returns:
-        * (`bool`): True if some approved tree holds it.
-        """
-        # Either spelling, in any version directory, counts as present.
-        tree: Path
-        for tree in self.paths()[2].iterdir():
-            if ((tree / package).is_dir()
-                    or (tree / f"{package}.py").is_file()):
-                return True
-        return False

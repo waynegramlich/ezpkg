@@ -3,6 +3,11 @@
 Earlier entries (the `ux01`-`ux27` review, the redesign's slices and
 the 2026-10-19 batches) are in `History.md`.
 
+Superseded 2026-10-22 (see `T.ee`'s `Context.md`): a developer's Part 1
+is no longer edited (the stash), releases follow `release` and go into
+`prog.py.releases`, and `cull` uses 30 days.  Entries below that say
+otherwise describe the code before that day.
+
 ## 2026-10-19: State at day's end (condensed)
 
 `Details.md` "The Design" is the design, with these changes since:
