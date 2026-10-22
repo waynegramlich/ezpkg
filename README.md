@@ -332,7 +332,7 @@ exports = [  # Remove the `#`s of the forms each release builds.
 Once you are satisfied with your program, you may choose to release it in
 a more durable single file package.  Currently three formats are supported:
 * **`email`**:
-  Email format is just a single Python file (e.g. `YOUR_PROG.py`) that has
+  Email format is just a single Python file (e.g. `PROG_NAME.py`) that has
   had all of its inline metadata dependencies updated.  When emailed to
   another person, the `EZPkg` bootstrap ensures that all of the required
   packages are downloaded prior to running the program.
@@ -341,7 +341,7 @@ a more durable single file package.  Currently three formats are supported:
   etc.) and produces a `.pyz` file.  The file can be quite large since it
   includes all of the needed code.  All that the recipient needs is a Python
   interpreter; no network is needed.  It produces a file
-  `YOUR_PROG-X.Y.Z.pyz`, where `YOUR_PROG` is the program name and `X.Y.Z`
+  `PROG_NAME-X.Y.Z.pyz`, where `PROG_NAME` is the program name and `X.Y.Z`
   is the version number.
 * **`uv`**:
   `uv` is a popular packaging system written in Rust.  It handles both
@@ -349,10 +349,10 @@ a more durable single file package.  Currently three formats are supported:
   installed, and `uv` fetches the packages over the network on the first run.
 
 The requirement is that at least one of the values for `exports = [ ... ]`
-is enabled (`email`, `zipapp` or `uv`).  Once `exports = [ ... ]` is set, run your program.  As a side
-effect of running your program the appropriate files are generated.  Whenever
-an import is added or removed, the appropriate generated files are
-(re)generated.
+is enabled (`email`, `zipapp` or `uv`).  Once `exports = [ ... ]` is set,
+run your program.  As a side effect of running your program the appropriate
+files are generated.  Whenever an import is added or removed, the appropriate
+generated files are (re)generated.
 
 ## The Bootstrap
 
@@ -396,10 +396,6 @@ Here are some miscellaneous observations:
   Programs that need the same package share one copy.
 * **Versions side by side**:
   Programs that need different versions of a package each get their own.
-
-<!-- Claude: (2026-10-21) Proposed bullets for this list: the
-limitations, and an `ezpkg` that is already installed.
-
 * **One version per program**:
   A running program can import only one version of a package, so two
   parts of one program cannot use different versions of the same one.
@@ -467,9 +463,6 @@ others refuse to let it install into the system's Python
 ([PEP 668](https://peps.python.org/pep-0668/)).  The machine's own
 `pip`, if it has one, is never changed.
 
-<!-- Claude: (2026-10-21) Proposed new section, with a table of contents
-entry `* [Troubleshooting](#troubleshooting)`.  Messages abbreviated.
-
 ## Troubleshooting
 
 These are the messages a developer is most likely to meet, and what to
@@ -501,24 +494,13 @@ Program That Uses `EZPkg`](#running-a-program-that-uses-ezpkg).
   The release stopped for the reason given; `prog.py` still runs, and the
   next run tries the release again, so fix the reason and run it.
 
--->
-
-<!-- Claude: (2026-10-21) Proposed new section, with a table of contents
-entry `* [The Project](#the-project)`.  The license: the repository's
-`LICENSE` has been MIT No Attribution (SPDX `MIT-0`) since 2026-10-10,
-and the source files and the test.pypi.org wheel say so too.  MIT-0 is
-MIT without the condition that copies keep the copyright notice.  If you
-want plain MIT (SPDX `MIT`) instead, it is four files and the wheel's
-`License` field to change.
-
-## The Project
+## Project Information
 
 * **Source**: https://github.com/waynegramlich/ezpkg
 * **Problems and suggestions**:
   https://github.com/waynegramlich/ezpkg/issues
 * **License**: MIT No Attribution (`MIT-0`); see
   [`LICENSE`](https://github.com/waynegramlich/ezpkg/blob/main/LICENSE).
--->
 
 ## Missing Sections
 
