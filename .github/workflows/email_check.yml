@@ -1,8 +1,8 @@
 # Check the `email` and `zipapp` releases on other computers (`T.ee`):
 # a program needing `tqdm`, developed and released on each kind of
-# computer, whose own `prog.py` should be refused on Windows (its
-# `colorama` was never approved) and whose releases, `prog-1.0.0.py` and
-# `prog-1.0.0.pyz`, should run everywhere.  No `uv` is installed: each
+# computer, whose own `prog.py` is never edited, and whose releases,
+# `prog-1.0.0.py` and `prog-1.0.0.pyz`, should run everywhere, each
+# carrying `colorama`, which only Windows needs.  No `uv` is installed: each
 # release must fetch the `uv` wheel for its own computer.
 #
 # Started by hand, from the Actions tab or with

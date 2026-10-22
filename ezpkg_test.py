@@ -1235,6 +1235,30 @@ def with_path(*entries: Path) -> str:
     return os.pathsep.join(wanted)
 
 
+def editing(test: Callable[..., None]) -> Callable[..., None]:
+    """Run a test with `ezpkg.EDIT_PROGRAM` on, here and in its children.
+
+    For the tests of the code that edits a developer's Part 1, which
+    stays until Wayne decides whether `prog.py` is ever edited
+    (2026-10-22).
+
+    Arguments:
+    * `test` (`Callable[..., None]`):
+      The test method.
+
+    Returns:
+    * (`Callable[..., None]`): It, with the switch on.
+    """
+    # The constant for this process, the variable for its children.
+    @functools.wraps(test)
+    def switched(*arguments: Any, **keywords: Any) -> None:
+        with (unittest.mock.patch.dict(os.environ,
+                                       {"EZPKG_EDIT_PROGRAM": "on"}),
+              unittest.mock.patch.object(ezpkg, "EDIT_PROGRAM", True)):
+            test(*arguments, **keywords)
+    return switched
+
+
 class _KeptStringIO(io.StringIO):
     """A `StringIO` that survives being closed.
 
@@ -3345,7 +3369,9 @@ class InstallTest(unittest.TestCase):
 
         With a `prog.py.toml` that leaves `dependencies` alone, removed
         again afterwards, so later runs are an end user's (`T.abfd`).
-        The first such run also stamps `exclude-newer` into Part 1.
+        The first such run also stamps `exclude-newer` into Part 1, which
+        is edited (`EZPKG_EDIT_PROGRAM=on`), as a release's copy would
+        carry them.
 
         Arguments:
         * `program` (`Path`):
@@ -3356,13 +3382,15 @@ class InstallTest(unittest.TestCase):
         Returns:
         * (`subprocess.CompletedProcess[str]`): The finished child.
         """
-        # Only a settings file this made is taken away.
+        # Only a settings file this made is taken away.  Part 1 is
+        # edited, so that the end user's later runs find the approvals.
         settings: Path = program.with_name(f"{program.name}.toml")
         made: bool = not settings.exists()
         if made:
             settings.write_text("auto-dependencies = false\n")
         try:
-            return self.run_program(program, **extra)
+            return self.run_program(
+                program, **{"EZPKG_EDIT_PROGRAM": "on", **extra})
         finally:
             if made:
                 settings.unlink()
@@ -3539,6 +3567,7 @@ class InstallTest(unittest.TestCase):
         self.assertIn("may be the conflict", done.stderr)
         self.assertIn("Part 1 of prog.py", done.stderr)
 
+    @editing
     def test_the_developer_stamps_the_date_into_the_block(self) -> None:
         """The first developer run puts the date in Part 1, unasked.
 
@@ -3580,6 +3609,7 @@ class InstallTest(unittest.TestCase):
 
     @unittest.skipIf(dating_pip() is None,
                      "no pip here filters by upload date")
+    @editing
     def test_an_import_newer_than_the_date_stops_the_run(self) -> None:
         """A package with no release before the date stops the run.
 
@@ -3614,6 +3644,45 @@ class InstallTest(unittest.TestCase):
                          r"versions, delete line \d+ and run prog\.py "
                          r"again\.")
         self.assertEqual(self.declared_now(program), ["widget"])
+
+    @unittest.skipIf(dating_pip() is None,
+                     "no pip here filters by upload date")
+    def test_an_import_newer_than_the_stash_date_says_upgrade(self) -> None:
+        """The stash's date stops a newer import, and `upgrade` is named."""
+        # Every `sprocket` is dated after 2019, and `widget` before.
+        self.dated_sprocket()
+        wheel: Path
+        for wheel in (self.index / "widget").glob("*.whl"):
+            held: os.stat_result = wheel.stat()
+            self.addCleanup(os.utime, wheel,
+                            (held.st_atime, held.st_mtime))
+            stamp: float = datetime.datetime(
+                2010, 1, 1, tzinfo=datetime.UTC).timestamp()
+            os.utime(wheel, (stamp, stamp))
+        program: Path = self.synced_program(
+            "too_new_stash", '["widget"]', "import sprocket")
+        dating: Path | None = dating_pip()
+        assert dating is not None
+        self.give_pip(program, dating)
+
+        # The stash's date moved back, as an old program's would be.
+        where: str = str(program.resolve())
+        record: Path = (program.parent / "cache" / "develop"
+                        / f"{hashlib.sha256(where.encode()).hexdigest()[:16]}"
+                          ".json")
+        kept: dict[str, Any] = json.loads(record.read_text())
+        kept["stash"]["exclude-newer"] = "2019-01-01T00:00:00Z"
+        record.write_text(json.dumps(kept))
+        written: str = program.read_text()
+        done: subprocess.CompletedProcess[str] = self.run_program(program)
+        self.assertNotEqual(done.returncode, 0)
+        flat: str = " ".join(done.stderr.split())
+        self.assertRegex(flat, r"prog\.py line \d+ imports `sprocket`, but "
+                         r"no release of it existed before 2019-01-01, the "
+                         r"date prog\.py's versions are frozen at\. To "
+                         r"upgrade .*, set `upgrade = true` in "
+                         r"prog\.py\.toml and run prog\.py again\.")
+        self.assertEqual(program.read_text(), written)
 
     def dated_sprocket(self) -> None:
         """Date `sprocket` 1.0.0 to 2020 and 2.0.0 to 2024 on the index.
@@ -5491,6 +5560,54 @@ class InstallTest(unittest.TestCase):
             ["prog-1.0.0.py"])
         self.assertIn('version = "1.0.0"', record.read_text())
 
+    def test_a_release_copy_carries_the_stash(self) -> None:
+        """A release writes the stash into its copies, never into `prog.py`.
+
+        And a lost stash is taken back from the newest release.
+        """
+        # `uv` does the resolving for every computer.
+        if ezpkg.find_uv() is None:
+            self.skipTest("uv is not installed")
+        self.releasing = True
+        program: Path
+        home: Path
+        program, home = self.bootstrapped_program(
+            "carried", 'dependencies = ["paned"]',
+            "import paned\nimport widget\nprint(paned.__version__)")
+        self.developer_settings(program, 'exports = ["email"]\n')
+        written: str = program.read_text()
+        done: subprocess.CompletedProcess[str] = self.run_program(
+            program, HOME=str(home))
+        self.assertEqual(done.returncode, 0, done.stderr[-400:])
+        self.assertIn("Released `prog.py` 1.0.0",
+                      " ".join(done.stderr.split()))
+        self.assertEqual(program.read_text(), written)
+
+        # The copy: every entry ranged, its checksums and its date.
+        cache: Path = home / ".ezpkg"
+        stashed: dict[str, Any] = self.stash_of(program, cache)
+        self.assertEqual(stashed["released"], "1.0.0")
+        copy: str = (program.with_name("prog_builds") / "1.0.0"
+                     / "prog-1.0.0.py").read_text()
+        metadata: dict[str, Any] | None = ezpkg.script_metadata(copy)
+        assert metadata is not None
+        # A source `ezpkg` leaves its entry bare (S5.1c).
+        self.assertEqual(metadata["dependencies"],
+                         ["ezpkg", "paned>=1.0.0,<2", "widget>=1.2.3,<2"])
+        self.assertEqual(
+            metadata["tool"]["uv"]["exclude-newer"], stashed["exclude-newer"])
+        self.assertTrue(set(stashed["checksums"]) <= set(
+            ezpkg.approvals_in(copy) or {}))
+
+        # A lost stash comes back from the copy.
+        shutil.rmtree(cache / "develop")
+        done = self.run_program(program, HOME=str(home))
+        self.assertEqual(done.returncode, 0, done.stderr[-400:])
+        again: dict[str, Any] = self.stash_of(program, cache)
+        self.assertEqual(again["released"], "1.0.0")
+        self.assertEqual(again["exclude-newer"], stashed["exclude-newer"])
+        self.assertEqual(program.read_text(), written)
+
     def test_next_release_adds_one_to_the_last_number(self) -> None:
         """1.0.0 when there was none; padded; `.devN` dropped."""
         # One of each.
@@ -5722,7 +5839,10 @@ class InstallTest(unittest.TestCase):
         return path
 
     def declared_now(self, program: Path) -> list[str]:
-        """Return a program's `dependencies` as its file says now.
+        """Return a program's `dependencies` as its developer's run sees them.
+
+        Its file's, then, unless Part 1 is edited, the entries its
+        stash adds (`EZPkg.declared`).
 
         Arguments:
         * `program` (`Path`):
@@ -5736,7 +5856,37 @@ class InstallTest(unittest.TestCase):
             program.read_text())
         assert metadata is not None
         found: list[str] = metadata["dependencies"]
-        return found
+        if ezpkg.EDIT_PROGRAM:
+            return found
+        names: set[str] = {ezpkg.normal_name(ezpkg.requirement_name(one))
+                           for one in found}
+        return found + [one for one in self.stash_of(program).get(
+            "dependencies", [])
+            if ezpkg.normal_name(ezpkg.requirement_name(one)) not in names]
+
+    def stash_of(self, program: Path, cache: Path | None = None
+                 ) -> dict[str, Any]:
+        """Return what a program's cache keeps for its developer.
+
+        Arguments:
+        * `program` (`Path`):
+          The program.
+        * `cache` (`Path | None`):
+          Its cache; `None` means `cache` beside it.
+
+        Returns:
+        * (`dict[str, Any]`): Its stash (`EZPkg.stash`), empty for none.
+        """
+        # The record `development_record` names.
+        where: str = str(program.resolve())
+        record: Path = ((cache or program.parent / "cache") / "develop"
+                        / f"{hashlib.sha256(where.encode()).hexdigest()[:16]}"
+                          ".json")
+        try:
+            stashed: object = json.loads(record.read_text()).get("stash")
+        except (OSError, ValueError):
+            return {}
+        return stashed if isinstance(stashed, dict) else {}
 
     def test_a_missing_dependency_is_added(self) -> None:
         """A new import gets its entry, with a range, without a word.
@@ -5756,6 +5906,72 @@ class InstallTest(unittest.TestCase):
         done = self.run_program(program)
         self.assertEqual((done.stdout, done.stderr), ("ran\n", ""))
 
+    def test_the_stash_keeps_what_part_1_does_not_say(self) -> None:
+        """A developer's `prog.py` is never edited (Wayne, 2026-10-22).
+
+        A new import's entry, the approvals and the date go into the
+        stash; an entry the stash added goes with its import; Part 1's
+        own entries stay, imported or not.
+        """
+        # Added to the stash, not to the file.
+        program: Path = self.synced_program(
+            "stashed", '["widget"]', "import sprocket")
+        before: str = program.read_text()
+        done: subprocess.CompletedProcess[str] = self.run_program(program)
+        self.assertEqual((done.returncode, done.stdout, done.stderr),
+                         (0, "ran\n", ""))
+        self.assertEqual(program.read_text(), before)
+        stashed: dict[str, Any] = self.stash_of(program)
+        self.assertEqual(stashed["dependencies"], ["sprocket>=2.0.0,<3"])
+        self.assertEqual(sorted(stashed["checksums"]),
+                         ["sprocket==2.0.0", "widget==1.2.3"])
+        self.assertRegex(stashed["exclude-newer"], r"^\d{4}-\d\d-\d\dT")
+        self.assertIsNone(self.approvals_of(program))
+
+        # Both imports gone: the stash's entry goes, Part 1's stays.
+        program.write_text(before.replace("import sprocket\n", "").replace(
+            "import widget\n", ""))
+        unimported: str = program.read_text()
+        done = self.run_program(program)
+        self.assertEqual((done.returncode, done.stdout), (0, "ran\n"),
+                         done.stderr[-300:])
+        self.assertEqual(program.read_text(), unimported)
+        self.assertEqual(self.declared_now(program), ["widget"])
+
+    def test_upgrade_takes_the_newest_versions(self) -> None:
+        """`upgrade = true` passes over the stash's lock and date.
+
+        Commented out again, the versions freeze at that run's.
+        """
+        # Recorded at 1.0.0, then loosened: still locked.
+        program: Path = self.declaring_program(
+            "upgrading", 'dependencies = ["sprocket==1.0.0"]',
+            "import sprocket\nprint(sprocket.__version__)")
+        settings: Path = self.developer_settings(
+            program, "auto-dependencies = false\n")
+
+        def run() -> str:
+            # One developer run, giving `sprocket`'s version.
+            done: subprocess.CompletedProcess[str] = self.run_program(
+                program)
+            self.assertEqual(done.returncode, 0, done.stderr[-300:])
+            return done.stdout.strip()
+
+        self.assertEqual(run(), "1.0.0")
+        program.write_text(program.read_text().replace(
+            '"sprocket==1.0.0"', '"sprocket"'))
+        written: str = program.read_text()
+        self.assertEqual(run(), "1.0.0")
+
+        # Upgraded, then frozen there; the file never changes.
+        settings.write_text("auto-dependencies = false\nupgrade = true\n")
+        self.assertEqual(run(), "2.0.0")
+        settings.write_text("auto-dependencies = false\n")
+        self.assertEqual(run(), "2.0.0")
+        self.assertIn("sprocket==2.0.0", self.stash_of(program)["checksums"])
+        self.assertEqual(program.read_text(), written)
+
+    @editing
     def test_the_authors_mypy_comment_is_copied(self) -> None:
         """A new import gets the `type: ignore` the others carry."""
         # The Quick Start's own comment, word for word.
@@ -5766,6 +5982,7 @@ class InstallTest(unittest.TestCase):
         self.assertEqual(done.returncode, 0, done.stderr[-400:])
         self.assertIn(f"\nimport sprocket{comment}\n", program.read_text())
 
+    @editing
     def test_an_ezpkg_import_gets_the_mypy_comment_alone(self) -> None:
         """`import ezpkg` gets the comment, but never a dependency.
 
@@ -5852,6 +6069,7 @@ class InstallTest(unittest.TestCase):
                          (0, "ran\n", ""))
         self.assertEqual(program.read_text(), before)
 
+    @editing
     def test_a_release_happens_once_per_value(self) -> None:
         """A new `release` value releases, once, and the program runs.
 
@@ -5884,6 +6102,7 @@ class InstallTest(unittest.TestCase):
         self.assertEqual((done.returncode, done.stdout, done.stderr),
                          (0, "ran\n", ""))
 
+    @editing
     def test_a_source_ezpkg_leaves_the_ezpkg_entry_alone(self) -> None:
         """A release from a source `ezpkg` does not range its entry.
 
@@ -5902,6 +6121,7 @@ class InstallTest(unittest.TestCase):
         self.assertEqual(self.declared_now(program),
                          ["ezpkg>=0.0.1.dev0,<0.1", "widget>=1.2.3,<2"])
 
+    @editing
     def test_an_empty_settings_file_is_filled(self) -> None:
         """An empty `prog.py.toml` is filled with the template, once.
 
@@ -5925,7 +6145,7 @@ class InstallTest(unittest.TestCase):
         filled: str = settings.read_text(encoding="utf-8")
         self.assertEqual(filled, ezpkg.SETTINGS_TEMPLATE.format(
             name="prog.py", stem="prog",
-            note=ezpkg.first_run_note("prog.py", [])))
+            note="\n" + ezpkg.first_run_note("prog.py", [])))
         self.assertIn("(right now nothing needs adding)", filled)
 
         # Filled, it is every default, and left alone; now the program
@@ -5936,6 +6156,7 @@ class InstallTest(unittest.TestCase):
         self.assertIn("checksums", program.read_text())
         self.assertEqual(settings.read_text(encoding="utf-8"), filled)
 
+    @editing
     def test_the_filling_run_names_what_the_next_run_adds(self) -> None:
         """A new import is fetched for the filling run, but not written.
 
@@ -5999,6 +6220,7 @@ class InstallTest(unittest.TestCase):
         self.assertEqual(self.declared_now(program),
                          ["widget", "sprocket>=2.0.0,<3"])
 
+    @editing
     def test_a_removed_import_removes_its_entry(self) -> None:
         """An entry whose import has gone goes too.
 
@@ -6026,6 +6248,7 @@ class InstallTest(unittest.TestCase):
         self.assertEqual(self.declared_now(program),
                          ["widget", "sprocket>=2.0.0,<3"])
 
+    @editing
     def test_an_entry_nothing_loads_goes_after_a_run(self) -> None:
         """An entry nothing imports goes once a recorded run shows it unused.
 
@@ -6100,6 +6323,7 @@ class InstallTest(unittest.TestCase):
         self.assertIn("`prog.py` did not run: ERROR: ", done.stderr)
         self.assertNotIn("shows all", done.stderr)
 
+    @editing
     def test_dependencies_follow_the_order_of_the_imports(self) -> None:
         """Out of order is a discrepancy, and is put in order."""
         # Nothing to add or remove, only the order.
@@ -6131,6 +6355,7 @@ class InstallTest(unittest.TestCase):
         self.assertEqual(self.declared_now(program), ["widget", "sprocket"])
         self.assertNotIn("not imported", program.read_text())
 
+    @editing
     def test_report_prints_a_line_per_change(self) -> None:
         """`verbosity = "medium"` names each change to `dependencies`."""
         # Two additions and a misspelt one.
@@ -6161,6 +6386,7 @@ class InstallTest(unittest.TestCase):
         self.assertTrue(done.stderr.startswith("Traceback"), done.stderr)
         self.assertIn("No module named 'bogus_package'", done.stderr)
 
+    @editing
     def test_verbosity_high_says_what_was_decided(self) -> None:
         """`verbosity = "high"` names the lock, the date and the fetch."""
         # An addition, so something is fetched and recorded.
@@ -6182,6 +6408,7 @@ class InstallTest(unittest.TestCase):
         self.assertIn("ezpkg: request remembered, nothing fetched",
                       done.stderr)
 
+    @editing
     def test_a_name_the_index_lacks_is_not_added(self) -> None:
         """A misspelt import is named in one line, then Python's error.
 
@@ -6200,6 +6427,7 @@ class InstallTest(unittest.TestCase):
         self.assertIn("No module named 'bogus_package'", flat)
         self.assertEqual(program.read_text(), before)
 
+    @editing
     def test_a_wrong_guess_is_not_added(self) -> None:
         """A package that is not what its name says is never added.
 
@@ -6223,6 +6451,7 @@ class InstallTest(unittest.TestCase):
         self.assertFalse(list((program.parent / "cache" / "versions")
                               .glob("decoy-*")))
 
+    @editing
     def test_a_source_only_package_is_not_added(self) -> None:
         """A name the index has only as source code is never added.
 
@@ -6305,6 +6534,7 @@ class InstallTest(unittest.TestCase):
             "print(1)\nif True:\n"
             + textwrap.indent(bootstrap.pasted(SHIPPING), "    ")), [1])
 
+    @editing
     def test_an_edit_starts_the_program_again(self) -> None:
         """After `ezpkg` edits the program, it runs the edited file.
 
@@ -6777,6 +7007,7 @@ class BootstrapCheckTest(unittest.TestCase):
                                         return_value=None):
             self.assertEqual(venv.bootstrap_status(), ("absent", ""))
 
+    @editing
     def test_a_newer_bootstrap_is_told_once_and_replaced_at_release(
             self) -> None:
         """A developer hears of a newer bootstrap once; a release replaces it.
@@ -8074,7 +8305,7 @@ class MetadataTest(unittest.TestCase):
                 ("\n\n[colour]\nx = 1\n",
                  ("prog.py.toml line 3: unknown setting `colour` (the "
                  "settings are `auto-dependencies`, `verbosity`, `release`, "
-                 "`exports` and `bootstrap`)")),
+                 "`exports`, `bootstrap` and `upgrade`)")),
                 ('auto-dependencies = "yes"\n',
                  ("prog.py.toml line 1: `auto-dependencies` must be `true` "
                   "or `false`")),

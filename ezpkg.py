@@ -869,24 +869,27 @@ def main_source() -> tuple[Path, str] | None:
 # What an empty `prog.py.toml` is filled with: every setting, commented
 # out at its default (`T.abfd`), except `exports`, whose empty list is
 # left open so that each form is one `#` to remove (Wayne, 2026-10-21).
-# `{name}` is the program's file name, `{stem}` it without `.py`.
+# `{name}` is the program's file name, `{stem}` it without `.py`, and
+# `{note}` empty, or `first_run_note`'s lines after a newline when
+# `EDIT_PROGRAM` is on.
 SETTINGS_TEMPLATE: str = """\
 # {name}.toml: EZPkg settings for {name}.
 #
 # This file makes you {name}'s developer.  ezpkg asks you nothing,
-# keeps the `dependencies` in {name}'s Part 1 matching its imports, and
-# records there the versions you ran, so that whoever you send {name}
-# to gets exactly those.  Without this file, {name} is an end user's:
-# they are asked once, on its first run, and {name} is never edited.
+# works out the packages {name}'s imports need, and remembers them and
+# the versions you ran in ~/.ezpkg, never in {name} itself.  Each
+# release writes them into its copies, so that whoever you send a
+# release to gets exactly those.  Without this file, {name} is an end
+# user's: they are asked once, on its first run, and {name} is never
+# edited.
 #
 # Each setting is shown at its default.  Remove a `#` to change one.
 # More: https://pypi.org/project/ezpkg/
 
-# Keep `dependencies` matching the imports: a new import gets an entry
-# with a version range, and an entry whose import is gone is removed.
-# An entry with a comment after it is always kept.
-# auto-dependencies = true
-{note}
+# Keep the packages matching the imports: a new import gets one, with
+# a version range, and one whose import is gone is dropped.  What you
+# write in `dependencies` yourself is always kept.
+# auto-dependencies = true{note}
 
 # How much ezpkg says: "none", "low", "medium" or "high".
 # verbosity = "low"
@@ -913,9 +916,10 @@ exports = [  # Remove the `#`s of the forms each release builds.
 # next release; a name, such as "nopip8", keeps exactly that one.
 # bootstrap = "update"
 
-# Upgrading: {name}'s versions are frozen at the date on the
-# `exclude-newer` line in its Part 1.  Delete that line and run {name}
-# to move everything to today's versions.
+# Upgrading: {name}'s versions are frozen at the date of its first
+# run.  With `upgrade = true`, every run takes the newest versions;
+# put the `#` back to freeze them at the last run's date.
+# upgrade = false
 """
 
 def first_run_note(name: str, adding: Sequence[str] | None) -> str:
@@ -959,6 +963,16 @@ def first_run_note(name: str, adding: Sequence[str] | None) -> str:
 # it and none loaded its package (Wayne, 2026-10-20; `T.abfd`).
 RUNS_KEPT: int = 10
 
+# Whether a developer's runs edit the program's Part 1.  Off: what
+# `ezpkg` works out (the entries for imports Part 1 does not declare,
+# the `checksums`, the frozen date, the last release) is kept in the
+# program's `develop/` record, its stash (`EZPkg.stash`), and only a
+# release's copies carry it (Wayne, 2026-10-22).  Whether `prog.py` is
+# never to be edited is not yet decided, so the editing code stays, and
+# the tests that need it turn this on (`EZPKG_EDIT_PROGRAM=on`, for the
+# test suite only).
+EDIT_PROGRAM: bool = os.environ.get("EZPKG_EDIT_PROGRAM", "").lower() == "on"
+
 # What a release can build, in the order it builds them.  `exports`
 # names none of them until the developer turns releases on (Wayne,
 # 2026-10-21: no `prog_builds/` on a first run).
@@ -991,6 +1005,9 @@ class Settings:
     * `bootstrap` (`str`):
       `update`, or the short name of the published bootstrap the
       program must carry, such as `nopip7` (Wayne, S5.1).
+    * `upgrade` (`bool`):
+      Take the newest versions on every run, rather than those of the
+      frozen date (`EZPkg.declared_date`).
     """
 
     auto_dependencies: bool = True
@@ -998,6 +1015,7 @@ class Settings:
     release: str | None = None
     exports: tuple[str, ...] = ()
     bootstrap: str = "update"
+    upgrade: bool = False
 
 
 def settings_path(program: Path) -> Path:
@@ -1031,6 +1049,21 @@ def release_path(program: Path) -> Path:
     """
     # Named like the settings file.
     return program.with_name(f"{program.name}.release")
+
+
+def builds_path(program: Path) -> Path:
+    """Return the folder a program's releases are built in.
+
+    Arguments:
+    * `program` (`Path`):
+      The program, such as `prog.py`.
+
+    Returns:
+    * (`Path`): Such as `prog_builds`, whether or not it exists; each
+      release is a folder in it named by its version.
+    """
+    # Beside the program.
+    return program.with_name(f"{program.stem}_builds")
 
 
 def next_release(last: str) -> str:
@@ -3509,6 +3542,9 @@ class EZPkg:
         self.declined: bool = False  # `n` to `reconcile`, this run.
         self.reported: set[str] = set()  # Modules `reconcile` named.
         self.edited: bool = False  # Was the program's file changed?
+        self.stashed: dict[str, Any] | None = None  # See `stash`.
+        # A release's copy of the program while it is built (`staged`).
+        self.staging: tuple[str, str, bool] | None = None
         # The `prog.py.toml` this run filled, and what it wrote, so that
         # nothing in the program is edited until the next run.
         self.filled: tuple[Path, str] | None = None
@@ -3653,6 +3689,11 @@ class EZPkg:
         * (`dict[str, str] | None`): What was approved, or `None` when
           there are no approvals, which means nothing is verified.
         """
+        # A developer's are in the stash (seeded from Part 1's).
+        if self.stashing():
+            held: object = self.stash().get("checksums")
+            return dict(held) if isinstance(held, dict) and held else None
+
         # The program's text as it is now, since this run may edit it.
         found: tuple[Path, str] | None = main_source()
         return None if found is None else approvals_in(found[1])
@@ -3666,6 +3707,11 @@ class EZPkg:
         Returns:
         * (`str`): Such as `1.0.0`; empty when nothing was released.
         """
+        # The stash's, for a developer whose Part 1 is not edited.
+        if self.stashing():
+            last: object = self.stash().get("released")
+            return last if isinstance(last, str) else ""
+
         # A block that will not parse has released nothing.
         try:
             declared: dict[str, Any] = self.declaration()
@@ -3839,9 +3885,22 @@ class EZPkg:
     def declared_date(self) -> str:
         """Return Part 1's `exclude-newer` date, or an empty string.
 
+        For a developer whose Part 1 is not edited (`stashing`), Part 1's
+        own date if the developer wrote one, else the stash's; and none
+        at all while `upgrade` is on, so that each run fetches the newest
+        versions and `record_approvals` dates them afresh.
+
         Returns:
         * (`str`): The date as written, such as `2026-10-19T12:00:00Z`.
         """
+        # Part 1's, else the stash's, unless upgrading.
+        stashed: object = None
+        if self.stashing():
+            settings: Settings | None = self.settings()
+            if settings is not None and settings.upgrade:
+                return ""
+            stashed = self.stash().get("exclude-newer")
+
         # A block that will not parse is reported elsewhere, by the
         # code that needs it; here it simply has no date.
         try:
@@ -3855,7 +3914,9 @@ class EZPkg:
         # TOML lets the date go unquoted, and then it arrives as one.
         if isinstance(when, datetime.date):
             return when.isoformat()
-        return when if isinstance(when, str) else ""
+        if isinstance(when, str) and when:
+            return when
+        return stashed if isinstance(stashed, str) else ""
 
     def stamp(self, resolved: str) -> str:
         """Write the resolution date into the program's Part 1.
@@ -3873,6 +3934,101 @@ class EZPkg:
         """
         # One key, in the table `uv` reads.
         return self.edit_part1([("uv", "exclude-newer", f'"{resolved}"')])
+
+    def program_text(self, where: Path) -> tuple[str, str, bool]:
+        """Read the program as a release sees it.
+
+        While a release is built for a developer whose Part 1 is not
+        edited, that is its staged copy (`staging`), with the stash
+        merged in; otherwise the file itself (`read_program`).
+
+        Arguments:
+        * `where` (`Path`):
+          The program.
+
+        Returns:
+        * (`tuple[str, str, bool]`): As `read_program` returns.
+
+        Raises:
+        * `OSError`:
+          If the file cannot be read.
+        """
+        # The staged copy, if there is one.
+        return self.staging or read_program(where)
+
+    def rewrite(self, where: Path, text: str, encoding: str,
+                crlf: bool) -> None:
+        """Write the program as a release changes it.
+
+        Into the staged copy while there is one (`program_text`),
+        otherwise into the file (`write_program`).
+
+        Arguments:
+        * `where` (`Path`):
+          The program.
+        * `text`, `encoding`, `crlf` (`str`, `str`, `bool`):
+          As `write_program` takes them.
+
+        Raises:
+        * `OSError`:
+          If the file cannot be written.
+        """
+        # The staged copy, if there is one.
+        if self.staging is not None:
+            self.staging = (text, encoding, crlf)
+        else:
+            write_program(where, text, encoding, crlf)
+
+    def staged(self, asking: Sequence[str]) -> tuple[str, str, bool]:
+        """Return the program with the stash merged into its Part 1.
+
+        What a release's copies are made from when Part 1 is not edited
+        (Wayne, 2026-10-22): `dependencies` as this run declared them
+        (Part 1's and the stash's), with the stash's `checksums` and
+        date.
+
+        Arguments:
+        * `asking` (`Sequence[str]`):
+          The requirements the program declared.
+
+        Returns:
+        * (`tuple[str, str, bool]`): As `read_program` returns.
+
+        Raises:
+        * `RuntimeError`:
+          If Part 1 cannot be edited.
+        * `OSError`:
+          If the program cannot be read.
+        """
+        # The file, then each change to its block.
+        where: Path | None = main_path()
+        if where is None:
+            raise RuntimeError("a release needs the program's own file")
+        text: str
+        encoding: str
+        crlf: bool
+        text, encoding, crlf = read_program(where)
+        listed: str | None = (with_dependency_list(text, list(asking))
+                              if list(asking) != self.written() else text)
+        block: tuple[re.Match[str], str] | None = (
+            None if listed is None else script_toml(listed))
+        if listed is None or block is None:
+            raise RuntimeError(f"cannot edit the script block of a copy "
+                               f"of {where.name}")
+        stashed: dict[str, Any] = self.stash()
+        toml: str | None = block[1]
+        rows: dict[str, str] = self.approved() or {}
+        if rows and toml is not None:
+            toml = uv_setting(toml, "checksums", approvals_array(
+                rows, stashed.get("tags") or {}), "ezpkg")
+        dated: str = self.declared_date() or str(
+            stashed.get("exclude-newer") or "")
+        if dated and toml is not None:
+            toml = uv_setting(toml, "exclude-newer", f'"{dated}"', "uv")
+        if toml is None:
+            raise RuntimeError(f"cannot edit the script block of a copy "
+                               f"of {where.name}")
+        return with_script_toml(listed, block[0], toml), encoding, crlf
 
     def give_ranges(self, asking: Sequence[str]) -> list[str]:
         """Give each bare entry in Part 1 a range from its approved version.
@@ -3910,14 +4066,14 @@ class EZPkg:
         encoding: str
         crlf: bool
         try:
-            source, encoding, crlf = read_program(where)
+            source, encoding, crlf = self.program_text(where)
         except OSError:
             return list(asking)
         edited: str | None = with_dependency_list(source, ranged)
         if edited is None:
             raise SystemExit(f"{where.name}: cannot edit its script "
                              f"block to give `dependencies` ranges")
-        write_program(where, edited, encoding, crlf)
+        self.rewrite(where, edited, encoding, crlf)
         return ranged
 
     def request_for(self, asking: Sequence[str]) -> str:
@@ -4225,7 +4381,8 @@ class EZPkg:
             index for index in found.removals
             if normal_name(requirement_name(found.entries[index])) in unused}
         final: list[str] = found.arrange(set(modules), removed)
-        comment: bool = found.uncommented is not None
+        # Only an edited program gets the author's `mypy` comments.
+        comment: bool = found.uncommented is not None and EDIT_PROGRAM
         imported: list[str] = found.imported(set(modules))
         doubt: str
         if final == found.entries and not comment:
@@ -4267,6 +4424,43 @@ class EZPkg:
             except importlib.metadata.PackageNotFoundError:
                 ranged[package] = package
         final = [ranged.get(entry, entry) for entry in final]
+
+        # Not edited: the entries Part 1 does not declare are stashed,
+        # and what arrived serves this run.
+        if self.stashing():
+            for doubt in doubts:
+                self.say(1, doubt)
+            if fetched is not None:
+                self.remember(self.request_for(self.fetching(final)),
+                              *fetched)
+            own: set[str] = {normal_name(requirement_name(entry))
+                             for entry in self.written()}
+            self.put_stash(dependencies=[
+                entry for entry in final
+                if normal_name(requirement_name(entry)) not in own])
+            if self.verbosity() >= 2:
+                before: set[str] = {normal_name(requirement_name(entry))
+                                    for entry in found.entries}
+                after: set[str] = {normal_name(requirement_name(entry))
+                                   for entry in final}
+                for entry in final:
+                    if normal_name(requirement_name(entry)) not in before:
+                        self.say(2, f"Added {entry} for `{program.name}`.")
+                for entry in found.entries:
+                    if normal_name(requirement_name(entry)) not in after:
+                        self.say(2, f"Dropped {entry} from "
+                                 f"`{program.name}`'s packages.")
+            try:
+                settled_now: str = (
+                    dependency_fingerprint(read_program(program)[0], final,
+                                           approved)
+                    + unused_key(self.unused_lately(kept)))
+            except (SyntaxError, OSError):
+                settled_now = fingerprint
+            self.keep(record, kept,
+                      **({} if doubts else {"asked": settled_now}),
+                      imported=imported)
+            return final
 
         # The run that filled `prog.py.toml` only says what it would add
         # (`first_run_note`); what arrived serves this run.
@@ -4370,6 +4564,16 @@ class EZPkg:
             try:
                 arrived = self.download([package], argv, (), before)
             except (RuntimeError, ValueError):
+                if self.stashing() and not dated:
+                    raise SystemExit(wrapped(
+                        f"{program.name} line {line} imports `{module}`, "
+                        f"but no release of it existed before "
+                        f"{before[:10]}, the date {program.name}'s versions "
+                        f"are frozen at.  To upgrade everything to today's "
+                        f"versions, set `upgrade = true` in "
+                        f"{program.name}.toml and run {program.name} "
+                        f"again.",
+                        columns(sys.stderr))) from None
                 raise SystemExit(wrapped(
                     f"{program.name} line {line} imports `{module}`, but no "
                     f"release of it existed before the date "
@@ -4495,12 +4699,19 @@ class EZPkg:
             imports = sorted([*imports, ("ezpkg", implied, False)],
                              key=lambda one: one[1])
         entries: list[str] = list(asking)
-        lines: list[int] = dependency_lines(text) or [0] * len(entries)
+        lines: list[int] = dependency_lines(text) or []
+        # The stash's entries, after Part 1's, have no line.
+        lines = (lines + [0] * len(entries))[:len(entries)]
         names: list[str] = [normal_name(requirement_name(entry))
                             for entry in entries]
         # Any comment on an entry is the developer's, and keeps it
         # (Wayne, S3.4).
         keep: set[str] = set(dependency_comments(text))
+        # And, when Part 1 is not edited, every entry it holds, since
+        # only the stash's can go.
+        if self.stashing():
+            keep |= {normal_name(requirement_name(entry))
+                     for entry in self.written()}
         approved: set[str] = {normal_name(pin.partition("==")[0])
                               for pin in self.approved() or {}}
         providers: Mapping[str, list[str]] = (
@@ -4585,10 +4796,10 @@ class EZPkg:
 
         An empty file (or one of blank lines) is an invitation: it is
         filled with `SETTINGS_TEMPLATE`, every setting commented out at
-        its default, and one line says so.  That run edits nothing in
-        the program (`filled`), and the file's note (`first_run_note`)
-        says what the next run will change.  After that run `ezpkg`
-        never writes the file.
+        its default, and one line says so.  After that run `ezpkg`
+        never writes the file.  With `EDIT_PROGRAM` on, that run edits
+        nothing in the program (`filled`), and the file's note
+        (`first_run_note`) says what the next run will change.
 
         Returns:
         * (`Settings | None`): The settings, or `None` for an end user's
@@ -4617,14 +4828,18 @@ class EZPkg:
             try:
                 filling: str = SETTINGS_TEMPLATE.format(
                     name=program.name, stem=program.stem,
-                    note=first_run_note(program.name, None))
+                    note="\n" + first_run_note(program.name, None)
+                    if EDIT_PROGRAM else "")
                 path.write_text(filling, encoding="utf-8")
-                self.filled = (path, filling)
+                if EDIT_PROGRAM:
+                    self.filled = (path, filling)
                 print(wrapped(
-                    f"`{path.name}` was empty, so `ezpkg` filled it in "
-                    f"and left `{program.name}` as it is; the note under "
-                    f"`auto-dependencies` says what changes from the next "
-                    f"run.", columns(sys.stderr)), file=sys.stderr)
+                    f"`{path.name}` was empty, so `ezpkg` filled it in"
+                    + (f" and left `{program.name}` as it is; the note "
+                       f"under `auto-dependencies` says what changes from "
+                       f"the next run." if EDIT_PROGRAM else
+                       ", with every setting at its default."),
+                    columns(sys.stderr)), file=sys.stderr)
             except OSError:
                 pass  # Empty is every default anyway.
         try:
@@ -4744,6 +4959,16 @@ class EZPkg:
         * `changes` (`str`):
           `asked`, `warned` or `answer`.
         """
+        # The stash on disk wins over an older copy in `kept`, which a
+        # caller may have read before `put_stash` changed it.
+        if "stash" not in changes:
+            try:
+                there: object = json.loads(record.read_text())
+                if isinstance(there, dict) and "stash" in there:
+                    kept["stash"] = there["stash"]
+            except (OSError, ValueError):
+                pass
+
         # Atomically, and quietly: a record is a convenience.
         kept.update(changes)
         handle: int
@@ -4756,6 +4981,157 @@ class EZPkg:
             Path(temporary).replace(record)
         except OSError:
             pass
+
+    def stashing(self) -> bool:
+        """Say whether this run keeps what it works out in the stash.
+
+        Returns:
+        * (`bool`): True for a developer's run with `EDIT_PROGRAM` off.
+        """
+        # The developer's, unless their Part 1 is edited.
+        return not EDIT_PROGRAM and self.developing()
+
+    def stash(self) -> dict[str, Any]:
+        """Return what `ezpkg` keeps for a developer's program.
+
+        In the program's `develop/` record, never in `prog.py` or its
+        `.toml` (Wayne, 2026-10-22): `dependencies`, the entries for
+        imports Part 1 does not declare; `checksums` and `tags`, the
+        approvals (`record_approvals`); `exclude-newer`, the frozen
+        date; and `released`, the last release.  A program with none yet
+        (a new program, a deleted `~/.ezpkg`, another computer, a moved
+        program) is seeded once from what Part 1 itself holds, as an
+        older `ezpkg` wrote it there, else from its newest release's
+        `email` copy (`seed_from_builds`), else starts empty.
+
+        Returns:
+        * (`dict[str, Any]`): The stash, empty for a program with no
+          file.
+        """
+        # Read once per run; `put_stash` keeps the copy current.
+        if self.stashed is not None:
+            return self.stashed
+        program: tuple[Path, str] | None = main_source()
+        if program is None:
+            return {}
+        record: Path
+        kept: dict[str, Any]
+        record, kept = self.development_record(program[0])
+        held: object = kept.get("stash")
+        if isinstance(held, dict):
+            self.stashed = held
+            return held
+
+        # Seeded from Part 1, then from the newest release.
+        text: str = program[1]
+        seeded: dict[str, Any] = {}
+        approved: dict[str, str] | None = approvals_in(text)
+        if approved:
+            seeded["checksums"] = approved
+            seeded["tags"] = approval_tags(text)
+        dated: object = self.part1_value("uv", "exclude-newer")
+        if isinstance(dated, datetime.date):
+            dated = dated.isoformat()
+        if isinstance(dated, str) and dated:
+            seeded["exclude-newer"] = dated
+        released: object = self.part1_value("ezpkg", "released")
+        if isinstance(released, str) and released:
+            seeded["released"] = released
+        if "checksums" not in seeded:
+            seeded = {**self.seed_from_builds(program[0]), **seeded}
+        self.stashed = seeded
+        self.keep(record, kept, stash=seeded)
+        return seeded
+
+    def seed_from_builds(self, program: Path) -> dict[str, Any]:
+        """Return a stash taken from a program's newest `email` release.
+
+        Its copy holds the merged `dependencies`, the `checksums` and
+        the date, so a program whose stash was lost carries on with the
+        versions it last released.
+
+        Arguments:
+        * `program` (`Path`):
+          The program.
+
+        Returns:
+        * (`dict[str, Any]`): The stash, empty when there is no such
+          release.
+        """
+        # The newest version folder that has an `email` copy.
+        folders: list[Path] = sorted(
+            (one for one in builds_path(program).glob("*")
+             if (one / f"{program.stem}-{one.name}.py").is_file()),
+            key=lambda one: [int(number) for number
+                             in re.findall(r"\d+", one.name)])
+        if not folders:
+            return {}
+        copy: Path = folders[-1] / f"{program.stem}-{folders[-1].name}.py"
+        try:
+            text: str = read_program(copy)[0]
+            declared: dict[str, Any] = script_metadata(text) or {}
+        except (OSError, ValueError):
+            return {}
+
+        # Its entries beyond Part 1's, its approvals and date.
+        seeded: dict[str, Any] = {"released": folders[-1].name}
+        entries: object = declared.get("dependencies")
+        if isinstance(entries, list):
+            seeded["dependencies"] = [one for one in entries
+                                      if isinstance(one, str)]
+        approved: dict[str, str] | None = approvals_in(text)
+        if approved:
+            seeded["checksums"] = approved
+            seeded["tags"] = approval_tags(text)
+        tool: object = declared.get("tool", {})
+        uv: object = tool.get("uv", {}) if isinstance(tool, dict) else {}
+        when: object = uv.get("exclude-newer") if isinstance(uv, dict) else None
+        if isinstance(when, datetime.date):
+            when = when.isoformat()
+        if isinstance(when, str) and when:
+            seeded["exclude-newer"] = when
+        self.say(3, f"ezpkg: {program.name}'s versions taken from {copy}")
+        return seeded
+
+    def put_stash(self, **changes: object) -> None:
+        """Change keys of the stash, as `stash` describes them.
+
+        Arguments:
+        * `changes` (`object`):
+          The keys and their new values.
+        """
+        # The record as it is now, so that nothing else in it is lost.
+        program: Path | None = main_path()
+        if program is None:
+            return
+        stashed: dict[str, Any] = {**self.stash(), **changes}
+        record: Path
+        kept: dict[str, Any]
+        record, kept = self.development_record(program)
+        self.stashed = stashed
+        self.keep(record, kept, stash=stashed)
+
+    def part1_value(self, table: str, key: str) -> object:
+        """Return a key of a `[tool]` table in Part 1 itself.
+
+        Arguments:
+        * `table` (`str`):
+          The table under `tool`, such as `uv`.
+        * `key` (`str`):
+          The key.
+
+        Returns:
+        * (`object`): Its value, or `None` when there is none or the
+          block will not parse.
+        """
+        # A block that will not parse holds nothing.
+        try:
+            declared: dict[str, Any] = self.declaration()
+        except ValueError:
+            return None
+        tool: object = declared.get("tool", {})
+        found: object = tool.get(table, {}) if isinstance(tool, dict) else {}
+        return found.get(key) if isinstance(found, dict) else None
 
     def check_imports(self, asking: Sequence[str]) -> None:
         """Refuse an export whose imports Part 1 does not cover.
@@ -5101,9 +5477,9 @@ class EZPkg:
         if program is None:
             raise RuntimeError("a zipapp needs the program's own file")
         target = target or program.with_suffix(".pyz")
-        raw: bytes = program.read_bytes()
-        encoding: str = tokenize.detect_encoding(io.BytesIO(raw).readline)[0]
-        text: str = raw.decode(encoding)
+        text: str
+        encoding: str
+        text, encoding, _ = self.program_text(program)
 
         # The bootstrap checked the Python version; the archive has no
         # bootstrap, so its line checks instead, when Part 1 gives a
@@ -5237,10 +5613,11 @@ class EZPkg:
         if program is None:
             raise RuntimeError("a uv script needs the program's own file")
         target = target or program.with_name(f"{program.stem}-uv.py")
-        raw: bytes = program.read_bytes()
-        encoding: str = tokenize.detect_encoding(io.BytesIO(raw).readline)[0]
+        text: str
+        encoding: str
+        text, encoding, _ = self.program_text(program)
         stripped: str | None = strip_bootstrap(
-            raw.decode(encoding), "uv installs the packages.")
+            text, "uv installs the packages.")
         if stripped is None:
             raise RuntimeError(
                 "a uv script leaves ezpkg out, so the program needs "
@@ -5583,7 +5960,7 @@ class EZPkg:
         text: str
         encoding: str
         crlf: bool
-        text, encoding, crlf = read_program(program)
+        text, encoding, crlf = self.program_text(program)
         # No approvals means nothing was fetched, so nothing is approved.
         approved: dict[str, str] = self.approved() or {}
 
@@ -6110,7 +6487,9 @@ class EZPkg:
         and `id:` per package, and change only when what arrived does.
         With no `exclude-newer` date (the first run, or an upgrade,
         which deleted it), the date is now, and both go into Part 1 in
-        one edit, after which the program starts again (`T.abfd`).
+        one edit, after which the program starts again (`T.abfd`).  With
+        `EDIT_PROGRAM` off they go into the stash instead (`stashing`),
+        and nothing starts again.
 
         Arguments:
         * `wheels` (`Sequence[Path]`):
@@ -6125,6 +6504,17 @@ class EZPkg:
             for wheel in wheels}
         tags: dict[str, str] = {wheel_pin(wheel.name): wheel_tag(wheel.name)
                                 for wheel in wheels if wheel_tag(wheel.name)}
+        if self.stashing():
+            stashed: dict[str, Any] = self.stash()
+            if (self.approved() == rows and stashed.get("tags", {}) == tags
+                    and dated):
+                self.say(3, "ezpkg: approvals unchanged")
+                return
+            self.put_stash(checksums=rows, tags=tags,
+                           **{"exclude-newer": resolved})
+            self.say(3, "ezpkg: approvals kept in the stash"
+                     + (f", dated {resolved}" if not dated else ""))
+            return
         found: tuple[Path, str] | None = main_source()
         changes: list[tuple[str, str, str | None]] = []
         if self.approved() != rows or (
@@ -6906,7 +7296,7 @@ class EZPkg:
         text: str
         encoding: str
         crlf: bool
-        text, encoding, crlf = read_program(where)
+        text, encoding, crlf = self.program_text(where)
         node: ast.Try | None = bootstrap_node(text)
         if node is None:
             return ""
@@ -6917,8 +7307,12 @@ class EZPkg:
                                    - len(lines[first].lstrip())]
         lines[first:last] = [textwrap.indent(fresh.rstrip("\n"), indent)
                              + "\n"]
-        write_program(where, "".join(lines), encoding, crlf)
+        self.rewrite(where, "".join(lines), encoding, crlf)
         newest: str = list(BOOTSTRAPS.values())[-1].split()[0]
+        if self.staging is not None:
+            return (f"This release's copies carry the bootstrap `{newest}` "
+                    f"in place of `{name.split()[0]}` (lines "
+                    f"{first + 1}-{last} of `{where.name}`).")
         return (f"Replaced the bootstrap `{name.split()[0]}` (lines "
                 f"{first + 1}-{last} of `{where.name}`) with `{newest}`.")
 
@@ -6942,6 +7336,10 @@ class EZPkg:
         A release that fails says why and writes no `prog.py.release`,
         so the program still runs, and its next run tries again.
 
+        With `EDIT_PROGRAM` off, every change is made to a staged copy
+        of the program (`staged`, `program_text`), never to `prog.py`,
+        and the version is recorded in the stash (Wayne, 2026-10-22).
+
         Arguments:
         * `settings` (`Settings`):
           The developer's settings.
@@ -6955,16 +7353,43 @@ class EZPkg:
         Returns:
         * (`bool`): Whether the release was made.
         """
-        # The bootstrap and the `ezpkg` entry, kept current.
+        # Made from a staged copy, if Part 1 is not edited.
         program: Path | None = main_path()
         if program is None:
             return False
+        try:
+            if self.stashing():
+                self.staging = self.staged(asking)
+            return self.build_release(program, settings, asking,
+                                      providing, version)
+        except (RuntimeError, OSError) as error:
+            self.say(1, f"`{program.name}` {version} was not released: "
+                     f"{error}.  `{program.name}` runs as usual, and its "
+                     f"next run tries again.")
+            return False
+        finally:
+            self.staging = None
+
+    def build_release(self, program: Path, settings: Settings,
+                      asking: list[str], providing: Sequence[str],
+                      version: str) -> bool:
+        """Do `release`'s work, once its copy is staged.
+
+        Arguments:
+        * `program` (`Path`):
+          The program.
+        * `settings`, `asking`, `providing`, `version`:
+          As `release` takes them.
+
+        Returns:
+        * (`bool`): Whether the release was made.
+        """
+        # The bootstrap and the `ezpkg` entry, kept current.
         if settings.bootstrap == "update":
             replaced: str = self.replace_bootstrap()
             if replaced:
                 self.say(1, replaced)
-        folder: Path = (program.with_name(f"{program.stem}_builds")
-                        / version)
+        folder: Path = builds_path(program) / version
         built: list[Path] = []
         skipped: list[str] = []
         try:
@@ -6980,7 +7405,8 @@ class EZPkg:
             folder.mkdir(parents=True)
             forms: list[str] = sorted(settings.exports,
                                       key=EXPORT_FORMS.index)
-            if forms and find_bootstrap(read_program(program)[0]) is None:
+            if forms and find_bootstrap(
+                    self.program_text(program)[0]) is None:
                 skipped.append("all: no pasted bootstrap")
                 self.say(1, f"`{program.name}` has no pasted bootstrap, "
                          f"so its release builds no "
@@ -7011,9 +7437,14 @@ class EZPkg:
                      f"next run tries again.")
             return False
 
-        # Recorded in Part 1 and in `prog.py.release`, then said.
-        trouble: str = self.edit_part1(
-            [("ezpkg", "released", f'"{version}"')])
+        # Recorded in Part 1 (or the stash) and in `prog.py.release`,
+        # then said.
+        trouble: str = ""
+        if self.stashing():
+            self.put_stash(released=version)
+        else:
+            trouble = self.edit_part1(
+                [("ezpkg", "released", f'"{version}"')])
         if trouble:
             self.say(1, f"`{program.name}` {version} was built, but "
                      f"{trouble}")
@@ -7069,12 +7500,12 @@ class EZPkg:
         source: str
         encoding: str
         crlf: bool
-        source, encoding, crlf = read_program(where)
+        source, encoding, crlf = self.program_text(where)
         edited: str | None = with_dependency_list(source, entries)
         if edited is None:
             raise SystemExit(f"{where.name}: cannot edit its script block "
                              f"to give `{own}` this ezpkg's range")
-        write_program(where, edited, encoding, crlf)
+        self.rewrite(where, edited, encoding, crlf)
         self.say(2, f'Changed "{own}" to "{ranged}" in `{where.name}`\'s '
                  f"`dependencies`.")
         return entries
@@ -7619,6 +8050,29 @@ class EZPkg:
         * `TypeError`:
           If `dependencies` is not a list of strings.
         """
+        # Part 1's own, then, for a developer, the stash's entries for
+        # the imports Part 1 does not declare (Part 1's win by name).
+        written: list[str] = self.written()
+        if not self.stashing():
+            return written
+        names: set[str] = {normal_name(requirement_name(entry))
+                           for entry in written}
+        held: object = self.stash().get("dependencies")
+        return written + [
+            entry for entry in (held if isinstance(held, list) else [])
+            if isinstance(entry, str)
+            and normal_name(requirement_name(entry)) not in names]
+
+    def written(self) -> list[str]:
+        """Return the requirements Part 1 itself declares.
+
+        Returns:
+        * (`list[str]`): As `declared` says, but never the stash's.
+
+        Raises:
+        * `ValueError`, `TypeError`:
+          As `declared` says.
+        """
         # `requires-python` is `check_python`'s business, not this one's.
         metadata: dict[str, Any] = self.declaration()
         declared: object = metadata.get("dependencies", [])
@@ -7912,7 +8366,9 @@ class EZPkg:
         except one that holds an end user's yes (`agreed`): that is
         asked once and never again, however long the program sits idle,
         since whoever runs it next may not be who agreed (Wayne,
-        2026-10-19).  Nor are the requests such a program uses
+        2026-10-19).  Nor one that holds a developer's `stash`, which
+        is the only record of the program's frozen versions (until the
+        garbage collection question is settled, Wayne, 2026-10-22).  Nor are the requests such a program uses
         (`note_request`), so its packages stay (S3.3b).
 
         Nothing else is aged.  Trees are kept or dropped by whether a
@@ -7948,7 +8404,8 @@ class EZPkg:
             try:
                 if record.stat().st_mtime < cutoff and not (
                         record.parent.name == "develop"
-                        and json.loads(record.read_text()).get("agreed")
+                        and any(json.loads(record.read_text()).get(key)
+                                for key in ("agreed", "stash"))
                         or record.stem in held):
                     found.append(record)
             except (OSError, ValueError, AttributeError):

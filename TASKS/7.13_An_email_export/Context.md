@@ -227,3 +227,47 @@ Decided, being built.  Supersedes the first-run note above.
   edited, so there is nothing to announce.
 * End users are unchanged: they run a release copy, whose Part 1 is
   complete.  The working `prog.py` runs only for its developer.
+
+## 2026-10-22: The plan, revised (Wayne)
+
+* Agreed, not yet built: everything `ezpkg` works out for a
+  developer's program (undeclared entries, `checksums`, date, last
+  release) is kept in its `~/.ezpkg/develop/` record for now; where it
+  finally lives is revisited later (a file beside `prog.py` that
+  version control can keep is one candidate).
+* Undecided: whether `prog.py` itself is never edited.  Keep the code
+  that edits Part 1 (and its tests) until that is decided; only switch
+  it off.
+* If the builds folder stays, `prog_builds/` becomes `prog.py.builds/`,
+  so `ls` lists `prog.py`, `prog.py.builds`, `prog.py.release` and
+  `prog.py.toml` together.
+* New questions: garbage collection of `develop/` records and old
+  builds, and git/hg retention of the builds and of the stash.
+* Wayne (2026-10-22): go ahead with the three phases (1. stash, edits
+  switched off by one constant; 2. `prog.py.builds/`; 3. `cull`), with a
+  progress report after each.  Garbage collection is not solved (an end
+  user could hold a lot in `~/.ezpkg` unknowingly).  git/hg retention
+  deferred, but probably to be encouraged.  README left alone; edited
+  together later.
+
+## 2026-10-22: Phase 1 built: the stash
+
+* `EDIT_PROGRAM` (off; `EZPKG_EDIT_PROGRAM=on` for tests) chooses.
+  Off: `approved`, `declared_date`, `released` and `declared` read the
+  stash (`stash`, `put_stash`; Part 1's date wins if written);
+  `record_approvals` and `reconcile` write it; Part 1's own entries are
+  never removed (`discrepancy` keeps them); no `mypy` comments, no
+  restart.  Seeded once from Part 1, else `seed_from_builds`.
+  `upgrade` setting (template's last line).  A release builds from
+  `staged` (via `program_text`/`rewrite`), records `released` in the
+  stash.  `stale` keeps a record holding a stash.  `builds_path` names
+  `prog_builds/` in one place, ready for phase 2.
+* Template wording changed for the stash (`T.ept` is Wayne's to edit).
+* Tests: 18 marked `@editing`; `run_as_developer` edits (end-user tests
+  need Part 1 approvals); new `test_the_stash_keeps_what_part_1_does_not_say`,
+  `test_upgrade_takes_the_newest_versions`,
+  `test_a_release_copy_carries_the_stash`,
+  `test_an_import_newer_than_the_stash_date_says_upgrade`.  Quick suite
+  323 OK (16 skipped).  `email_check.py` now expects `prog.py`
+  unedited and runs only the releases as a friend.
+* Not done: `ux/drive.py` developer steps still expect edits (stale).

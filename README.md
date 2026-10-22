@@ -309,7 +309,7 @@ the following content, which is meant to be self-documenting.
 # * This controls the verbosity level of `EZPkg`.
 
 exports = [  # Enable/disable export generation.
-#   "email",   # Enable an email release
+#   "email",   # Enable an email release (inserts metadata into the program)
 #   "zipapp",  # Enable a zipapp release
 #   "uv",      # Enable a uv release
 ]

@@ -100,9 +100,18 @@ entry chooses which `ezpkg` runs it (`T.eui`).
 ## The Two Modes (`T.abfd`, 2026-10-19)
 
 A `prog.py.toml` beside `prog.py` makes it its developer's: no
-questions, `dependencies` kept in step with the imports silently, the
-versions frozen by `exclude-newer` and the `[tool.ezpkg] checksums`
-`ezpkg` writes into Part 1.  Releases are off until `exports` in
+questions, the packages kept in step with the imports silently, and
+the versions frozen.  Since 2026-10-22 the developer's `prog.py` is not
+edited (`EDIT_PROGRAM` off; whether it is never edited is undecided, so
+the editing code and its `@editing` tests stay, switched on by
+`EZPKG_EDIT_PROGRAM=on`, tests only).  What `ezpkg` works out (entries
+for imports Part 1 lacks, `checksums`, `exclude-newer`, `released`)
+is the program's stash in its `~/.ezpkg/develop/` record
+(`EZPkg.stash`), seeded from Part 1 or the newest `email` build; Part
+1's own entries and a hand-written date are read, never changed;
+`upgrade = true` in `prog.py.toml` takes the newest versions; a
+release merges the stash into a staged copy (`staged`) that its forms
+are built from.  Releases are off until `exports` in
 `prog.py.toml` names a form (the template leaves `exports = [` open
 with each form's line commented out, so each is one `#` to remove;
 Wayne, 2026-10-21: no `prog_builds/` on a first run).  Then a

@@ -3,8 +3,10 @@
 
 A developer's `checksums` hold only what arrived on the developer's own
 computer, so a package that another computer alone needs, as `tqdm`
-needs `colorama` on Windows, is refused there.  The `email` release
-adds those packages (`T.ee`).  This shows both halves:
+needs `colorama` on Windows, would be refused there.  The `email`
+release adds those packages (`T.ee`).  The developer's `prog.py` is
+never edited (Wayne, 2026-10-22): the `checksums` are kept in
+`~/.ezpkg`, and only the releases carry them.  This shows both halves:
 
 * `./email_check.py build DIR`: as a developer on this computer, writes
   `prog.py` (the Quick Start's Parts 1-3, needing `tqdm`) and an empty
@@ -14,15 +16,13 @@ adds those packages (`T.ee`).  This shows both halves:
   `exports` entries, the next run must build release 1.0.0 into
   `prog_builds/1.0.0/`, write `prog.py.release` and run the program;
   the run after that must build nothing.  It leaves
-  `DIR/out/prog.py`, `DIR/out/prog-1.0.0.py` and
-  `DIR/out/prog-1.0.0.pyz`.  The runs pass over any installed `uv`
-  (`EZPKG_UV=fetch`), so `ezpkg` must fetch the `uv` wheel for this
-  computer, and both releases must carry `colorama`, which only
-  Windows needs.
+  `DIR/out/prog-1.0.0.py` and `DIR/out/prog-1.0.0.pyz`.  The runs
+  pass over any installed `uv` (`EZPKG_UV=fetch`), so `ezpkg` must
+  fetch the `uv` wheel for this computer; `prog.py` must be as it was
+  written; and both releases must carry `colorama`, which only Windows
+  needs.
 * `./email_check.py friend DIR OUT`: as a new end user, from a fresh
-  home each, runs the three files from `OUT`.  On Windows `prog.py`
-  must be refused for `colorama` and the releases must run; elsewhere
-  all must run.
+  home each, runs the two releases from `OUT`, which must both run.
 
 Each run uses this tree's `ezpkg.py`, as `~/.ezpkg/ezpkg.whl` where the
 bootstrap keeps it, and everything else from pypi.org.  `CI` is set, so
@@ -166,18 +166,17 @@ def build(directory: pathlib.Path) -> int:
     # both releases have it everywhere.
     out: pathlib.Path = directory / "out"
     out.mkdir()
-    shutil.copy2(program, out / "prog.py")
     shutil.copy2(copy, out / "prog-1.0.0.py")
     shutil.copy2(archive, out / "prog-1.0.0.pyz")
-    own: bool = "colorama==" in program.read_text(encoding="utf-8")
+    own: bool = "checksums" in program.read_text(encoding="utf-8")
     sent: bool = "colorama==" in copy.read_text(encoding="utf-8")
     with zipfile.ZipFile(archive) as opened:
         zipped: bool = "colorama/__init__.py" in opened.namelist()
-    print(f"colorama approved by prog.py: {own}; by prog-1.0.0.py: "
-          f"{sent}; inside prog-1.0.0.pyz: {zipped}")
-    if own != (os.name == "nt") or not sent or not zipped:
-        print("FAIL: expected colorama in both releases, and in prog.py "
-              "on Windows only")
+    print(f"checksums in prog.py: {own}; colorama approved by "
+          f"prog-1.0.0.py: {sent}; inside prog-1.0.0.pyz: {zipped}")
+    if own or not sent or not zipped:
+        print("FAIL: expected colorama in both releases, and prog.py "
+              "unedited")
         return 1
     print("OK: built")
     return 0
@@ -195,11 +194,10 @@ def friend(directory: pathlib.Path, out: pathlib.Path) -> int:
     Returns:
     * (`int`): The exit status.
     """
-    # On Windows the developer's own copy should be refused.
-    windows: bool = os.name == "nt"
+    # Each release, from a fresh home.
     failures: list[str] = []
     name: str
-    for name in ("prog.py", "prog-1.0.0.py", "prog-1.0.0.pyz"):
+    for name in ("prog-1.0.0.py", "prog-1.0.0.pyz"):
         stem: str = name.replace(".", "_")
         sent: pathlib.Path = directory / stem / name
         sent.parent.mkdir(parents=True)
@@ -211,23 +209,14 @@ def friend(directory: pathlib.Path, out: pathlib.Path) -> int:
         if failure.is_file():
             print(f"last_failure.txt:\n"
                   f"{failure.read_text(encoding='utf-8')}")
-        refused: bool = windows and name == "prog.py"
-        if refused:
-            reason: str = (failure.read_text(encoding="utf-8")
-                           if failure.is_file() else "")
-            if done.returncode == 0 or "colorama" not in (
-                    reason + done.stderr):
-                failures.append(f"{name}: expected a refusal naming "
-                                f"colorama")
-        elif done.returncode or "tqdm " not in done.stdout:
+        if done.returncode or "tqdm " not in done.stdout:
             failures.append(f"{name}: expected it to run")
 
     # One line each way.
     for line in failures:
         print(f"FAIL: {line}")
     if not failures:
-        print("OK: " + ("prog.py refused, the releases ran" if windows
-                        else "all three ran"))
+        print("OK: both releases ran")
     return 1 if failures else 0
 
 
