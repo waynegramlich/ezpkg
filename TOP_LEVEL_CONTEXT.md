@@ -161,7 +161,8 @@ program, ever, and the program is never edited.  `prog.ezpkg`,
 * Coverage: `./ezpkg_coverage.py --children DIR` (about 23 minutes,
   in the background, scratch `HOME`) annotates into `DIR` and lists the
   unrun lines not marked `# pragma: no cover` in `DIR/missing.txt`.
-  Keep pragmas few (Wayne).  `ezpkg.py` was 97% on 2026-10-22.
+  Keep pragmas few (Wayne).  `ezpkg.py` was 97% on 2026-10-22, 80
+  lines unrun, mostly Windows-only, timeout and `EDIT_PROGRAM` paths.
 * Tests of the old Part 1 editing are marked `@editing`
   (`EZPKG_EDIT_PROGRAM=on`); `run_as_developer` edits too, so end-user
   tests find approvals in Part 1.

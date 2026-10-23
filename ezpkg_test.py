@@ -71,6 +71,7 @@ import threading
 import time
 import tomllib
 import trace
+import types
 import unittest
 import unittest.mock
 import urllib.error
@@ -8455,6 +8456,9 @@ class MetadataTest(unittest.TestCase):
         self.assertEqual(ezpkg.with_requires_python(
             'requires-python = ">=3.11"\ndependencies = []', ">=3.13"),
             'requires-python = ">=3.13"\ndependencies = []')
+        self.assertIsNone(ezpkg.with_requires_python("dependencies = [", ">=3.12"))
+        self.assertIsNone(ezpkg.with_requires_python(
+            'requires-python = [\n  ">=3.11",\n]', ">=3.12"))
 
     def test_settings_dependencies_join_part_1s(self) -> None:
         """`dependencies` in `prog.py.toml` follows Part 1's, which win."""
@@ -8517,6 +8521,32 @@ class MetadataTest(unittest.TestCase):
                 self.assertIn("`prog.py` needed `socks`, so `ezpkg` added "
                               "`PySocks`", told.getvalue())
 
+                # Who wanted it, from the traceback: a library's frame.
+                def get() -> None:
+                    raise ModuleNotFoundError("x", name="socks")
+
+                inside: Callable[[], None] = types.FunctionType(
+                    get.__code__, {"__name__": "requests.adapters",
+                                   "ModuleNotFoundError": ModuleNotFoundError})
+                try:
+                    inside()
+                except ModuleNotFoundError as raised:
+                    stashed["dependencies"] = ["cowsay"]
+                    told.truncate(0)
+                    self.assertTrue(venv.add_missing(
+                        program, raised, raised.__traceback__))
+                self.assertIn("`requests` needed `socks`", told.getvalue())
+
+                # No package to be had: said, and the traceback follows.
+                proved.return_value = "PyPI has none called `socks`"
+                told.truncate(0)
+                self.assertFalse(venv.add_missing(program, error, None))
+                self.assertIn("`prog.py` stopped for want of `socks`, and no "
+                              "package for it was added: PyPI has none "
+                              "called `socks`.",
+                              " ".join(told.getvalue().split()))
+                proved.return_value = ""
+
                 # Not for an import the source makes, the standard
                 # library, a declared package, or another error.
                 for module in ("importlib", "json"):
@@ -8526,7 +8556,7 @@ class MetadataTest(unittest.TestCase):
                     program, ModuleNotFoundError("", name="cowsay"), None))
                 self.assertFalse(venv.add_missing(
                     program, ValueError("socks"), None))
-                self.assertEqual(put.call_count, 1)
+                self.assertEqual(put.call_count, 2)
 
     def test_a_release_lists_its_warnings(self) -> None:
         """Drops and a release's own warnings go in its entry, once.
@@ -8582,6 +8612,59 @@ class MetadataTest(unittest.TestCase):
             "# /// script\n# dependencies = [\n#   \"b\",\n"
             '#   "a",  # Needed by the build\n'
             '#   "c",  # Needed, but not imported\n# ]\n# ///\n'))
+
+    def test_a_guarded_import_is_added_with_its_marker(self) -> None:
+        """An import only Windows makes needs its package only there."""
+        # `win32api` is on no Linux; its package comes from the known names.
+        with tempfile.TemporaryDirectory() as scratch:
+            program: Path = Path(scratch) / "prog.py"
+            text: str = ('import sys\nif sys.platform == "win32":\n'
+                         "    import win32api\n")
+            program.write_text(text)
+            venv: ezpkg.EZPkg = ezpkg.EZPkg(Path(scratch) / "cache")
+            with (unittest.mock.patch.object(
+                      ezpkg.EZPkg, "stashing", return_value=False),
+                  unittest.mock.patch.object(
+                      ezpkg.EZPkg, "approved", return_value=None),
+                  unittest.mock.patch.object(
+                      importlib.util, "find_spec", return_value=None)):
+                found: ezpkg.Discrepancy | None = venv.discrepancy(
+                    program, text, [])
+            assert found is not None
+            self.assertEqual(found.additions, [
+                (3, "win32api", "pywin32; sys_platform == 'win32'")])
+            self.assertIn("pywin32; sys_platform == 'win32'", found.guessed)
+
+    def test_a_failed_release_says_its_warnings(self) -> None:
+        """Nothing records a failed release's warnings, so they are said."""
+        # A release whose staging fails after one warning.
+        with tempfile.TemporaryDirectory() as scratch:
+            program: Path = Path(scratch) / "prog.py"
+            program.write_text("print('ran')\n")
+            venv: ezpkg.EZPkg = ezpkg.EZPkg(Path(scratch) / "cache")
+
+            def failing(asking: Sequence[str]) -> tuple[str, str, bool]:
+                assert venv.warnings is not None
+                venv.warnings.append("A warning.")
+                raise RuntimeError("no copy")
+
+            told: io.StringIO = io.StringIO()
+            with (unittest.mock.patch.object(
+                      ezpkg, "main_path", return_value=program),
+                  unittest.mock.patch.object(
+                      ezpkg.EZPkg, "stashing", return_value=True),
+                  unittest.mock.patch.object(
+                      ezpkg.EZPkg, "verbosity", return_value=1),
+                  unittest.mock.patch.object(
+                      ezpkg.EZPkg, "staged", side_effect=failing),
+                  contextlib.redirect_stderr(told)):
+                self.assertFalse(venv.release(
+                    ezpkg.Settings(release="1.0.0", exports=("email",)),
+                    [], [], "1.0.0"))
+            said: str = " ".join(told.getvalue().split())
+            self.assertIn("A warning. `prog.py.toml`: `prog.py` 1.0.0 was "
+                          "not released: no copy.", said)
+            self.assertIsNone(venv.warnings)
 
     def test_a_gone_pin_is_recognised_in_a_conflict(self) -> None:
         """A locked version gone shows as a conflict, not a missing one.
@@ -8668,6 +8751,19 @@ class MetadataTest(unittest.TestCase):
                  '"email", "zipapp" or "uv", each at most once')),
                 ("verbosity = \n", ("prog.py.toml: Invalid value (at line 1, "
                  "column 13)")),
+                (('dependencies = ["numpy>=2", "pywin32; os_name == \'nt\'"]\n'
+                  'requires-python = ">=3.12"\n'),
+                 ezpkg.Settings(dependencies=(
+                     "numpy>=2", "pywin32; os_name == 'nt'"),
+                     requires_python=">=3.12")),
+                ('dependencies = [">=2"]\n',
+                 ('`prog.py.toml` line 1, `dependencies = [">=2"]`: '
+                  '`dependencies` must be a list of requirements in quotes, '
+                  'such as "numpy>=2"')),
+                ('requires-python = "3.12"\n',
+                 ('`prog.py.toml` line 1, `requires-python = "3.12"`: '
+                  '`requires-python` must be a Python version range in '
+                  'quotes, such as ">=3.11"')),
             ]
             text: str
             expected: str | ezpkg.Settings

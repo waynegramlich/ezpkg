@@ -2,12 +2,12 @@
 
 Earlier entries are in `History.md`.
 
-## 2026-10-19: State (condensed)
+## 2026-10-22: State (condensed)
 
 * `Details.md` holds the release procedure; it works end to end on
-  test.pypi.org.  Newest upload `0.0.1.dev202610200048` (the day's
-  last commit: developer messages, README skeleton), `release_check`
-  and `check.yml` run 39349884759 (25 jobs) passed.
+  test.pypi.org.  Newest upload `0.0.1.dev202610222321` (from
+  `b116d02`): `release_check` passed, `check.yml` 39871377247 25/25,
+  `email_check.yml` 39871177436 13/13.
 * Rehearsal, as Claude runs it in the background (about 6 minutes):
   `git push github main`; `gh workflow run release.yml -f
   target=testpypi`; approve via `gh api -X POST
@@ -20,14 +20,15 @@ Earlier entries are in `History.md`.
 * `v0.N.M` versions are disposable: a bad one is followed by the next
   number, never repaired.  The tag comes after the test.pypi.org
   rehearsal, since a pushed tag should never move.
-* Before `T.utpat`: `I.wmau` and `I.ffspo` closed; Wayne sets up the
-  `pypi` environment, the `v*` tag ruleset and the pypi.org pending
-  publisher.  `release.yml` calling `check.yml` (from `T.gar`) is
-  listed in `T.utpat`.
-* Open children: `T.wrw`, `T.towam` (`T.fwrm`), `T.abfd`, `T.ept`;
-  then `T.utpat`.  `T.kdaiis`, `T.reb`, `T.eui` closed 2026-10-19.
-  README (tomorrow) gates the pypi.org setup (Wayne: a bad release
-  would embarrass him).
+* Open children: `T.rsbr` (Wayne's README sweep, 2026-10-23), then
+  `T.utpat`, the last task.  Closed 2026-10-22: `T.wrw`, `T.towam`,
+  `T.fwrm`, `T.abfd`, `T.ept`, `T.ee`; and every issue (`I.wmau`,
+  `I.ffspo`, `I.htdwcp`).  No issue is open.
+* For `T.utpat`, carried from `T.wrw`: Wayne sets up the `pypi`
+  environment (tags `v*` only), the `v*` tag ruleset and the pypi.org
+  pending publisher; Claude makes `release.yml` call `check.yml` after
+  `publish`, and the Quick Start's `ezpkg>=0.0.1.dev0,<0.1` entry fits
+  the real version.  The `pypi` path of `release.yml` has never run.
 * `PyPI_Via_GitHub.md` (top level, git-ignored) is the reusable
   write-up; bring it up to date when the `pypi` half works.
 * Commits carry `Assisted-by: Claude Code:claude-opus-5-5` from

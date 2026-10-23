@@ -12,6 +12,8 @@ developer writes no Part 1, and a release writes one (with a worked-out
 adds its package; `dependencies` and `requires-python` settings;
 warnings in the release entry; messages name the `prog.py.toml` line
 that caused them; `cull` uses 30 days and `list.py` lists the cache.
-Left for later: a coverage pass, and warning at release when a
+Coverage, end of day: `ezpkg.py` 97%, 80 lines unrun (none marked;
+mostly Windows-only, timeout and `EDIT_PROGRAM` paths), 353 tests.
+Left for later: warning at release when a
 compiled package lacks a wheel for a computer `requires-python` admits.
 Related: `T.abfd`, `T.ept`, `I.htdwcp`.

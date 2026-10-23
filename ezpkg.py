@@ -8575,7 +8575,7 @@ class EZPkg:
             return False
         problem: str = self.prove(package, top)
         if problem:
-            self.say(1, f"`{program.name}` stopped for want of `{top}`, "
+            self.say(0, f"`{program.name}` stopped for want of `{top}`, "
                      f"and no package for it was added: {problem}.")
             return False
 
