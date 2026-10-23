@@ -5,6 +5,15 @@
 These items are only listed by tag and title; `ai_contexts TAG
 show` shows the rest.
 
+- `T.cbc` Create the bootstrap code
+- `T.mpaps` Master `pip` and package servers
+- `T.cltnf` Convert the logbook to the new format
+- `T.rps` A real package server
+- `I.apiia` An already-importable package is installed anyway
+- `I.wscdl` Where should the cache directory live?
+- `I.spinu` The stashed `pip` is never updated
+- `I.fpfipe` A failed `pip` fetch is poorly explained
+- `I.hmmdrpe` How many machines does requiring `pip` exclude?
 - `I.wtmifs` The wheel tag matcher is a five-line stand-in
 - `I.vedih` The venv executable directory is hard-coded
 - `I.pfaibne` `.pth` files are installed but never executed

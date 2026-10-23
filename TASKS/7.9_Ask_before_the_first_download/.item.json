@@ -1,7 +1,7 @@
 {
-  "state": "Open",
+  "state": "Closed",
   "created": "2026-10-17T01:46:32Z",
-  "updated": "2026-10-17T14:23:32Z",
+  "updated": "2026-10-23T01:32:37Z",
   "history": [
     {
       "state": "Pending",
@@ -10,6 +10,10 @@
     {
       "state": "Open",
       "time": "2026-10-17T14:23:32Z"
+    },
+    {
+      "state": "Closed",
+      "time": "2026-10-23T01:32:37Z"
     }
   ],
   "tag": "abfd"

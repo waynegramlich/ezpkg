@@ -2799,16 +2799,33 @@ def unavailable(text: str, pinned: Mapping[str, str]) -> tuple[str, str]:
       and `"gone"` or `"no wheel"`; or two empty strings when it is
       neither, or cannot be told.
     """
-    # `pip`'s own line names the requirement and what it found.
+    # `pip`'s own line names the requirement and what it found.  With
+    # the approvals as a lock, a pinned version that is gone is instead
+    # a conflict between the entry and its pin, `Cannot install X
+    # because ...` (seen 2026-10-22, `pip` 26.2.2), with no list.
     found: re.Match[str] | None = re.search(
         r"Could not find a version that satisfies the requirement "
         r"(\S+) \(from versions: ([^)]*)\)", text)
-    if found is None:
+    clashing: re.Match[str] | None = re.search(
+        r"Cannot install (.+?) because these package versions have "
+        r"conflicting dependencies", text)
+    requirement: str
+    listed: list[str]
+    if found is not None:
+        requirement = found.group(1)
+        listed = [one.strip() for one in found.group(2).split(",")
+                  if one.strip() and one.strip() != "none"]
+    elif clashing is not None:
+        requirement = next((
+            one for one in re.split(r",\s*|\s+and\s+", clashing.group(1))
+            if normal_name(requirement_name(one)) in pinned), "")
+        listed = []
+        if not requirement:
+            return "", ""
+    else:
         return "", ""
-    name: str = requirement_name(found.group(1))
-    listed: list[str] = [one.strip() for one in found.group(2).split(",")
-                         if one.strip() and one.strip() != "none"]
-    version: str = (found.group(1).partition("==")[2]
+    name: str = requirement_name(requirement)
+    version: str = (requirement.partition("==")[2]
                     or pinned.get(normal_name(name), ""))
     files: list[str] | None = index_files(name)
     if files is None:
@@ -7599,10 +7616,10 @@ class EZPkg:
             # On a line of its own, so `failure_reason` keeps `pip`'s
             # `ERROR:` line apart from this guess (`ux` step 2.9).
             stale: str = (
-                f"\nIf `dependencies` changed, the versions locked in "
-                f"Part 1 of {program_name()} may be the conflict: to "
-                f"upgrade them, delete the `exclude-newer` line in Part 1 "
-                f"and run the program again." if constraints else "")
+                f"\nIf `dependencies` changed, the versions locked for "
+                f"{program_name()} may be the conflict: to take today's, "
+                f"set `upgrade = true` in `{program_name()}.toml` and run "
+                f"the program again." if constraints else "")
             raise RuntimeError(
                 f"could not fetch {', '.join(requirements)} into "
                 f"{holding}: "

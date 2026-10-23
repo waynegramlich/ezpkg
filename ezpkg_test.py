@@ -3561,7 +3561,8 @@ class InstallTest(unittest.TestCase):
         done: subprocess.CompletedProcess[str] = self.run_program(program)
         self.assertNotEqual(done.returncode, 0)
         self.assertIn("may be the conflict", done.stderr)
-        self.assertIn("Part 1 of prog.py", done.stderr)
+        self.assertIn("set `upgrade = true` in `prog.py.toml`",
+                      " ".join(done.stderr.split()))
 
     @editing
     def test_the_developer_stamps_the_date_into_the_block(self) -> None:
@@ -8581,6 +8582,28 @@ class MetadataTest(unittest.TestCase):
             "# /// script\n# dependencies = [\n#   \"b\",\n"
             '#   "a",  # Needed by the build\n'
             '#   "c",  # Needed, but not imported\n# ]\n# ///\n'))
+
+    def test_a_gone_pin_is_recognised_in_a_conflict(self) -> None:
+        """A locked version gone shows as a conflict, not a missing one.
+
+        With the approvals as a lock, `pip` reports the entry and its
+        pin as conflicting (`I.ffspo`, case 2, seen 2026-10-22).
+        """
+        # The pin is not on the index; then it is, without a wheel here.
+        text: str = (
+            "ERROR: Cannot install cowsay because these package versions "
+            "have conflicting dependencies.\nERROR: ResolutionImpossible")
+        with unittest.mock.patch.object(
+                ezpkg, "index_files",
+                return_value=["cowsay-6.1-py2.py3-none-any.whl"]):
+            self.assertEqual(ezpkg.unavailable(text, {"cowsay": "6.0.99"}),
+                             ("cowsay 6.0.99", "gone"))
+            self.assertEqual(ezpkg.unavailable(text, {}), ("", ""))
+        with unittest.mock.patch.object(
+                ezpkg, "index_files",
+                return_value=["cowsay-6.0.99-cp312-win_amd64.whl"]):
+            self.assertEqual(ezpkg.unavailable(text, {"cowsay": "6.0.99"}),
+                             ("cowsay 6.0.99", "no wheel"))
 
     def test_a_message_names_the_line_that_caused_it(self) -> None:
         """A key's line, an entry's line, its comment dropped."""

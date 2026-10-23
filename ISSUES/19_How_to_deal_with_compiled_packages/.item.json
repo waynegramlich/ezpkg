@@ -1,11 +1,15 @@
 {
-  "state": "Pending",
+  "state": "Closed",
   "created": "2026-10-12T04:36:14Z",
-  "updated": "2026-10-12T04:36:14Z",
+  "updated": "2026-10-23T01:32:37Z",
   "history": [
     {
       "state": "Pending",
       "time": "2026-10-12T04:36:14Z"
+    },
+    {
+      "state": "Closed",
+      "time": "2026-10-23T01:32:37Z"
     }
   ],
   "tag": "htdwcp"

@@ -44,3 +44,24 @@
 * Tests: `test_an_end_users_failed_fetch_is_one_plain_line` (cases
   1-4, `index_files` mocked), `test_only_the_real_cache_fetches_its_own_pip`.
   Cases 2, 3 and 5 are not yet seen end to end.
+
+## 2026-10-22: Every case seen end to end
+
+* Against real pypi.org, as an end user (fresh `HOME`, project on
+  `PYTHONPATH`, no `prog.py.toml`):
+  * Case 2: Part 1's `checksums` locking `cowsay==6.0.99`.  First run
+    showed `pip`'s `ResolutionImpossible`: with the lock, `pip` says
+    `Cannot install cowsay because these package versions have
+    conflicting dependencies`, not `Could not find a version`.
+    `unavailable` now reads that form too (test
+    `test_a_gone_pin_is_recognised_in_a_conflict`); the line is then
+    "`prog.py` needs cowsay 6.0.99, which PyPI (https://pypi.org) no
+    longer offers, ...".
+  * Case 3: `"pywin32"` with no marker on Linux: "`prog.py` needs
+    pywin32, which has no version for this computer (Python 3.12 on
+    Linux x86_64), ...", first time.
+  * Case 5: every scratch trial of the day (project on `PYTHONPATH`,
+    fresh home) ended with `~/.ezpkg/pip.whl`, fetched by `own_pip`.
+* Both write `last_failure.txt` (date, program, `ezpkg`, Python, then
+  `pip`'s text).  Its lock hint said to delete `exclude-newer` in Part
+  1; now `upgrade = true` in `prog.py.toml`.

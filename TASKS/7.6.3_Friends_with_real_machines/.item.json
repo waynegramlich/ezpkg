@@ -1,11 +1,15 @@
 {
-  "state": "Pending",
+  "state": "Closed",
   "created": "2026-10-16T18:31:36Z",
-  "updated": "2026-10-16T18:31:36Z",
+  "updated": "2026-10-23T01:36:28Z",
   "history": [
     {
       "state": "Pending",
       "time": "2026-10-16T18:31:36Z"
+    },
+    {
+      "state": "Closed",
+      "time": "2026-10-23T01:36:28Z"
     }
   ],
   "tag": "fwrm"

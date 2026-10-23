@@ -1,11 +1,15 @@
 {
-  "state": "Pending",
+  "state": "Closed",
   "created": "2026-09-22T12:00:00Z",
-  "updated": "2026-09-22T12:00:00Z",
+  "updated": "2026-10-23T01:32:37Z",
   "history": [
     {
       "state": "Pending",
       "time": "2026-09-22T12:00:00Z"
+    },
+    {
+      "state": "Closed",
+      "time": "2026-10-23T01:32:37Z"
     }
   ],
   "tag": "wmau",

@@ -1,7 +1,7 @@
 {
-  "state": "Open",
+  "state": "Closed",
   "created": "2026-10-13T18:53:01Z",
-  "updated": "2026-10-15T02:54:22Z",
+  "updated": "2026-10-23T02:12:54Z",
   "history": [
     {
       "state": "Pending",
@@ -10,6 +10,10 @@
     {
       "state": "Open",
       "time": "2026-10-15T02:54:22Z"
+    },
+    {
+      "state": "Closed",
+      "time": "2026-10-23T02:12:54Z"
     }
   ],
   "tag": "wrw"

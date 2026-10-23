@@ -1,4 +1,4 @@
-# 7.11 Print the 2FA recovery codes
+# 7.10 Print the 2FA recovery codes
 
 Print the 2FA recovery codes for github.com, test.pypi.org and
 pypi.org (saved offline in `T.suh2`) once the printer works again, and

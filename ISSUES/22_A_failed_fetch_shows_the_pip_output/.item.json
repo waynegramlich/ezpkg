@@ -1,7 +1,7 @@
 {
-  "state": "Open",
+  "state": "Closed",
   "created": "2026-10-17T21:04:45Z",
-  "updated": "2026-10-17T21:05:00Z",
+  "updated": "2026-10-23T02:11:32Z",
   "history": [
     {
       "state": "Pending",
@@ -10,6 +10,10 @@
     {
       "state": "Open",
       "time": "2026-10-17T21:05:00Z"
+    },
+    {
+      "state": "Closed",
+      "time": "2026-10-23T02:11:32Z"
     }
   ],
   "tag": "ffspo",
