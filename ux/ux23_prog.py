@@ -1,28 +1,9 @@
 #!/usr/bin/env python3
-# Part 1: The packages this program needs.
-# /// script
-# requires-python = ">=3.11"
-# dependencies = [
-#   "ezpkg>=0.0.1.dev0,<0.1",
-#   "cowsay",
-#   "tabulate",
-#   "humanize>=4.16.0,<5",
-# ]
-#
-# [tool.ezpkg]
-# approved = [
-#   "cowsay==6.1  id:274b1e6fc1b966d5",
-#   "ezpkg==0.0.1  id:18d1bca9844fcd54",
-#   "humanize==4.16.0  id:353eb2f34c09d098",
-#   "tabulate==0.10.0  id:f0b0622e567335c8",
-# ]
-#
-# [tool.uv]
-# exclude-newer = "2026-10-20T00:23:40Z"
-# ///
 """Try `EZPkg`: fetch the `cowsay` package on first use, then run."""
 
-# Part 2: EZPkg required imports are immediately below.
+# Part 2: The EZPkg bootstrap.  Paste all of it, `# Begin` to `# End`,
+# below your docstring and any `from __future__` lines.
+# Begin the EZPkg bootstrap.  Never edit it.
 import hashlib
 import importlib
 import json
@@ -31,49 +12,41 @@ import subprocess
 import sys
 import urllib.request as req
 
-# All other imports are added after the EZPkg bootstrap.
-
-# Part 3: The EZPkg bootstrap.  Never edit it.
 try:  # Do not edit try block!  See https://pypi.org/project/ezpkg/
-    s = "find home"; t = pathlib.Path.home()/".ezpkg"; w = t/"pip.whl"
-    m = n = None
+    s = "find ezpkg"; t = pathlib.Path.home()/".ezpkg"; w = t/"ezpkg.whl"
     def g(u):  # Fetch u, with curl if this Python has no certificates.
         try: return req.urlopen(u, None, 60).read()
         except req.URLError as y: z = y  # As on python.org's macOS Python.
         try: return subprocess.run(["curl", "-fsSL", u],
                                    capture_output=True, check=True).stdout
         except Exception: raise z from None
-    try: m = importlib.import_module("ezpkg")  # Already importable?
+    try: m = None; m = importlib.import_module("ezpkg")  # Already importable?
     except ImportError: pass
-    if m is None and not (t/"ezpkg").is_dir():  # Not installed yet.
-        s = "choose pip"; v = sys.version_info[1]
-        d = json.loads(g("https://pypi.org/pypi/pip/json"))
-        e = max((e for f in d["releases"].values() for e in f  # Newest pip ...
-                 if e["url"][-4:] == ".whl" and not e["yanked"]
-                 and (q := e["requires_python"] or "")[:4] == ">=3."
-                 and "," not in q and int(q.split(".")[1]) <= v),
-                key=lambda e: e["upload_time"])  # ... whose floor we meet.
-        s = "download pip"; r = g(e["url"])
+    if m is None and not w.is_file():  # Not downloaded yet.
+        s = "download ezpkg"; d = g("https://pypi.org/pypi/ezpkg/json")
+        e = next(e for e in json.loads(d)["urls"] if e["url"][-4:] == ".whl")
+        r = g(e["url"])
         if hashlib.sha256(r).hexdigest() != e["digests"]["sha256"]:
             raise ValueError(f"{e['filename']} fails its SHA-256 check")
-        t.mkdir(parents=True, exist_ok=True); p = t/"pip.part"
+        t.mkdir(parents=True, exist_ok=True); p = t/"ezpkg.part"
         p.write_bytes(r); p.replace(w)  # The rename is atomic.
-        s = "install ezpkg"; n = subprocess.run([sys.executable, w/"pip",
-            "install", "--no-input", "-t", t, "--disable-pip-version-check",
-            "ezpkg"], check=False, capture_output=True, text=True)
-        if n.returncode: raise RuntimeError(n.stderr.strip()[-300:])
-    if m is None:
-        s = "import ezpkg"; sys.path.insert(0, str(t))
-        importlib.invalidate_caches(); m = importlib.import_module("ezpkg")
-    s = "fetch packages"; m.EZPkg(pip=n).install(bootstrap="nopip7")
+    if m is None:  # Python imports it straight from the wheel.
+        s = "import ezpkg"; sys.path.insert(0, str(w))
+        m = importlib.import_module("ezpkg")
+    s = "fetch packages"; m.EZPkg().install(bootstrap="nopip8")
 except Exception as x:
     raise SystemExit(f"ezpkg: {s} failed: {x!r}")  # Do not edit try block!
+# End the EZPkg bootstrap.  Your imports go below it.
 
-# Part 4: Your imports, all after the bootstrap.
+# Part 3: Your imports, all after the bootstrap.
 import cowsay  # type: ignore[import-not-found]  # For mypy.
 import tabulate
-import humanize  # type: ignore[import-not-found]  # For mypy.
+import humanize
 
-# Part 5: The program itself.
+import sys
+if sys.platform == "win32":
+    import win32api  # Windows only.
+
+# Part 4: The program itself.
 cowsay.cow("EZPkg works!")
 print(f"The cow above was drawn by cowsay {cowsay.__version__}.")

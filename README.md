@@ -290,9 +290,10 @@ it with the following, which explains every setting:
 # last one released builds that release, in place of the last one's
 # files, and then runs the program as usual.  Each release checks the
 # imports and the bootstrap, and gives each package without a version
-# a range.  Anything worth a second look, such as a package name EZPkg
-# had to guess, is listed under `warnings` in the release's entry in
-# PROG_NAME.py.releases, and the release's one line says how many.
+# a range.  Anything worth a second look, such as a package dropped
+# because nothing imports it any more, is listed under `warnings` in the
+# release's entry in PROG_NAME.py.releases, and the release's one line
+# says how many.
 exports = [  # Remove the `#`s of the forms each release builds.
 #   "email",   # PROG_NAME-VERSION.py, to send; for every computer.
 #   "zipapp",  # PROG_NAME-VERSION.pyz, no network; pure Python only.

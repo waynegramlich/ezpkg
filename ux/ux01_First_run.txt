@@ -1,6 +1,6 @@
 1.1 First run
 A stranger's first run, answered y: the packages listed, then the cow.
-prog.py: `ux01_prog.py`, left unchanged by `ezpkg`.
+prog.py: `ux01_prog.py`.
 -------------------------------------------------------------------------------
 The author of `prog.py` has selected some software packages from the internet.
 If you agree, they are retained in `~/.ezpkg`.  If you do not trust the author,
@@ -9,10 +9,11 @@ answer `n` and `~/.ezpkg` will simply go away without running `prog.py`.
 Retain `~/.ezpkg` and run `prog.py`?
 [y=>Yes|n=>No|?=>Explain]: y
 The following 3 package(s) are now retained in `~/.ezpkg`:
-1. pip 26.2.1 (used by `ezpkg`): The PyPA recommended tool for installing Py...
+1. pip 26.2.2 (used by `ezpkg`): The PyPA recommended tool for installing Py...
 2. ezpkg 0.0.1: Automatic Package Fetching for One-File Programs
 3. cowsay 6.1: The famous cowsay for GNU/Linux is now available for python
-`ezpkg` (https://pypi.org/project/ezpkg/) manages `~/.ezpkg`.
+`ezpkg` (https://pypi.org/project/ezpkg/) manages `~/.ezpkg`; its `list.py`
+says what is there.
 
   ____________
 | EZPkg works! |

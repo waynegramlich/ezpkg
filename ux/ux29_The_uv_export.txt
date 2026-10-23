@@ -1,6 +1,7 @@
-2.12 The zipapp
-python3 prog-1.0.0.pyz: runs with no ~/.ezpkg at all.
-prog.py: `ux24_prog.py`, left unchanged by `ezpkg`.
+2.17 The uv export
+uv run prog-1.0.0-uv.py: uv provides everything.
+prog.py: `ux29_prog.py`.
+prog.py.toml: release = "1.0.0"; exports = ["email", "zipapp", "uv"].
 -------------------------------------------------------------------------------
   ____________
 | EZPkg works! |

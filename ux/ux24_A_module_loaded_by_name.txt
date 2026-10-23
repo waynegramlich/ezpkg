@@ -1,6 +1,7 @@
-2.4 An entry added by hand
-tabulate added to dependencies, never imported: kept, and marked.
-prog.py: `ux16_prog.py`, changed by `ezpkg` into `ux16_prog_after.py`.
+2.12 A module loaded by name
+The program loads socks by a computed name, as a plugin is: it stops, and ezpkg adds PySocks for next time.
+prog.py: `ux24_prog.py`.
+prog.py.toml: every setting at its default.
 -------------------------------------------------------------------------------
   ____________
 | EZPkg works! |
@@ -13,3 +14,5 @@ prog.py: `ux16_prog.py`, changed by `ezpkg` into `ux16_prog_after.py`.
                    ||----w |
                    ||     ||
 The cow above was drawn by cowsay 6.1.
+`prog.py` needed `socks`, so `ezpkg` added `PySocks` to `prog.py`'s packages;
+run `prog.py` again.

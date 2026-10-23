@@ -1,0 +1,16 @@
+2.11 A Windows-only import
+import win32api under if sys.platform == "win32": its package is only for Windows, so Linux skips it.
+prog.py: `ux23_prog.py`.
+prog.py.toml: every setting at its default.
+-------------------------------------------------------------------------------
+  ____________
+| EZPkg works! |
+  ============
+            \
+             \
+               ^__^
+               (oo)\_______
+               (__)\       )\/\
+                   ||----w |
+                   ||     ||
+The cow above was drawn by cowsay 6.1.

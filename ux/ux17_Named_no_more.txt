@@ -1,6 +1,7 @@
-2.5 The mark goes
-import tabulate added: the entry is explained, so its mark goes.
-prog.py: `ux17_prog.py`, changed by `ezpkg` into `ux17_prog_after.py`.
+2.5 Named no more
+dependencies = ["humanize>=4"] deleted from prog.py.toml: nothing imports humanize, so prog.py no longer declares it, silently.
+prog.py: `ux17_prog.py`.
+prog.py.toml: every setting at its default.
 -------------------------------------------------------------------------------
   ____________
 | EZPkg works! |

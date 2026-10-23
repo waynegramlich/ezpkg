@@ -46,7 +46,8 @@ needs live here instead.
   starts it).
 * `ux/drive.py [--keep] [--until STEP | --only STEP...] [--ux-dir
   DIR]`: Runs the scripted UX steps (end user 1.1-1.12, developer
-  2.1-2.13) on a pseudoterminal in a temporary copy of the Quick
+  2.1-2.17, whose program is the Quick Start without Part 1) on a
+  pseudoterminal in a temporary copy of the Quick
   Start, as a stranger's real first run: a fresh home, the bootstrap
   fetching `pip` from pypi.org and installing a wheel of the project's
   `ezpkg.py` (`PIP_FIND_LINKS`), everything else from real pypi.org.
@@ -59,9 +60,9 @@ needs live here instead.
   and commits, so `git diff ux/` after a rerun shows what is left to
   build (`T.abfd`'s `Context.md`).  A rerun overwrites them; while
   Wayne may be editing them, run with `--ux-dir` into the scratchpad
-  and copy back.  Each step also leaves `uxNN_prog.py` (as it ran) and,
-  if `ezpkg` edited it, `uxNN_prog_after.py`, named on the `.txt`'s
-  third line, so Wayne can `diff` the transitions.
+  and copy back.  Each step also leaves `uxNN_prog.py` (as it ran),
+  named on the `.txt`'s third line, so Wayne can `diff` the
+  transitions; a step fails if `ezpkg` edits `prog.py`.
   `--only 1.4` runs one step from the snapshot the step before left
   in `ux/.snapshots/` (ignored; dropped when the code changes), or
   after running the earlier steps as unrecorded setup.
@@ -79,8 +80,9 @@ needs live here instead.
 match it:
 
 * The Quick Start copy in `README.md`.  Its "Enabling `EZPkg` for a
-  Program" says to copy Parts 1-3 from `quick_start.py`, so it has no
-  copy of its own (Wayne's README, 2026-10-20).
+  Program" says to copy Part 2, the bootstrap from `# Begin` to `# End`
+  (its imports included), from `quick_start.py`, so it has no copy of
+  its own (Wayne, 2026-10-22).  A developer writes no Part 1.
 * `QUICK_START` in `ezpkg.py`.
 * The `nopip8` function in `bootstrap.py` (which spells the package name
   as `PACKAGE` and the index as `JSON_API`).
@@ -93,15 +95,32 @@ previous text kept in `OLD_BOOTSTRAP_TEXTS`.  `bootstrap.py`'s copies
 spell things as variables, so its harness sets
 `EZPKG_BOOTSTRAP=unchecked`.
 
-Part 1 of every program with a bootstrap lists `ezpkg` first (the Quick
+Part 1 of every released program lists `ezpkg` first (the Quick
 Start's is `ezpkg>=0.0.1.dev0,<0.1` until the real release), and that
-entry chooses which `ezpkg` runs it (`T.eui`).
+entry chooses which `ezpkg` runs it (`T.eui`).  A release writes Part 1
+into its copy when the program has none (`with_script_block`), with a
+`requires-python` worked out from the syntax and the packages
+(`python_range`), or the setting.
+
+`SETTINGS_TEMPLATE` in `ezpkg.py` is the authority for what an empty
+`prog.py.toml` is filled with, and `README.md`'s "`prog.py.toml`
+Settings" shows it verbatim (Claude copies it after every change; a
+test fails otherwise, or on a line over 79 columns).  It names no
+program: `PROG_NAME` is the README's word (Wayne, 2026-10-22).
 
 ## The Two Modes (`T.abfd`, 2026-10-19)
 
 A `prog.py.toml` beside `prog.py` makes it its developer's: no
 questions, the packages kept in step with the imports silently, and
-the versions frozen.  Since 2026-10-22 the developer's `prog.py` is not
+the versions frozen.  There is no `auto-dependencies` any more (Wayne,
+2026-10-22): `dependencies` in `prog.py.toml` names what the imports
+cannot (extras, exact versions), and Part 1's or its entries are never
+removed.  A platform-guarded import gets a marker (`import_markers`);
+an uncaught `ModuleNotFoundError` adds its package to the stash and
+asks for another run (`add_missing`).  Dropped entries are noted in
+the stash (`noted`; a guessed name is proved, so not noted), and the
+next release lists them, with its own warnings (`warn`), under `warnings` in its
+`prog.py.releases` entry; its one "Released" line counts them.  Since 2026-10-22 the developer's `prog.py` is not
 edited (`EDIT_PROGRAM` off; whether it is never edited is undecided, so
 the editing code and its `@editing` tests stay, switched on by
 `EZPKG_EDIT_PROGRAM=on`, tests only).  What `ezpkg` works out (entries
@@ -150,9 +169,9 @@ program, ever, and the program is never edited.  `prog.ezpkg`,
   without one.  This machine has no `~/.ezpkg`, so run the suite with
   `HOME` set to a scratch home whose `.ezpkg/pip.whl` is a current
   `pip` (`pip download pip --no-deps`).
-* `ruff check .` and `mypy .`; both check against the Python 3.11 floor.
-  `quick_start.py` draws one known `I001` (no blank line after the
-  Part 2 imports).
+* `ruff check .` and `mypy .`; both check against the Python 3.11 floor,
+  and both must pass (`release.yml` runs `ruff`; the bootstrap's
+  imports need their blank line before `try:`).
 
 ## Working With Wayne
 

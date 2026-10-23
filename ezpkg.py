@@ -988,9 +988,10 @@ SETTINGS_TEMPLATE: str = """\
 # last one released builds that release, in place of the last one's
 # files, and then runs the program as usual.  Each release checks the
 # imports and the bootstrap, and gives each package without a version
-# a range.  Anything worth a second look, such as a package name EZPkg
-# had to guess, is listed under `warnings` in the release's entry in
-# PROG_NAME.py.releases, and the release's one line says how many.
+# a range.  Anything worth a second look, such as a package dropped
+# because nothing imports it any more, is listed under `warnings` in the
+# release's entry in PROG_NAME.py.releases, and the release's one line
+# says how many.
 exports = [  # Remove the `#`s of the forms each release builds.
 #   "email",   # PROG_NAME-VERSION.py, to send; for every computer.
 #   "zipapp",  # PROG_NAME-VERSION.pyz, no network; pure Python only.
@@ -1374,6 +1375,42 @@ def setting_line(text: str, key: str) -> int:
     return 0
 
 
+def setting_place(name: str, text: str, key: str, entry: str = "") -> str:
+    """Return where a setting is, to begin a message it caused.
+
+    Such as ``prog.py.toml` line 41, `release = "1.0.0"``, so that the
+    developer never has to guess which line a message is about (Wayne,
+    2026-10-22).  For one entry of a list, such as one of
+    `dependencies`, the line that holds it.
+
+    Arguments:
+    * `name` (`str`):
+      The file's name, such as `prog.py.toml`.
+    * `text` (`str`):
+      Its text.
+    * `key` (`str`):
+      The top-level key.
+    * `entry` (`str`):
+      A string in the key's list, or empty for the key's own line.
+
+    Returns:
+    * (`str`): The place, or just the file's name when the line cannot
+      be found.
+    """
+    # The key's line, then the entry's, at or after it.
+    number: int = setting_line(text, key)
+    if not number:
+        return f"`{name}`"
+    lines: list[str] = text.splitlines()
+    if entry:
+        quoted: tuple[str, str] = (f'"{entry}"', f"'{entry}'")
+        number = next((at for at in range(number, len(lines) + 1)
+                       if any(one in lines[at - 1] for one in quoted)),
+                      number)
+    shown: str = lines[number - 1].split("  #", 1)[0].strip()
+    return f"`{name}` line {number}, `{shown}`"
+
+
 def read_settings(path: Path) -> Settings:
     """Read and check a program's `prog.py.toml`.
 
@@ -1389,8 +1426,9 @@ def read_settings(path: Path) -> Settings:
 
     Raises:
     * `ValueError`:
-      With the message for the developer, such as `prog.py.toml line 3:
-      unknown setting `relase` (did you mean `release`?)`.
+      With the message for the developer, such as ``prog.py.toml` line
+      3, `relase = "1.0.0"`: unknown setting `relase` (did you mean
+      `release`?)`.
     """
     # TOML is UTF-8, and `tomllib`'s own messages give the line.
     try:
@@ -1406,7 +1444,7 @@ def read_settings(path: Path) -> Settings:
     key: str
     value: Any
     for key, value in table.items():
-        where: str = f"{path.name} line {setting_line(text, key)}"
+        where: str = setting_place(path.name, text, key)
         if key not in known:
             near: list[str] = difflib.get_close_matches(key, list(known), 1)
             raise ValueError(
@@ -4975,8 +5013,10 @@ class EZPkg:
                 doubts.append(
                     f"`{program.name}` line {line}: `import {module}` "
                     f"needs a package, but {problem}.  Please check the "
-                    f"spelling, or add the right package to "
-                    f"`dependencies`{where} by hand.")
+                    f"spelling, or name the right package in "
+                    + (f"`dependencies` in `{program.name}.toml`."
+                       if self.stashing() else
+                       f"`dependencies`{where} by hand."))
                 self.reported.add(module)
             else:
                 modules[package] = module
@@ -4993,7 +5033,7 @@ class EZPkg:
         doubt: str
         if final == found.entries and not comment:
             for doubt in doubts:
-                self.say(1, doubt)
+                self.say(0, doubt)
             # A failed guess is tried again next run, since the network
             # may have been the reason (S3.3a).
             if not doubts:
@@ -5014,7 +5054,7 @@ class EZPkg:
         except (RuntimeError, ValueError) as error:
             self.too_new(found, modules, argv)
             for doubt in doubts:
-                self.say(1, doubt)
+                self.say(0, doubt)
             # Not recorded as settled, so the next run tries again
             # (S3.3a).
             self.say(1, f"{program.name}: `dependencies` is left as it "
@@ -5042,7 +5082,7 @@ class EZPkg:
         # and what arrived serves this run.
         if self.stashing():
             for doubt in doubts:
-                self.say(1, doubt)
+                self.say(0, doubt)
             if fetched is not None:
                 self.remember(self.request_for(self.fetching(final)),
                               *fetched)
@@ -5081,7 +5121,7 @@ class EZPkg:
         # (`first_run_note`); what arrived serves this run.
         if self.filled is not None:
             for doubt in doubts:
-                self.say(1, doubt)
+                self.say(0, doubt)
             self.adding = [ranged.get(package, package)
                            for package in modules]
             return final
@@ -5092,7 +5132,7 @@ class EZPkg:
             found, final, set(modules.values()), comment)
         if isinstance(made, str):
             for doubt in doubts:
-                self.say(1, doubt)
+                self.say(0, doubt)
             print(made, file=sys.stderr)
             return asking
         encoding: str
@@ -5105,7 +5145,7 @@ class EZPkg:
             self.edited = True
         except OSError as error:
             for doubt in doubts:
-                self.say(1, doubt)
+                self.say(0, doubt)
             self.say(1, f"{program.name}: `dependencies` is left as it is: "
                      f"{error}")
             return asking
@@ -5205,11 +5245,12 @@ class EZPkg:
         """Return the stash's notes, after `reconcile`'s changes.
 
         Things worth a second look, which the next release lists in its
-        entry in `prog.py.releases` (Wayne, 2026-10-22): each package
-        named only by guessing the import's own name (not from metadata
-        or `MODULE_PACKAGES`), while it is still the stash's, and each
-        entry dropped because nothing imports it any more.  A release
-        lists them once and clears them.
+        entry in `prog.py.releases` (Wayne, 2026-10-22): each entry
+        dropped because nothing imports it any more, until it comes
+        back.  A package added by guessing its name is not one: it was
+        proved to provide its module (`prove`), and a guess that failed
+        was said at once, so noting it would only teach people to skip
+        warnings.  A release lists the notes once and clears them.
 
         Arguments:
         * `found` (`Discrepancy`):
@@ -5220,37 +5261,45 @@ class EZPkg:
           The indexes of the entries removed.
 
         Returns:
-        * (`dict[str, str]`): The notes, by `guess:` or `dropped:` and
-          the package's `normal_name`.
+        * (`dict[str, str]`): The notes, by `dropped:` and the package's
+          `normal_name`.
         """
         # The notes as they were, then this run's changes.
         held: object = self.stash().get("notes")
         notes: dict[str, str] = dict(held) if isinstance(held, dict) else {}
-        program: Path = found.program
-        line: int
-        module: str
         package: str
-        for line, module, package in found.additions:
-            if package not in modules:
-                continue
-            name: str = requirement_name(package)
-            normal: str = normal_name(name)
-            notes.pop(f"dropped:{normal}", None)
-            if (package in found.guessed and module not in MODULE_PACKAGES
-                    and normal == normal_name(module)):
-                notes[f"guess:{normal}"] = (
-                    f"`import {module}` (line {line}) was taken to need the "
-                    f"PyPI package `{name}`; if that is wrong, name the "
-                    f"right one in `dependencies` in `{program.name}.toml`.")
+        for package in modules:
+            notes.pop(f"dropped:{normal_name(requirement_name(package))}",
+                      None)
         index: int
         for index in removed:
             entry: str = found.entries[index]
             gone: str = normal_name(requirement_name(entry))
-            notes.pop(f"guess:{gone}", None)
             notes[f"dropped:{gone}"] = (
                 f"`{entry}` was dropped from the packages, since nothing "
                 f"imports it any more.")
         return notes
+
+    def setting_at(self, key: str, entry: str = "") -> str:
+        """Return where the running program's `prog.py.toml` sets a key.
+
+        As `setting_place` says, for the start of a message that a line
+        of `prog.py.toml` caused.
+
+        Arguments:
+        * `key`, `entry` (`str`):
+          As `setting_place` takes them.
+
+        Returns:
+        * (`str`): The place, or just the file's name.
+        """
+        # The file beside the program.
+        path: Path = settings_path(main_path() or Path("prog.py"))
+        try:
+            text: str = path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            return f"`{path.name}`"
+        return setting_place(path.name, text, key, entry)
 
     def warn(self, text: str) -> None:
         """Say a release's warning, or keep it for `prog.py.releases`.
@@ -5592,8 +5641,10 @@ class EZPkg:
 
         Arguments:
         * `level` (`int`):
-          1 for a one-off notice (`low`), 2 for each change (`medium`),
-          3 for what was decided and why (`high`).
+          0 for a line saying why the program is about to stop, said
+          even at `none` (Wayne, 2026-10-22), 1 for a one-off notice
+          (`low`), 2 for each change (`medium`), 3 for what was decided
+          and why (`high`).
         * `text` (`str`):
           The text.
         * `wrap` (`bool`):
@@ -7915,10 +7966,9 @@ class EZPkg:
         carries: str = (f"`{name.split()[0]}`" if name else
                         "an edited one" if state == "edited" else "none")
         raise SystemExit(wrapped(
-            f"`{settings_path(main_path() or Path('prog.py')).name}` asks "
-            f"for the bootstrap `{wanted}`, but `{program_name()}` carries "
-            f"{carries}.  Paste in `{wanted}`, or change `bootstrap`.",
-            columns(sys.stderr)))
+            f"{self.setting_at('bootstrap')}: `{program_name()}` carries "
+            f"{carries}, not `{wanted}`.  Paste in `{wanted}`, or change "
+            f"that line.", columns(sys.stderr)))
 
     def replace_bootstrap(self) -> str:
         """Replace an older bootstrap with the current one, in place.
@@ -8015,7 +8065,8 @@ class EZPkg:
             warning: str
             for warning in self.warnings or []:
                 self.say(1, warning)
-            self.say(1, f"`{program.name}` {version} was not released: "
+            self.say(1, f"{self.setting_at('release')}: "
+                     f"`{program.name}` {version} was not released: "
                      f"{error}.  `{program.name}` runs as usual, and its "
                      f"next run tries again.")
             return False
@@ -8055,7 +8106,8 @@ class EZPkg:
                                       key=EXPORT_FORMS.index)
             if forms and find_bootstrap(
                     self.program_text(program)[0]) is None:
-                self.warn(f"`{program.name}` has no pasted bootstrap, "
+                self.warn(f"{self.setting_at('exports')}: "
+                          f"`{program.name}` has no pasted bootstrap, "
                           f"so its release builds no "
                           f"{and_list(forms, 'or')}.")
                 forms = []
@@ -8069,7 +8121,8 @@ class EZPkg:
                     # A zip cannot carry compiled code; the rest can.
                     if form != "zipapp" or "cannot bundle" not in str(error):
                         raise
-                    self.warn(f"No `{target.name}`: {error}.")
+                    self.warn(f"{self.setting_at('exports', form)}: no "
+                              f"`{target.name}`: {error}.")
 
                 # The lock `uv` wrote beside the script, if `uv` was there.
                 if form == "uv" and files[3].is_file():
@@ -8093,7 +8146,8 @@ class EZPkg:
             warning: str
             for warning in self.warnings or []:
                 self.say(1, warning)
-            self.say(1, f"`{program.name}` {version} was not released: "
+            self.say(1, f"{self.setting_at('release')}: "
+                     f"`{program.name}` {version} was not released: "
                      f"{error}.  `{program.name}` runs as usual, and its "
                      f"next run tries again.")
             return False
@@ -8118,38 +8172,32 @@ class EZPkg:
         if self.stashing():
             self.put_stash(notes={})
         names: list[str] = [f"`{one.name}`" for one in built]
-        self.say(1, f"Released `{program.name}` {version}"
+        self.say(1, f"{self.setting_at('release')}: released "
+                 f"`{program.name}` {version}"
                  + (f": {and_list(names)}" if names else "")
                  + (f", with {len(warnings)} warning(s), listed in "
                     f"`{record.name}`" if warnings else "")
-                 + f".  To make the next release, change `release` in "
-                 f"`{program.name}.toml` (to \"{next_release(version)}\", "
-                 f"say) and run `{program.name}`.")
+                 + f".  To make the next release, change that line (to "
+                 f"\"{next_release(version)}\", say) and run "
+                 f"`{program.name}`.")
         return True
 
     def release_warnings(self) -> list[str]:
         """Return what a release lists under `warnings` in its entry.
 
-        The stash's notes (`noted`), those about a guessed package only
-        while the stash still declares it, then the release's own
-        warnings (`warn`), each once.
+        The stash's notes (`noted`), then the release's own warnings
+        (`warn`), each once.
 
         Returns:
         * (`list[str]`): The warnings, perhaps none.
         """
-        # A guess stands while its package is still the stash's.
+        # The notes in a steady order, then the release's.
         stashed: dict[str, Any] = self.stash() if self.stashing() else {}
-        held: object = stashed.get("dependencies")
-        names: set[str] = {normal_name(requirement_name(entry))
-                           for entry in (held if isinstance(held, list)
-                                         else []) if isinstance(entry, str)}
         notes: object = stashed.get("notes")
         found: list[str] = [
-            note for key, note in sorted(
+            note for _, note in sorted(
                 notes.items() if isinstance(notes, dict) else ())
-            if isinstance(note, str) and (
-                not key.startswith("guess:")
-                or key.removeprefix("guess:") in names)]
+            if isinstance(note, str)]
         return list(dict.fromkeys(found + (self.warnings or [])))
 
     def range_ezpkg(self, asking: list[str]) -> list[str]:
@@ -8250,8 +8298,17 @@ class EZPkg:
                 raise SystemExit(wrapped(self.end_user_failure(error),
                                          columns(sys.stderr))) from None
             self.say(3, f"ezpkg: {error}", wrap=False)
+            settings: Settings | None = self.settings()
+            # The entry `pip` names, as `normal_name` spells names.
+            said: str = re.sub(r"[-.]", "_", str(error).lower())
+            asked: str = next((
+                entry for entry in (settings.dependencies if settings else ())
+                if re.search(r"(?<!\w)" + re.escape(normal_name(
+                    requirement_name(entry))) + r"(?!\w)", said)), "")
             raise SystemExit(wrapped(
-                f"{name_of(program_name())} did not run: "
+                (f"{self.setting_at('dependencies', asked)}: "
+                 if asked else "")
+                + f"{name_of(program_name())} did not run: "
                 f"{failure_reason(error)}"
                 + ("" if self.verbosity() >= 3 else
                    '  (`verbosity = "high"` shows all of pip\'s output.)'),
@@ -8516,16 +8573,8 @@ class EZPkg:
                 wanting = program.name
             trace = trace.tb_next
         held: object = self.stash().get("dependencies")
-        noted: object = self.stash().get("notes")
-        notes: dict[str, str] = (dict(noted) if isinstance(noted, dict)
-                                 else {})
-        if top not in MODULE_PACKAGES:
-            notes[f"guess:{normal_name(package)}"] = (
-                f"`{package}` was added because `{wanting}` needed `{top}` "
-                f"while `{program.name}` ran; if that is wrong, name the "
-                f"right one in `dependencies` in `{program.name}.toml`.")
         self.put_stash(dependencies=[
-            *(held if isinstance(held, list) else []), package], notes=notes)
+            *(held if isinstance(held, list) else []), package])
         print(wrapped(f"`{wanting}` needed `{top}`, so `ezpkg` added "
                       f"`{package}` to `{program.name}`'s packages; run "
                       f"`{program.name}` again.", columns(sys.stderr)),

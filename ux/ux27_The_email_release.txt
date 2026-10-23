@@ -1,0 +1,33 @@
+2.15 The email release
+A friend runs prog-1.0.0.py with no ~/.ezpkg: asked once, y, and it runs.
+prog.py: `ux27_prog.py`.
+prog.py.toml: release = "1.0.0"; exports = ["email", "zipapp", "uv"].
+-------------------------------------------------------------------------------
+The author of `prog-1.0.0.py` has selected some software packages from the
+internet.  If you agree, they are retained in `~/.ezpkg`.  If you do not trust
+the author, answer `n` and `~/.ezpkg` will simply go away without running
+`prog-1.0.0.py`.
+
+Retain `~/.ezpkg` and run `prog-1.0.0.py`?
+[y=>Yes|n=>No|?=>Explain]: y
+The following 6 package(s) are now retained in `~/.ezpkg`:
+1. pip 26.2.2 (used by `ezpkg`): The PyPA recommended tool for installing Py...
+2. ezpkg 0.0.1: Automatic Package Fetching for One-File Programs
+3. cowsay 6.1: The famous cowsay for GNU/Linux is now available for python
+4. humanize 4.16.0: Python humanize utilities
+5. PySocks 1.7.1: A Python SOCKS client module. See https://github.com/Anoro...
+6. tabulate 0.10.0: Pretty-print tabular data
+`ezpkg` (https://pypi.org/project/ezpkg/) manages `~/.ezpkg`; its `list.py`
+says what is there.
+
+  ____________
+| EZPkg works! |
+  ============
+            \
+             \
+               ^__^
+               (oo)\_______
+               (__)\       )\/\
+                   ||----w |
+                   ||     ||
+The cow above was drawn by cowsay 6.1.

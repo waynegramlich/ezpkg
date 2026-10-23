@@ -1,6 +1,7 @@
 2.3 An import removed
-import tabulate taken out again: its entry goes, silently.
-prog.py: `ux15_prog.py`, changed by `ezpkg` into `ux15_prog_after.py`.
+import tabulate taken out again: its package goes, silently.
+prog.py: `ux15_prog.py`.
+prog.py.toml: every setting at its default.
 -------------------------------------------------------------------------------
   ____________
 | EZPkg works! |

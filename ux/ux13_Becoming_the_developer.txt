@@ -1,9 +1,10 @@
 2.1 Becoming the developer
-touch prog.py.toml, then a first run: the file is filled in, nothing is asked, and the cow.
-prog.py: `ux13_prog.py`, changed by `ezpkg` into `ux13_prog_after.py`.
+The Quick Start without Part 1, and touch prog.py.toml: the file is filled in, nothing is asked, and the cow.
+prog.py: `ux13_prog.py`.
+prog.py.toml: empty, so EZPkg fills it in.
 -------------------------------------------------------------------------------
-`prog.py.toml` was empty, so `ezpkg` filled it with every setting, commented
-out at its default.
+`prog.py.toml` was empty, so `ezpkg` filled it in, with every setting at its
+default.
   ____________
 | EZPkg works! |
   ============

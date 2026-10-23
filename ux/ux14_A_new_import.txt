@@ -1,6 +1,7 @@
 2.2 A new import
-import tabulate added: an entry with a range, silently, then the cow.
-prog.py: `ux14_prog.py`, changed by `ezpkg` into `ux14_prog_after.py`.
+import tabulate added: it gets a package with a range, silently, then the cow.
+prog.py: `ux14_prog.py`.
+prog.py.toml: every setting at its default.
 -------------------------------------------------------------------------------
   ____________
 | EZPkg works! |

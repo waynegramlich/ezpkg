@@ -1,9 +1,9 @@
 2.7 Medium verbosity
 verbosity = "medium", the misspelling fixed and humanize imported: each change said.
-prog.py: `ux19_prog.py`, changed by `ezpkg` into `ux19_prog_after.py`.
+prog.py: `ux19_prog.py`.
+prog.py.toml: verbosity = "medium".
 -------------------------------------------------------------------------------
-Added "humanize>=4.16.0,<5" to `prog.py`'s `dependencies` (line 9), and the
-`mypy` comment to `import humanize` (line 75).
+Added humanize>=4.16.0,<5 for `prog.py`.
   ____________
 | EZPkg works! |
   ============

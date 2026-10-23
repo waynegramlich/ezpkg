@@ -1,0 +1,16 @@
+2.13 Run again
+The next run finds socks.
+prog.py: `ux25_prog.py`.
+prog.py.toml: every setting at its default.
+-------------------------------------------------------------------------------
+  ____________
+| EZPkg works! |
+  ============
+            \
+             \
+               ^__^
+               (oo)\_______
+               (__)\       )\/\
+                   ||----w |
+                   ||     ||
+The cow above was drawn by cowsay 6.1.

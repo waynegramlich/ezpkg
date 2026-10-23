@@ -1,11 +1,12 @@
 2.6 A misspelt import
 import tabluate (sic): no such package, one line, then Python's own error.
-prog.py: `ux18_prog.py`, left unchanged by `ezpkg`.
+prog.py: `ux18_prog.py`.
+prog.py.toml: every setting at its default.
 -------------------------------------------------------------------------------
-`prog.py` line 73: `import tabluate` needs a package, but PyPI has none called
-`tabluate`.  Please check the spelling, or add the right package to
-`dependencies` (lines 6-8) by hand.
+`prog.py` line 44: `import tabluate` needs a package, but PyPI has none called
+`tabluate`.  Please check the spelling, or name the right package in
+`dependencies` in `prog.py.toml`.
 Traceback (most recent call last):
-  File "/tmp/drive-.../prog.py", line 73, in <module>
+  File "/tmp/drive-.../prog.py", line 44, in <module>
     import tabluate
 ModuleNotFoundError: No module named 'tabluate'

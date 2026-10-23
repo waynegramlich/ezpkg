@@ -1,0 +1,16 @@
+2.4 A package named by hand
+dependencies = ["humanize>=4"] in prog.py.toml, never imported: kept, since the developer wrote it.
+prog.py: `ux16_prog.py`.
+prog.py.toml: dependencies = ["humanize>=4"].
+-------------------------------------------------------------------------------
+  ____________
+| EZPkg works! |
+  ============
+            \
+             \
+               ^__^
+               (oo)\_______
+               (__)\       )\/\
+                   ||----w |
+                   ||     ||
+The cow above was drawn by cowsay 6.1.

@@ -49,15 +49,52 @@ Earlier entries are in `History.md`.
 * Python floor stays 3.11 (Claude's advice: 3.10 reaches end of life
   this month; only `tomllib` needs 3.11 in `ezpkg.py`).
 
+## 2026-10-22 (afternoon): README, template, a Part 1 nobody writes
+
+* Quick Start: Parts 2 and 3 merged into one pasted block, `# Begin the
+  EZPkg bootstrap.` to `# End ...` (still `nopip8`: only the `try` is
+  fingerprinted; a blank line before `try:` keeps `ruff`'s `I001`
+  quiet, which `release.yml` enforces).  Parts now run 1-4.  README
+  "Enabling" is three steps: paste Part 2, create `PROG_NAME.py.toml`,
+  run.  A developer writes no Part 1.
+* `SETTINGS_TEMPLATE` names no program (`PROG_NAME`), is plain text,
+  and README shows it verbatim (`test_the_settings_template_is_current`,
+  79 columns).  Wayne wrote its header; the stale README text after it
+  is deleted.  `T.ept` is in effect done.
+* `auto-dependencies` removed (Wayne).  New settings, under "Rarely
+  needed": `dependencies` (joins Part 1's in `written`, never removed;
+  `part1_entries` is Part 1 alone) and `requires-python` (else
+  `python_range`: max of 3.11, `syntax_floor`, `package_floor`; no
+  warning, Wayne: one on nearly every release trains people to ignore
+  them; checking the standard library under an older Python declined).
+* A release writes Part 1 into its copy when there is none
+  (`with_script_block`, `with_requires_python` in `staged`).
+  `lock_everywhere` keeps entries nothing here fetched, so the `email`
+  copy approves `pywin32` for Windows.
+* Platform markers from plain guards (`platform_marker`,
+  `import_markers`, `marker_holds`, `holds_here`; single quotes inside
+  TOML's double).  `MODULE_PACKAGES` gained `pywin32`'s modules and
+  `socks`.  An uncaught `ModuleNotFoundError` in a developer's run adds
+  its package to the stash, one line, run again (`catch_missing`,
+  `add_missing`).
+* Warnings: dropped entries are stash `notes` (`noted`; guessed names
+  were noted too, until Wayne agreed they were routine noise: a guess
+  is added only once `prove` passes); a release's own messages go through `warn`; both land under
+  `warnings` in the `[[release]]` entry (`release_warnings`), once, and
+  the "Released" line counts them.  A failed release says its warnings.
+* Seen end to end in a scratch home; quick suite 349 OK.  GitHub
+  `email_check.yml` passed on `d3a7c1e`; the first rehearsal failed on
+  `I001` (fixed).  On `b116d02`: rehearsal `0.0.1.dev202610222321`
+  (`release.yml` 39871174210), `release_check` passed, `check.yml`
+  39871377247 25/25, `email_check.yml` 39871177436 13/13.
+
 ## Open
 
-1. `README.md`: edit together (next session).  To document: `upgrade`,
-   `cull-days`, `release` + `exports`, `prog.py.releases`, `list.py`;
-   the line after a yes now names `list.py`.
-2. `T.ept`: template wording (Claude rewrote the release paragraph,
-   added `upgrade` and `cull-days`).
-3. `ux/drive.py` developer steps (2.x) are stale (edits, old trigger).
-4. Coverage: the 72 lines above, when resumed.
-5. Later: warn at release when a compiled package lacks a wheel for a
-   computer `requires-python` admits; an `email` step in
-   `ux/drive.py`; whether `email_check.yml` joins `check.yml`.
+1. `ux/drive.py`: developer steps rewritten (2.1-2.17: no Part 1,
+   stash checks, marker, `add_missing`, `dependencies`, a release with
+   warnings, the email copy run as a friend's).  Wayne reads `ux/`.
+2. Coverage: the 72 lines of the morning, plus today's code, when
+   resumed.
+3. Later: warn at release when a compiled package lacks a wheel for a
+   computer `requires-python` admits; whether `email_check.yml` joins
+   `check.yml`.

@@ -1,0 +1,20 @@
+2.14 Release
+release = "1.0.0", exports = ["email", "zipapp", "uv"]: built, warnings counted, then the program runs.
+prog.py: `ux26_prog.py`.
+prog.py.toml: release = "1.0.0"; exports = ["email", "zipapp", "uv"].
+-------------------------------------------------------------------------------
+`prog.py.toml` line 1, `release = "1.0.0"`: released `prog.py` 1.0.0:
+`prog-1.0.0.py`, `prog-1.0.0.pyz`, `prog-1.0.0-uv.py` and
+`prog-1.0.0-uv.py.lock`, with 1 warning(s), listed in `prog.py.releases`.  To
+make the next release, change that line (to "1.0.1", say) and run `prog.py`.
+  ____________
+| EZPkg works! |
+  ============
+            \
+             \
+               ^__^
+               (oo)\_______
+               (__)\       )\/\
+                   ||----w |
+                   ||     ||
+The cow above was drawn by cowsay 6.1.

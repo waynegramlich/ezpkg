@@ -5626,7 +5626,7 @@ class InstallTest(unittest.TestCase):
         settings.write_text(settings.read_text().replace(
             '# release = "1.0.0"', 'release = "1.0.0"'))
         said: str = run()
-        self.assertIn("Released `prog.py` 1.0.0: ", said)
+        self.assertIn("released `prog.py` 1.0.0: ", said)
         self.assertEqual(beside(), ["prog-1.0.0-uv.py",
                                     "prog-1.0.0-uv.py.lock",
                                     "prog-1.0.0.py", "prog-1.0.0.pyz"])
@@ -5637,7 +5637,7 @@ class InstallTest(unittest.TestCase):
         self.assertNotIn("Released", run())
         settings.write_text(settings.read_text().replace(
             'release = "1.0.0"', 'release = "1.0.1"'))
-        self.assertIn("Released `prog.py` 1.0.1", run())
+        self.assertIn("released `prog.py` 1.0.1", run())
         self.assertEqual(beside(), ["prog-1.0.1-uv.py",
                                     "prog-1.0.1-uv.py.lock",
                                     "prog-1.0.1.py", "prog-1.0.1.pyz"])
@@ -5645,7 +5645,7 @@ class InstallTest(unittest.TestCase):
         # Back to 1.0.0, which is built again and recorded again.
         settings.write_text('release = "1.0.0"\n'
                             'exports = ["email"]\n')
-        self.assertIn("Released `prog.py` 1.0.0", run())
+        self.assertIn("released `prog.py` 1.0.0", run())
         self.assertEqual(beside(), ["prog-1.0.0.py"])
         self.assertEqual(versions(), ["1.0.0", "1.0.1", "1.0.0"])
         self.assertTrue(ezpkg.releases_path(program).read_text().startswith(
@@ -5671,7 +5671,7 @@ class InstallTest(unittest.TestCase):
         done: subprocess.CompletedProcess[str] = self.run_program(
             program, HOME=str(home))
         self.assertEqual(done.returncode, 0, done.stderr[-400:])
-        self.assertIn("Released `prog.py` 1.0.0",
+        self.assertIn("released `prog.py` 1.0.0",
                       " ".join(done.stderr.split()))
         self.assertEqual(program.read_text(), written)
 
@@ -5785,7 +5785,7 @@ class InstallTest(unittest.TestCase):
                       "Part 1 does not declare", done.stderr)
         self.assertIn(f"line {lurker + 1}: `gadgetlib` is not importable",
                       done.stderr)
-        self.assertIn("2 import(s) in prog.py", done.stderr)
+        self.assertIn("2 import(s) in prog.py", " ".join(done.stderr.split()))
         self.assertNotIn("`helper`", done.stderr)
         self.assertNotIn("`widget`", done.stderr)
 
@@ -6163,7 +6163,7 @@ class InstallTest(unittest.TestCase):
         done: subprocess.CompletedProcess[str] = self.run_program(program)
         self.assertEqual(done.returncode, 0, done.stderr[-400:])
         self.assertEqual(done.stdout, "ran\n")
-        self.assertIn("Released `prog.py` 1.0.0, with 1 warning(s), listed "
+        self.assertIn("released `prog.py` 1.0.0, with 1 warning(s), listed "
                       "in `prog.py.releases`.",
                       " ".join(done.stderr.split()))
         self.assertEqual(self.declared_now(program),
@@ -6171,8 +6171,8 @@ class InstallTest(unittest.TestCase):
         entries: list[dict[str, Any]] = ezpkg.read_releases(program)
         self.assertEqual([one["version"] for one in entries], ["1.0.0"])
         self.assertEqual(entries[0]["warnings"], [
-            ("`prog.py` has no pasted bootstrap, so its release builds no "
-             "email.")])
+            ('`prog.py.toml` line 2, `exports = ["email"]`: `prog.py` has '
+             "no pasted bootstrap, so its release builds no email.")])
         self.assertEqual(entries[0]["dependencies"],
                          ["widget>=1.2.3,<2", "sprocket>=1"])
         self.assertFalse(program.with_suffix(".ezpkg").exists())
@@ -6274,8 +6274,8 @@ class InstallTest(unittest.TestCase):
         self.assertNotEqual(done.returncode, 0)
         self.assertNotIn("ran", done.stdout)
         self.assertEqual(done.stderr.strip(),
-                         "prog.py.toml line 3: unknown setting `relase` "
-                         "(did you mean `release`?)")
+                         '`prog.py.toml` line 3, `relase = "1.0.0"`: unknown '
+                         "setting `relase` (did you mean `release`?)")
 
     def test_a_failed_addition_is_tried_again(self) -> None:
         """A fetch that fails while adding an entry is retried next run.
@@ -6453,16 +6453,21 @@ class InstallTest(unittest.TestCase):
         self.assertEqual(self.declared_now(program),
                          ["widget", "sprocket", "needy>=1.0.0,<2"])
 
-    def test_verbosity_none_says_nothing_extra(self) -> None:
-        """`verbosity = "none"`: a misspelt import gets only Python's error."""
-        # No line of `ezpkg`'s, only the traceback.
+    def test_verbosity_none_still_says_why_it_stops(self) -> None:
+        """`verbosity = "none"`: a misspelt import is still explained.
+
+        The program is about to stop, so the line saying why is said
+        even at `none`, before Python's error (Wayne, 2026-10-22).
+        """
+        # `ezpkg`'s one line, then the traceback.
         program: Path = self.synced_program(
             "silenced", '["widget"]', "import bogus_package",
             settings='verbosity = "none"\n')
         done: subprocess.CompletedProcess[str] = self.run_program(program)
         self.assertNotEqual(done.returncode, 0)
-        self.assertNotIn("needs a package", done.stderr)
-        self.assertTrue(done.stderr.startswith("Traceback"), done.stderr)
+        self.assertTrue(done.stderr.startswith(
+            "`prog.py` line 12: `import bogus_package` needs a package"),
+            done.stderr)
         self.assertIn("No module named 'bogus_package'", done.stderr)
 
     @editing
@@ -6653,7 +6658,7 @@ class InstallTest(unittest.TestCase):
         line: int = program.read_text().splitlines().index("import os") + 1
         self.assertIn(f"line {line}: `os` is imported above the "
                       "bootstrap", done.stderr)
-        self.assertIn("1 import(s) in prog.py", done.stderr)
+        self.assertIn("1 import(s) in prog.py", " ".join(done.stderr.split()))
         self.assertFalse(self.built.exists())
 
     def test_export_refuses_an_unknown_form(self) -> None:
@@ -7168,8 +7173,8 @@ class BootstrapCheckTest(unittest.TestCase):
         wrong: subprocess.CompletedProcess[str] = run()
         self.assertNotEqual(wrong.returncode, 0)
         self.assertEqual(wrong.stdout, "")
-        self.assertIn("`prog.py.toml` asks for the bootstrap `nopip5`, but "
-                      "`prog.py` carries `nopip6`.",
+        self.assertIn('`prog.py.toml` line 1, `bootstrap = "nopip5"`: '
+                      "`prog.py` carries `nopip6`, not `nopip5`.",
                       " ".join(wrong.stderr.split()))
 
         # A release replaces it, indented as it was, and runs.  A release
@@ -8507,7 +8512,7 @@ class MetadataTest(unittest.TestCase):
                 self.assertTrue(venv.add_missing(program, error, None))
                 proved.assert_called_once_with("PySocks", "socks")
                 put.assert_called_once_with(
-                    dependencies=["cowsay", "PySocks"], notes={})
+                    dependencies=["cowsay", "PySocks"])
                 self.assertIn("`prog.py` needed `socks`, so `ezpkg` added "
                               "`PySocks`", told.getvalue())
 
@@ -8523,12 +8528,13 @@ class MetadataTest(unittest.TestCase):
                 self.assertEqual(put.call_count, 1)
 
     def test_a_release_lists_its_warnings(self) -> None:
-        """Guesses, drops and a release's own warnings go in its entry.
+        """Drops and a release's own warnings go in its entry, once.
 
-        Each once, a guess only while the stash still declares it, and
-        none at all leaves the entry as it was (Wayne, 2026-10-22).
+        A guessed package was proved, so it is no warning; a dropped one
+        that comes back is none either, and no warnings leave the entry
+        as it was (Wayne, 2026-10-22).
         """
-        # Notes from a run: one guess added, one known name, one drop.
+        # Notes from a run: a guess added, one back, and one dropped.
         with tempfile.TemporaryDirectory() as scratch:
             program: Path = Path(scratch) / "prog.py"
             venv: ezpkg.EZPkg = ezpkg.EZPkg(Path(scratch) / "cache")
@@ -8541,23 +8547,17 @@ class MetadataTest(unittest.TestCase):
                                             return_value=stashed):
                 notes: dict[str, str] = venv.noted(
                     found, {"tabulate": "tabulate", "PyYAML": "yaml"}, [0])
-            self.assertEqual(sorted(notes), ["dropped:old", "guess:tabulate"])
-            self.assertIn("`import tabulate` (line 3) was taken to need the "
-                          "PyPI package `tabulate`", notes["guess:tabulate"])
+            self.assertEqual(list(notes), ["dropped:old"])
             self.assertIn("`old>=1` was dropped", notes["dropped:old"])
 
-            # Listed with the release's own, a guess only while declared.
+            # Listed with the release's own, each once.
             venv.warnings = ["Own.", "Own."]
-            for declared, expected in (
-                    (["tabulate>=0.10"], [notes["dropped:old"],
-                                          notes["guess:tabulate"], "Own."]),
-                    (["kept"], [notes["dropped:old"], "Own."])):
-                with (unittest.mock.patch.object(
-                          ezpkg.EZPkg, "stashing", return_value=True),
-                      unittest.mock.patch.object(
-                          ezpkg.EZPkg, "stash", return_value={
-                              "dependencies": declared, "notes": notes})):
-                    self.assertEqual(venv.release_warnings(), expected)
+            with (unittest.mock.patch.object(
+                      ezpkg.EZPkg, "stashing", return_value=True),
+                  unittest.mock.patch.object(
+                      ezpkg.EZPkg, "stash", return_value={"notes": notes})):
+                self.assertEqual(venv.release_warnings(),
+                                 [notes["dropped:old"], "Own."])
 
         # The entry lists them, and none adds nothing.
         entry: str = ezpkg.release_entry("1.0.0", "", ["a"], "", ["Say \"x\"."])
@@ -8582,6 +8582,22 @@ class MetadataTest(unittest.TestCase):
             '#   "a",  # Needed by the build\n'
             '#   "c",  # Needed, but not imported\n# ]\n# ///\n'))
 
+    def test_a_message_names_the_line_that_caused_it(self) -> None:
+        """A key's line, an entry's line, its comment dropped."""
+        # One-line keys, a list over several lines, and nothing found.
+        text: str = ('# Mine.\nrelease = "1.0.0"  # Next.\n'
+                     'dependencies = [\n    "numpy>=2",\n    "x",\n]\n')
+        self.assertEqual(ezpkg.setting_place("p.toml", text, "release"),
+                         '`p.toml` line 2, `release = "1.0.0"`')
+        self.assertEqual(
+            ezpkg.setting_place("p.toml", text, "dependencies", "x"),
+            '`p.toml` line 5, `"x",`')
+        self.assertEqual(
+            ezpkg.setting_place("p.toml", text, "dependencies", "gone"),
+            "`p.toml` line 3, `dependencies = [`")
+        self.assertEqual(ezpkg.setting_place("p.toml", text, "upgrade"),
+                         "`p.toml`")
+
     def test_read_settings_checks_every_key(self) -> None:
         """`read_settings` names the line and what is wrong with it."""
         # Each file, and what it says or holds.
@@ -8592,40 +8608,40 @@ class MetadataTest(unittest.TestCase):
                 ("exports = []\n", ezpkg.Settings(exports=())),
                 ("cull-days = 90\n", ezpkg.Settings(cull_days=90)),
                 ("cull-days = 0\n",
-                 ("prog.py.toml line 1: `cull-days` must be a whole number "
+                 ("`prog.py.toml` line 1, `cull-days = 0`: `cull-days` must be a whole number "
                   "of days, 1 or more")),
                 ("cull-days = true\n",
-                 ("prog.py.toml line 1: `cull-days` must be a whole number "
+                 ("`prog.py.toml` line 1, `cull-days = true`: `cull-days` must be a whole number "
                   "of days, 1 or more")),
                 (('verbosity = "high"\nrelease = "1.2.0"\nexports = ["uv"]\n'
                  'bootstrap = "nopip6"\n'),
                  ezpkg.Settings("high", "1.2.0", ("uv",), "nopip6")),
                 ('bootstrap = "nopip9"\n',
-                 ('prog.py.toml line 1: `bootstrap` must be "update" or a '
+                 ('`prog.py.toml` line 1, `bootstrap = "nopip9"`: `bootstrap` must be "update" or a '
                   'published bootstrap, "nopip3", "nopip4", "nopip5", '
                   '"nopip6", "nopip7" or "nopip8"')),
                 ("\ncull_days = 9\n",
-                 ("prog.py.toml line 2: unknown setting `cull_days` "
+                 ("`prog.py.toml` line 2, `cull_days = 9`: unknown setting `cull_days` "
                  "(did you mean `cull-days`?)")),
                 ("\n\n[colour]\nx = 1\n",
-                 ("prog.py.toml line 3: unknown setting `colour` (the "
+                 ("`prog.py.toml` line 3, `[colour]`: unknown setting `colour` (the "
                  "settings are `verbosity`, `release`, `exports`, "
                  "`bootstrap`, `upgrade`, `cull-days`, `dependencies` and "
                  "`requires-python`)")),
                 ('upgrade = "yes"\n',
-                 ("prog.py.toml line 1: `upgrade` must be `true` "
+                 ("`prog.py.toml` line 1, `upgrade = \"yes\"`: `upgrade` must be `true` "
                   "or `false`")),
                 ('verbosity = "loud"\n',
-                 ('prog.py.toml line 1: `verbosity` must be one of "none", '
+                 ('`prog.py.toml` line 1, `verbosity = "loud"`: `verbosity` must be one of "none", '
                  '"low", "medium" or "high"')),
                 ("release = 1.0\n",
-                 ('prog.py.toml line 1: `release` must be a version in '
+                 ('`prog.py.toml` line 1, `release = 1.0`: `release` must be a version in '
                  'quotes, such as "1.0.0"')),
                 ('exports = ["zip"]\n',
-                 ('prog.py.toml line 1: `exports` must be a list of '
+                 ('`prog.py.toml` line 1, `exports = ["zip"]`: `exports` must be a list of '
                  '"email", "zipapp" or "uv", each at most once')),
                 ('exports = ["uv", "uv"]\n',
-                 ('prog.py.toml line 1: `exports` must be a list of '
+                 ('`prog.py.toml` line 1, `exports = ["uv", "uv"]`: `exports` must be a list of '
                  '"email", "zipapp" or "uv", each at most once')),
                 ("verbosity = \n", ("prog.py.toml: Invalid value (at line 1, "
                  "column 13)")),
