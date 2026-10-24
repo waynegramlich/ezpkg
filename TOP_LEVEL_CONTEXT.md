@@ -10,13 +10,26 @@ needs live here instead.
 * `ezpkg.py`: The `ezpkg` package itself (the `EZPkg` class).
 * `quick_start.py`: The Quick Start program, and the authority for the
   bootstrap text.
-* `bootstrap.py`: Every bootstrap this project has tried, one function
-  per case (`nopip1` ... `nopip8`); `nopip8` is the one that ships,
-  published as the bootstrap `2026-10-23` (Wayne, 2026-10-23): it fetches only `ezpkg`'s wheel, keeps it as
-  `~/.ezpkg/ezpkg.whl` and imports from it; `EZPkg.own_pip` fetches
-  `pip`.  pypi.org has no `ezpkg` yet, so `ux/drive.py` and
-  `release_check.py testpypi` put the wheel there themselves.
-* `ezpkg_test.py`: The test suite.
+* `bootstrap.py`: The shipping bootstrap, `2026-10-23`, as the
+  function `bootstrap_2026_10_23` (`MECHANISMS` maps the name to it;
+  `python3 bootstrap.py 2026-10-23` runs it, for the suite only).  It
+  fetches only `ezpkg`'s wheel, keeps it as `~/.ezpkg/ezpkg.whl` and
+  imports from it; `EZPkg.own_pip` fetches `pip`.  The older cases
+  were deleted on 2026-10-24 (Wayne).  pypi.org has no `ezpkg` yet, so
+  `ux/drive.py` and `release_check.py testpypi` put the wheel there
+  themselves.
+* `ezpkg_test.py`: The test suite.  Its module docstring is the
+  contributor's guide (Wayne, 2026-10-24): "Fixing a Bug or Adding a
+  Feature" (the steps before a pull request), then "How To Test
+  `EZPkg`" (five layers: lint, the suite against its local server,
+  coverage, `ux/drive.py`, GitHub Actions).  Keep it current when a
+  test tool or workflow changes; README's Project Information links it.
+* `ezpkg_test_all.py [DIR]`: Every local test in one command (about 35
+  minutes): `ruff`, `mypy`, the suite under `ezpkg_coverage.py
+  --children` with a scratch home holding a fresh `pip.whl`,
+  `ux/drive.py --ux-dir DIR/ux`, and `email_check.py build`/`friend`;
+  each step logs into `DIR`, then a summary.  Claude runs it in the
+  background.
 * `ezpkg_coverage.py`: Coverage with the standard library `trace`
   (`trace_hook/` carries it into child processes).
 * `README.md`: The user documentation, rewritten by Wayne since
@@ -84,8 +97,8 @@ match it:
   (its imports included), from `quick_start.py`, so it has no copy of
   its own (Wayne, 2026-10-22).  A developer writes no Part 1.
 * `QUICK_START` in `ezpkg.py`.
-* The `nopip8` function in `bootstrap.py` (which spells the package name
-  as `PACKAGE` and the index as `JSON_API`).
+* `bootstrap_2026_10_23` in `bootstrap.py` (which spells the package
+  name as `PACKAGE` and the index as `JSON_API`; `pasted` renders it).
 
 A changed bootstrap is a new one, comments and spaces included
 (`T.reb`: `EZPkg` refuses any bootstrap that is not, line for line once
@@ -93,8 +106,8 @@ trimmed, a published one).  It needs a new name, the date it is published
 (`DATED`; `nopip3`-`nopip7` were never released and stay only as test
 fixtures), its
 fingerprint added to the end of `BOOTSTRAPS` in `ezpkg.py`, and the
-previous text kept in `OLD_BOOTSTRAP_TEXTS`.  `bootstrap.py`'s copies
-spell things as variables, so its harness sets
+previous text kept in `OLD_BOOTSTRAP_TEXTS`.  `bootstrap.py`'s copy
+spells things as variables, so the suite runs it with
 `EZPKG_BOOTSTRAP=unchecked`.
 
 Part 1 of every released program lists `ezpkg` first (the Quick
@@ -135,8 +148,10 @@ is the program's stash in its `~/.ezpkg/develop/` record
 1's own entries and a hand-written date are read, never changed;
 `update-frequency` (`"never"`, the default, `"monthly"`, `"weekly"`
 or `"daily"`) drops the stash's date once it is older than that, so
-that run takes the newest versions and dates them afresh; a
-release merges the stash into a staged copy (`staged`) that its forms
+that run takes the newest versions and dates them afresh, and so
+does a new import whose package is newer than the stash's date
+(`too_new`, with a notice; a date written into Part 1 stops the run
+instead; Wayne, 2026-10-24); a release merges the stash into a staged copy (`staged`) that its forms
 are built from.  Releases are off until `release` in
 `prog.py.toml` names a form and `version` names a version (the
 template leaves `release = [` open with each form's line commented
@@ -163,15 +178,13 @@ program, ever, and the program is never edited.  `prog.ezpkg`,
 
 ## Testing and Linting
 
+* Everything local at once: `./ezpkg_test_all.py DIR` (see above).
 * Quick tests, during development (about 6 minutes): `./ezpkg_test.py`
-  (`EZPKG_TEST=FAST`, the default), which runs everything plus the
-  latest bootstrap's case (`FAST_CASES`, `nopip8` in `bootstrap.py`,
-  published as `2026-10-23`).  The quick suite must run the latest
-  bootstrap (Wayne, 2026-10-23); `EZPKG_TEST=NONE` skips every case
-  and is only the coverage tool's baseline.  A single class or method
-  can be named after it.
-* `EZPKG_TEST=COMPLETE`, every `bootstrap.py` case, runs only when
-  Wayne asks.
+  (`EZPKG_TEST=FAST`, the default), which runs everything, the
+  bootstrap `2026-10-23` in `bootstrap.py` included.  The quick suite
+  must run the latest bootstrap (Wayne, 2026-10-23); `EZPKG_TEST=NONE`
+  skips it and is only the coverage tool's baseline.  A single class
+  or method can be named after it.
 * Coverage: `./ezpkg_coverage.py --children DIR` (about 23 minutes,
   in the background, scratch `HOME`) annotates into `DIR` and lists the
   unrun lines not marked `# pragma: no cover` in `DIR/missing.txt`.
@@ -193,6 +206,9 @@ program, ever, and the program is never edited.  `prog.ezpkg`,
 
 ## Working With Wayne
 
+* `README.md`'s table of contents lists every `##` heading; keep it in
+  step when a heading changes (Wayne's README note, moved here
+  2026-10-24).
 * `README.md` rewrites are proposed in HTML comments beside the old
   text, with the line ranges of both (recheck them, since they shift);
   when Wayne says delete, delete.  Never nest HTML comments: an inner

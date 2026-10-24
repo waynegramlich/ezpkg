@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """Measure test suite coverage with the standard library `trace`.
 
+How to run every kind of test, coverage included, is in the docstring
+at the top of `ezpkg_test.py` ("How To Test `EZPkg`").
+
 `trace` is used rather than `coverage` because it ships with Python.
 A test suite for a project about fetching packages that are not
 preinstalled should not itself need a package fetched, which is the
@@ -8,26 +11,25 @@ same criterion that chose `http.server` over `pypiserver` in 5.1 of `T.rps`.
 
 Run it with no arguments to measure the suite, or with a directory to
 say where the annotated `.cover` files should go.  `EZPKG_TEST`
-is honoured by the suite as usual, so `COMPLETE` measures every
-`bootstrap.py` case and costs several minutes.
+is honoured by the suite as usual.
 
 `--per-case <directory>` answers a different question: what does each
 `bootstrap.py` case add?  The cases are those `EZPKG_TEST` selects,
-so `nopip1` and `nopip5` unless it says `COMPLETE`.  It makes one
-baseline run of the whole suite with `EZPKG_TEST=NONE`, so that no
-case runs, and then one run per case of only the tests marked
-`runs_cases`, with `EZPKG_TEST` naming that case.  Children are
-traced throughout.  Runs go two at a time by default (`--jobs`), since
-each is a busy tree of processes in its own right, and each writes only
-under `<directory>/<run>/`, so runs side by side cannot overwrite each
-other.  Then it compares them and writes `report.md`: what each case
-adds beyond the baseline, the lines only one case reaches, and a greedy
-ordering from the case that ships showing which cases add nothing.
-`--compare <directory>` redoes just the comparison from the saved
-counts, in seconds, which is what makes culling cases cheap to repeat.
-Both work in a copy of the project made under `<directory>/project/`,
-so that editing the project during a run cannot spoil its report.
-See `T.tsc`.
+which by default is every case `bootstrap.py` defines; today that is
+only the shipping one, `2026-10-23`.  It makes one baseline run of the
+whole suite with `EZPKG_TEST=NONE`, so that no case runs, and then one
+run per case of only the tests marked `runs_cases`, with `EZPKG_TEST`
+naming that case.  Children are traced throughout.  Runs go two at a
+time by default (`--jobs`), since each is a busy tree of processes in
+its own right, and each writes only under `<directory>/<run>/`, so runs
+side by side cannot overwrite each other.  Then it compares them and
+writes `report.md`: what each case adds beyond the baseline, the lines
+only one case reaches, and a greedy ordering from the case that ships
+showing which cases add nothing.  `--compare <directory>` redoes just
+the comparison from the saved counts, in seconds, which is what makes
+culling cases cheap to repeat.  Both work in a copy of the project made
+under `<directory>/project/`, so that editing the project during a run
+cannot spoil its report.  See `T.tsc`.
 
 Three workarounds here were each found the hard way, and all matter
 more than they look:
@@ -55,8 +57,8 @@ more than they look:
 One blind spot remains, and it is not a defect in the tests:
 
 * **Child processes are not followed** unless `--children` is given.
-  Without it `bootstrap.py` reports about 7%, because its fifteen
-  cases only ever run in child interpreters.  With it, a copy of
+  Without it `bootstrap.py` reports little, because its case only
+  ever runs in child interpreters.  With it, a copy of
   `ezpkg.py` that a bootstrap installed is credited to the project's
   own file when the two are identical; see `trace_hook/sitecustomize.py`.
 
@@ -403,9 +405,9 @@ def trace_children(counts: Path) -> None:
     """Arrange for child processes to be traced as well.
 
     Most of what this suite does happens in children: every `pip`, and
-    `bootstrap.py` once or fifteen times over.  `trace` follows neither
-    those nor threads by itself, so `bootstrap.py` reads as about 7%
-    however thoroughly its cases are exercised.
+    every run of `bootstrap.py`.  `trace` follows neither those nor
+    threads by itself, so `bootstrap.py` reads as barely covered
+    however thoroughly its case is exercised.
 
     The only hook that reaches a process nobody wrote the command line
     for is `sitecustomize`, which Python imports at startup from
@@ -455,7 +457,8 @@ def merge_children(tracer: trace.Trace, counts: Path) -> int:
 def case_bodies() -> dict[str, tuple[set[int], set[int]]]:
     """Return the lines of each case in `bootstrap.py`.
 
-    Each case is a module level function named after it.  A case covers
+    Each case is a module level function, named in `MECHANISMS` against
+    the case's label.  A case covers
     its own body and nothing else does, so those lines say nothing about
     what a case adds.  `compare` sets them aside and reports them
     separately.
@@ -474,22 +477,23 @@ def case_bodies() -> dict[str, tuple[set[int], set[int]]]:
       to its whole range of lines and to the first lines of its
       statements.
     """
-    # Parse rather than search, the way `measure_source` does.
+    # Parse rather than search, the way `bootstrap.pasted` does.
     import bootstrap
+    labels: dict[str, str] = {function.__name__: label for label, function
+                              in bootstrap.MECHANISMS.items()}
     source: Path = Path(__file__).resolve().parent / "bootstrap.py"
     tree: ast.Module = ast.parse(source.read_text(encoding="utf-8"))
     bodies: dict[str, tuple[set[int], set[int]]] = {}
     node: ast.stmt
     for node in tree.body:
-        if (isinstance(node, ast.FunctionDef)
-                and node.name in bootstrap.MECHANISMS):
+        if isinstance(node, ast.FunctionDef) and node.name in labels:
             last: int = node.end_lineno or node.lineno
             statements: set[int] = {
                 inner.lineno for top in node.body[1:]
                 for inner in ast.walk(top)
                 if isinstance(inner, ast.stmt)}
-            bodies[node.name] = (set(range(node.lineno, last + 1)),
-                                 statements)
+            bodies[labels[node.name]] = (set(range(node.lineno, last + 1)),
+                                         statements)
     return bodies
 
 
@@ -710,8 +714,7 @@ def measure_cases(directory: Path, jobs: int) -> bool:
     """Measure a baseline, then each case separately, `jobs` at a time.
 
     The cases are the ones `EZPKG_TEST` selects, as for the suite
-    itself: `nopip1` and `nopip5` by default, and all fifteen under
-    `COMPLETE`.
+    itself: every case `bootstrap.py` defines, by default.
 
     The baseline is the whole suite with no case selected, and is the
     one long run.  Each case then runs only the tests that run cases,

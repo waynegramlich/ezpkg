@@ -4320,27 +4320,25 @@ class EZPkg:
     def repair_module_layout(self) -> Path | None:
         """Rewrite this module inside the cache as a package directory.
 
-        Every case in `bootstrap.py` decides whether it has already
+        The early bootstraps decided whether they had already
         installed the package by asking `(target / PACKAGE).is_dir()`.
         A distribution that installs as a single module puts
         `ezpkg.py` there rather than a directory, so the answer
-        is no on every run and the fetch is repeated forever.  `venv4`
-        does worse than waste a download: it deletes the `pip` it
-        installed with, so its second run has nothing to install with
-        and fails.  This is the `I.cctfd` issue in `ISSUES/`.
+        was no on every run and the fetch was repeated forever.  This
+        is the `I.cctfd` issue in `ISSUES/`.
 
-        Rather than edit every case body that people paste, the
+        Rather than edit the bodies that people had pasted, the
         second stage repairs the layout once, the first time it runs.
         The file this module was imported from becomes
-        `<name>/__init__.py` in the same directory, which every case's
+        `<name>/__init__.py` in the same directory, which an
         `is_dir()` test then finds.  The cost is one extra fetch, on
         the first run only.
 
         The file is only touched when it lies somewhere under `root`,
         which is what keeps a checkout being worked on from being
-        rewritten.  Half the cases install into `root` itself and half
-        into a `site-packages` directory inside it, so anywhere under
-        `root` is the test that covers both.
+        rewritten.  A bootstrap installed into `root` itself or into a
+        `site-packages` directory inside it, so anywhere under `root`
+        is the test that covers both.
 
         Repairing twice must not nest, so this returns `None` once the
         module is already a package.
@@ -5178,24 +5176,33 @@ class EZPkg:
             return asking
 
         # The additions are fetched and proved first, since the versions
-        # that arrive decide what is written.
+        # that arrive decide what is written.  Once more if `too_new`
+        # moved the date, which it does only once.
         fetching: list[str] = self.fetching(final)
-        try:
-            self.provide(fetching, argv, {
-                normal_name(requirement_name(package)): module
-                for package, module in modules.items()
-                if holds_here(package)})
-        except Declined:
-            raise
-        except (RuntimeError, ValueError) as error:
-            self.too_new(found, modules, argv)
+        failed: RuntimeError | ValueError | None = None
+        for _ in range(2):
+            try:
+                self.provide(fetching, argv, {
+                    normal_name(requirement_name(package)): module
+                    for package, module in modules.items()
+                    if holds_here(package)})
+                failed = None
+                break
+            except Declined:
+                raise
+            except (RuntimeError, ValueError) as error:
+                failed = error
+                if not self.too_new(found, modules, argv):
+                    break
+                fetching = self.fetching(final)
+        if failed is not None:
             for doubt in doubts:
                 self.say(0, doubt)
             # Not recorded as settled, so the next run tries again
             # (S3.3a).
             self.say(1, f"{program.name}: `dependencies` is left as it "
-                     f"is: {failure_reason(error)}")
-            self.say(3, f"ezpkg: in full: {error}", wrap=False)
+                     f"is: {failure_reason(failed)}")
+            self.say(3, f"ezpkg: in full: {failed}", wrap=False)
             return asking
         fetched: tuple[list[str], list[str]] | None = self.remember(
             self.request_for(fetching))
@@ -5308,11 +5315,16 @@ class EZPkg:
         return final
 
     def too_new(self, found: Discrepancy, modules: Mapping[str, str],
-                argv: Sequence[str]) -> None:
-        """Stop if an addition has no release before the program's date.
+                argv: Sequence[str]) -> bool:
+        """Deal with an addition that has no release before the date.
 
-        The end user's copy would fail the same way, so the developer is
-        told how to upgrade instead (`T.abfd`).
+        The end user's copy would fail the same way.  A date in the
+        stash moves to today instead, as `update-frequency` would move
+        it, so that the next fetch takes the newest versions and
+        `record_approvals` dates them afresh; only this program's
+        versions change (Wayne, 2026-10-24).  A date the developer
+        wrote into Part 1 is theirs, so the run stops and says which
+        line to delete (`T.abfd`).
 
         Arguments:
         * `found` (`Discrepancy`):
@@ -5322,16 +5334,20 @@ class EZPkg:
         * `argv` (`Sequence[str]`):
           Extra arguments for `pip`.
 
+        Returns:
+        * (`bool`): True when the stash's date was moved, so that the
+          fetch is worth trying again.
+
         Raises:
         * `SystemExit`:
           Naming the import and the date's line, when one fails under
-          the date alone.
+          a date written into Part 1.
         """
         # Each addition alone, under the date: what `prove` fetched
         # without it.
         before: str = self.cutoff()
         if not before:
-            return
+            return False
         program: Path = found.program
         source: list[str] = read_program(program)[0].splitlines()
         dated: int = next((number for number, line in enumerate(source, 1)
@@ -5356,15 +5372,12 @@ class EZPkg:
                 arrived = self.download([package], argv, (), before)
             except (RuntimeError, ValueError):
                 if self.stashing() and not dated:
-                    raise SystemExit(wrapped(
-                        f"{program.name} line {line} imports `{module}`, "
-                        f"but no release of it existed before "
-                        f"{before[:10]}, the date {program.name}'s versions "
-                        f"are frozen at.  To upgrade everything to today's "
-                        f"versions, set `update-frequency = \"daily\"` in "
-                        f"{program.name}.toml and run {program.name} "
-                        f"again.",
-                        columns(sys.stderr))) from None
+                    self.put_stash(**{"exclude-newer": None})
+                    self.say(1, f"{program.name} line {line} imports "
+                             f"`{module}`, which is newer than "
+                             f"{before[:10]}, so {program.name} moves to "
+                             f"today's versions of all its packages")
+                    return True
                 raise SystemExit(wrapped(
                     f"{program.name} line {line} imports `{module}`, but no "
                     f"release of it existed before the date "
@@ -5375,6 +5388,7 @@ class EZPkg:
             finally:
                 for holding in {one.parent for one in arrived}:
                     shutil.rmtree(holding, ignore_errors=True)
+        return False
 
     def noted(self, found: Discrepancy, modules: Mapping[str, str],
               removed: Collection[int]) -> dict[str, str]:

@@ -4,7 +4,7 @@
 Each step edits `prog.py`'s imports and runs it on a pseudoterminal,
 so `ezpkg`'s questions are asked as they are of a person.  The first
 run is a stranger's: a home of its own, holding only the
-`~/.ezpkg/ezpkg.whl` that `nopip8` would fetch from pypi.org, a wheel
+`~/.ezpkg/ezpkg.whl` that the bootstrap would fetch from pypi.org, a wheel
 of the project's `ezpkg.py` (also offered to `pip` by
 `PIP_FIND_LINKS`); `ezpkg` fetches `pip` from pypi.org.  Each question
 is answered from the step's
@@ -450,7 +450,7 @@ def run_on_a_terminal(work: Path, script: list[tuple[str, str]],
     environment.update(HOME=str(work / "home"),
                        PIP_FIND_LINKS=str(work / "links"), **(extra or {}))
 
-    # pypi.org has no `ezpkg` yet, so the wheel `nopip8` would fetch is
+    # pypi.org has no `ezpkg` yet, so the wheel the bootstrap would fetch is
     # put where it keeps it, for a run of the program itself.
     kept: Path = work / "home" / ".ezpkg" / "ezpkg.whl"
     if (runner is None and not kept.is_file()

@@ -29,3 +29,13 @@
 * Working style Wayne wants for these sweeps: give README line numbers
   with every issue, fix only spelling and grammar unless asked, and list
   semantic issues in numbered batches for him to decide.
+
+## 2026-10-24: Wayne finished his read
+
+* Claude fixed spelling and grammar only, and synced the table of
+  contents (Troubleshooting, Project Information, Missing Stuff).
+* Text that disagrees with the code went to Wayne as a numbered list
+  (S1.1 onward) for him to decide; none of it is changed yet.
+* `bootstrap.py`'s docstring now says eighteen cases, only `nopip8`
+  ships (as `2026-10-23`), `nopip3`-`nopip7` were the Quick Start's
+  for a while but never released.

@@ -70,7 +70,7 @@ jobs:
 
   # python.org's macOS Python reads no Keychain and has no certificates
   # until its `Install Certificates.command` is run, which many people
-  # never do; `nopip6` then fetches `pip` with `curl` (`I.btosc`).
+  # never do; the bootstrap then fetches with `curl` (`I.btosc`).
   python-org:
     strategy:
       fail-fast: false

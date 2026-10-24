@@ -12,12 +12,12 @@ never edited (Wayne, 2026-10-22): the `checksums` are kept in
   `prog.py` (the Quick Start's Parts 1-2, needing `tqdm`) and an empty
   `prog.py.toml`, and runs it: that first developer run must fill the
   file and run the program, building nothing, since releases are off
-  until `exports` and `release` are set.  With the `#`s removed from
-  the filled file's `exports` entries and `release` line, the next run
-  must build release 1.0.0 beside `prog.py`, add it to
+  until `release` names a form and `version` is set.  With the `#`s
+  removed from the filled file's `release` entries and `version` line,
+  the next run must build release 1.0.0 beside `prog.py`, add it to
   `prog.py.releases` and run the program; the run after that must build
-  nothing.  It leaves
-  `DIR/out/prog-1.0.0.py` and `DIR/out/prog-1.0.0.pyz`.  The runs
+  nothing.  It leaves `DIR/out/prog-1.0.0.py` and
+  `DIR/out/prog-1.0.0.pyz`.  The runs
   pass over any installed `uv` (`EZPKG_UV=fetch`), so `ezpkg` must
   fetch the `uv` wheel for this computer; `prog.py` must be as it was
   written; and both releases must carry `colorama`, which only Windows
@@ -115,7 +115,7 @@ def build(directory: pathlib.Path) -> int:
     seed_home(home)
 
     # The first developer run fills `prog.py.toml` and only runs, since
-    # releases are off until `exports` is set.
+    # releases are off until `release` and `version` are set.
     settings: pathlib.Path = work / "prog.py.toml"
     settings.write_text("", encoding="utf-8")
     filling: subprocess.CompletedProcess[str] = run(program, home,
@@ -126,15 +126,15 @@ def build(directory: pathlib.Path) -> int:
     if (list(work.glob("prog-*"))
             or (work / "prog.py.releases").exists()
             or '#   "email",' not in settings.read_text(encoding="utf-8")):
-        print("FAIL: the filling run released, or left no `exports`")
+        print("FAIL: the filling run released, or left no `release`")
         return 1
 
-    # Every `exports` entry and `release` uncommented: the next run
+    # Every `release` entry and `version` uncommented: the next run
     # releases and runs; the one after only runs.
     settings.write_text(re.sub(
         r'^#( +"(?:email|zipapp|uv)",)', r" \1",
         settings.read_text(encoding="utf-8"), flags=re.MULTILINE).replace(
-            '# release = "1.0.0"', 'release = "1.0.0"'),
+            '# version = "1.0.0"', 'version = "1.0.0"'),
         encoding="utf-8")
     first: subprocess.CompletedProcess[str] = run(program, home,
                                                   EZPKG_UV="fetch")

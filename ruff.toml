@@ -19,24 +19,19 @@ target-version = "py311"
 extend-exclude = ["ux/ux*_prog*.py"]
 
 [lint.per-file-ignores]
-# Every case in `bootstrap.py` is text that a person pastes into their
-# own program, so it carries its own `try`, and that `try` catches
+# The bootstrap in `bootstrap.py` is text that a person pastes into
+# their own program, so it carries its own `try`, and that `try` catches
 # `Exception` on purpose: a missing network must read as one line of
 # diagnosis rather than a traceback, while a control-C still reads as
 # a control-C.  A `noqa` comment would be pasted along with it, into
 # code whose readers never run `ruff`, so the exception lives here.
 #
-# Each case also ends `module = importlib.import_module(...)`, binding a
-# name for the program it is pasted into.  Here every case is a function
-# of its own, so the name looks unused (`F841`) though it is not, once
-# pasted; the harness reads the module back from `sys.modules` instead.
-#
-# And a bootstrap is meant to be small enough to feel like magic, so the
-# shipping case is squeezed on purpose, with short statements on one
-# topic sharing a line (`E702`).  Its imports stay one to a line and in
-# order, because the person moves them to the top of their program and
-# many tools there check exactly that.
-"bootstrap.py" = ["BLE001", "F841", "E702"]
+# And a bootstrap is meant to be small enough to feel like magic, so it
+# is squeezed on purpose, with short statements on one topic sharing a
+# line (`E702`).  Its imports stay one to a line and in order, because
+# the person moves them to the top of their program and many tools
+# there check exactly that.
+"bootstrap.py" = ["BLE001", "E702"]
 
 # `quick_start.py` is the whole program `README.md` asks a person to
 # copy, so it carries the shipping bootstrap's `try` and catches

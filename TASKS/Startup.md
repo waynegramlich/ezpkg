@@ -1,8 +1,7 @@
 @7_A_fetch_from_the_real_PyPI/Details.md
 @7_A_fetch_from_the_real_PyPI/Context.md
-@7.13_README_sweep_before_the_release/Details.md
-@7.13_README_sweep_before_the_release/Context.md
 @7.14_Upload_to_pypi_and_test/Details.md
+@7.13_README_sweep_before_the_release/Summary.md
 @7.3_Write_the_release_workflow/Summary.md
 @../ISSUES/22_A_failed_fetch_shows_the_pip_output/Summary.md
 @7.6_Test_on_Windows_and_macOS/Summary.md
@@ -52,5 +51,4 @@
 @6.6_Security_and_who_approves_what/Details.md
 @6.7_PEP_723_issues/Details.md
 @6.9_.pth_files/Details.md
-@1_Choose_the_version_control_arrangement/Details.md
 @Closed.md

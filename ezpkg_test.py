@@ -1,25 +1,175 @@
 #!/usr/bin/env python3
-"""Test framework for `ezpkg.py`.
+"""The test suite for `ezpkg.py`, and how `EZPkg` is tested.
 
-This module is the test half of Experiment 2.  The experiment is a
-pipeline rather than a set of alternatives -- publish a package to a
-local index, fetch it with the bootstrap stub, and import it -- so
-`EZPkgTest` is shaped around building and discarding that index
-rather than around a table of measurements.
+# Fixing a Bug or Adding a Feature
 
-The index is a [PEP 503](https://peps.python.org/pep-0503/) directory
-tree, published over HTTP by `serve_index` so that `pip` reaches it
-through a socket rather than reading the files directly.  5.1 of `T.rps`
-settled that `http.server` is enough for this; a third party package
-server would have cost between 4 and 43 dependencies and given the
-tests nothing they do not already have.
+These are the steps to take before submitting a pull request.  A pull
+request must pass every test, and must not lower the code coverage;
+"How To Test `EZPkg`", below, explains each kind of test.
 
-Three helpers here do the publishing half, using nothing but the
-standard library.  `build_wheel` turns a single module into a pure
-Python wheel, `build_index` lays those wheels out as a PEP 503 tree,
-and `serve_index` serves that tree.  None of them needs `build`,
-`twine` or `setuptools`, which keeps the test suite as dependency free
-as the thing it tests.
+1. **Fork and clone** https://github.com/waynegramlich/ezpkg, and work
+   on a branch of your own.  You need Python 3.11 or newer, `ruff` and
+   `mypy`; nothing else is installed.
+2. **Measure before you change anything.**  Run `./ezpkg_test_all.py
+   DIR` (about 35 minutes) on the unchanged code and keep its summary:
+   every step should pass, and the coverage log gives the number of
+   lines of `ezpkg.py` that no test runs.  This is what your change is
+   compared with.
+3. **Write the test first.**  Add a test to this file that fails: one
+   that shows the bug, or that uses the feature.  The tests run against
+   a local package server with made-up packages (`build_wheel`,
+   `build_index`, `serve_index`), never the real PyPI, so a new package
+   is a few lines of Python here; copy a nearby test that does
+   something similar.  Run just that test while you work:
+   `./ezpkg_test.py ClassName.test_name`.
+4. **Make the change** in `ezpkg.py`, in the style of the code around
+   it (docstrings with `Arguments:`, `Returns:` and `Raises:`, type
+   hints everywhere, lines of at most 79 characters), until the new test
+   passes.  Two parts of `ezpkg.py` have copies that tests keep equal,
+   so change them only with their copies:
+   * The bootstrap, Part 2 of `quick_start.py`, is also `QUICK_START`
+     in `ezpkg.py`, the Quick Start in `README.md`, and the function in
+     `bootstrap.py`.  A changed bootstrap, even by one space, is a new
+     one: it needs a new name (the date it is published), its
+     fingerprint added to the end of `BOOTSTRAPS`, and the old text kept
+     in `OLD_BOOTSTRAP_TEXTS`, since `EZPkg` refuses any bootstrap it
+     does not know.  Ask first; it is rarely the right fix.
+   * `SETTINGS_TEMPLATE`, the text an empty `PROG_NAME.py.toml` is
+     filled with, is shown in `README.md` ("`PROG_NAME.py.toml`
+     Settings").
+5. **Run the quick checks** until they pass: `ruff check .`, `mypy .`
+   and `./ezpkg_test.py` (about 6 minutes).
+6. **Update `README.md`** if what a user sees or does has changed.
+7. **Run everything again**, `./ezpkg_test_all.py DIR2`.  Every step
+   must pass, and `DIR2/coverage/missing.txt` must list no more lines
+   of `ezpkg.py` than step 2 did: each new line is run by a test.  A
+   line no test can reasonably reach (a Windows-only branch, say) may
+   be marked `# pragma: no cover`, but say why in the pull request;
+   such marks are kept few.
+8. **Submit the pull request** with what it fixes or adds, and the
+   summaries of steps 2 and 7.  The GitHub Actions checks (layer 5
+   below) run against a published `ezpkg`, so the project's owner runs
+   them after merging, before a release.
+
+# How To Test `EZPkg`
+
+There are five layers, quickest first.  Run them in this order: each
+one assumes that the ones before it pass.  Nothing here needs a package
+installed; Python 3.11 or newer is enough, plus `ruff` and `mypy` for
+the first layer and `gh` (the GitHub command line) for the last.
+
+`./ezpkg_test_all.py [DIR]` runs layers 1 to 4, and `email_check.py`
+from layer 5, in one command (about 35 minutes): the lint, the whole
+suite under coverage with a scratch home that skips nothing, the
+scripted first runs, and the `email` releases, each with its log in
+`DIR` and a summary at the end.  The sections below say what each one
+does, and how to run it alone.
+
+## 1. Lint
+
+`ruff check .` and `mypy .`, from the project directory.  Both check
+against Python 3.11, the oldest Python `ezpkg` supports, and both must
+pass; `release.yml` runs them again before it publishes anything.
+
+## 2. This File, Against a Local Server
+
+`./ezpkg_test.py` runs the whole suite (about 6 minutes).  Name a class
+or a single test to run less, such as `./ezpkg_test.py InstallTest` or
+`./ezpkg_test.py BootstrapCheckTest.test_the_quick_start_is_current`.
+
+The suite never touches the internet (`PyPITest` aside, below).  Each
+test class builds its own package index and serves it on `127.0.0.1`:
+
+* `build_wheel` turns a single module into a pure Python wheel: this
+  project's own `ezpkg.py`, and small made-up packages such as `widget`
+  and `sprocket`.  `release_wheel` builds the wheel that is published.
+* `build_index` lays the wheels out as a
+  [PEP 503](https://peps.python.org/pep-0503/) tree, together with the
+  `pip` wheel that `EZPkg.own_pip` fetches.
+* `serve_index` serves that tree over HTTP from a thread, on a port the
+  operating system picks, so that `pip` reaches it through a socket
+  exactly as it reaches pypi.org.  It also answers PyPI's JSON API
+  (`/pypi/NAME/json`), which the bootstrap reads, and gives each file
+  an upload time (its file time), which `exclude-newer` dates need.
+  `TlsTest` serves it over HTTPS, with a certificate made for the run.
+* The programs under test are aimed at it through the environment, so
+  no code is edited to test it: `PIP_INDEX_URL` for `pip`, and
+  `BOOTSTRAP_JSON_API` and `BOOTSTRAP_PACKAGE` for `bootstrap.py`.
+  Every test works in temporary directories, with a `HOME` of its own
+  wherever a child runs, so the real `~/.ezpkg` is never changed.
+
+The standard library's `http.server` is enough for this; a third party
+package server would have cost between 4 and 43 dependencies and given
+the tests nothing more (5.1 of `T.rps`).  Nor do the helpers need
+`build`, `twine` or `setuptools`, which keeps the suite as free of
+dependencies as the thing it tests.
+
+`EZPKG_TEST` chooses which `bootstrap.py` cases run: `FAST`, the
+default, runs the shipping bootstrap (`2026-10-23`); `NONE` runs none,
+and is only the coverage tool's baseline; a case's name runs that one.
+`EZPKG_PYPI=1` adds `PyPITest`, which fetches a few pinned packages
+from the real pypi.org; it is opt in because it can fail for reasons
+outside the repository.
+
+Two groups of tests skip themselves when this computer lacks
+something, and say so:
+
+* The `exclude-newer` date tests need a `pip` 26 or newer, which they
+  borrow from `~/.ezpkg`.  On a computer without one, run the suite with
+  a scratch home that has it:
+
+      HOME=$(mktemp -d); mkdir $HOME/.ezpkg
+      python3 -m pip download pip --no-deps -d $HOME/.ezpkg
+      mv $HOME/.ezpkg/pip-*.whl $HOME/.ezpkg/pip.whl
+
+  (from a shell, then run `./ezpkg_test.py` from that same shell).
+* The tests that run the real `uv` need one installed.
+
+## 3. Coverage
+
+`./ezpkg_coverage.py --children DIR` runs the whole suite under the
+standard library's `trace` (about 23 minutes; run it with a scratch
+`HOME`, as above).  `--children` follows every child Python as well,
+through `trace_hook/sitecustomize.py`, which matters because most of
+what the suite does happens in children.  It writes an annotated
+`.cover` file per source file into `DIR`, and lists in
+`DIR/missing.txt` every line that never ran and is not marked
+`# pragma: no cover`.  Those marks are kept few: a line goes unmarked
+unless no test can reasonably reach it.  `--per-case` and `--compare`
+measure what each `bootstrap.py` case adds; see `ezpkg_coverage.py`.
+
+## 4. Scripted First Runs
+
+`ux/drive.py` (about 7 minutes) plays an end user's and then a
+developer's sessions with the Quick Start on a pseudoterminal, from a
+fresh home, with this project's `ezpkg.py` as the wheel and everything
+else from the real pypi.org.  Each step's output is written to
+`ux/uxNN_NAME.txt`, so `git diff ux/` shows what changed since the
+agreed output was committed.
+
+## 5. GitHub Actions, Against a Published `ezpkg`
+
+These run on GitHub's computers, against an `ezpkg` that has been
+published, and are started by hand, never by a push:
+
+* `release.yml` (`gh workflow run release.yml -f target=testpypi`):
+  builds the wheel (`release.py`), runs the lint and `twine check`, and,
+  once the project's owner approves on GitHub, publishes it to
+  test.pypi.org (a throwaway `dev` version) or pypi.org (`target=pypi`,
+  from a `v` tag only).
+* `check.yml` (`gh workflow run check.yml -f target=testpypi -f
+  version=VERSION`): runs `release_check.py`, the Quick Start as a new
+  user against what was published, on Linux, Windows, Apple Silicon and
+  Intel macOS with Python 3.11 to 3.15, plus python.org's macOS Python
+  without certificates and a real console on each system (25 jobs,
+  about 3 minutes).  `./release_check.py testpypi [VERSION]` runs the
+  same check on this computer.
+* `email_check.yml` (`gh workflow run email_check.yml`): builds `email`
+  and `zipapp` releases on every kind of runner with `email_check.py`,
+  then runs them as a friend's on Windows, macOS and Linux (13 jobs).
+
+`gh run watch` follows a run, and a failed `check.yml` job uploads its
+scratch directory for a post-mortem.
 
 MIT No Attribution
 
@@ -94,12 +244,6 @@ MODULE: str = "ezpkg"
 VERSION: str = ezpkg.__version__
 SUMMARY: str = (ezpkg.__doc__ or "").splitlines()[0]
 
-# Whether `I.wtmifs` shows on this interpreter.  `cryptography`, the
-# package its test fetches, publishes a `cp311-abi3` wheel, which the
-# matcher finds by exact tag under 3.11; from 3.12 on there is no exact
-# tag to find, and the gap the test documents appears.
-ABI3_GAP: bool = sys.version_info >= (3, 12)
-
 # The distribution name for a rehearsal upload, which is deliberately
 # not `ezpkg` and deliberately not `ezpkg_test` either: the second
 # is this file's own module name, and a published module spelled that way
@@ -146,49 +290,13 @@ FLOOR: str = floor()
 # `ezpkg.py` fails in one obvious place rather than in six.
 PROMPT: str = "[y=>Yes|n=>No|?=>Explain]:"
 
-# The case that ships: `nopip8` uses an `ezpkg` that is already
-# importable, and otherwise fetches `ezpkg`'s wheel through the JSON API
-# and imports straight from it, so it needs no `pip` on the machine;
-# `EZPkg.own_pip` fetches one later.  It fetches with `curl` when this
-# Python has no certificates.  See `T.npp`, `T.ewar`, `T.rp`, `I.btosc`
-# and `T.abfd`.
-SHIPPING: str = "nopip8"
-
-# Which cases the all-case tests exercise by default.  The first cull
-# found that only the four needing no `pip` add anything to coverage
-# (6.16.3 of `T.tsc`), and the cull of 2026-10-12 that `nopip2` and `nopip3`
-# add nothing beyond `nopip1` and `nopip4`, so those two went too
-# (Wayne).  `nopip5`, which ships, took `nopip4`'s place in 2026-10-12's
-# rename, being the same code with `pip`'s output on standard error.
-# `nopip6` took `nopip5`'s place on 2026-10-16, adding the `curl`
-# fallback for a Python without certificates (`I.btosc`), and `nopip7`
-# took `nopip6`'s on 2026-10-17, capturing `pip`'s output (`T.abfd`),
-# and `nopip8` took `nopip7`'s on 2026-10-20, fetching no `pip` at all.
-# On 2026-10-22 Wayne cut the default to the shipping case alone, to
-# save time.  The others are kept, because keeping them costs nothing,
-# and run under `EZPKG_TEST=COMPLETE`; a test that names a case of its
-# own still runs it.
-FAST_CASES: tuple[str, ...] = (SHIPPING,)
-
-def platform_tag() -> str:
-    """Return a compatibility tag this interpreter would accept.
-
-    Built from the running interpreter rather than written down, so the
-    wheel it names is one `pip` will install and one the matcher in
-    `nopip1` and `nopip2` of `bootstrap.py` will recognise: that matcher looks
-    for `cp312-cp312-`, then for the machine name and `linux` in the
-    same filename.
-
-    Returns:
-    * (`str`): Something like `cp312-cp312-linux_x86_64`.
-    """
-    # A wheel filename may not contain a hyphen inside a field.
-    release: str = f"{sys.version_info.major}{sys.version_info.minor}"
-    implementation: str = ("cp" if sys.implementation.name == "cpython"
-                           else "py")
-    machine: str = sysconfig.get_platform().replace("-", "_")
-    machine = machine.replace(".", "_")
-    return f"{implementation}{release}-{implementation}{release}-{machine}"
+# The bootstrap that ships, by its published name in `bootstrap.py`'s
+# `MECHANISMS`: it uses an `ezpkg` that is already importable, and
+# otherwise fetches `ezpkg`'s wheel through the JSON API and imports
+# straight from it, so it needs no `pip` on the machine; `EZPkg.own_pip`
+# fetches one later.  It fetches with `curl` when this Python has no
+# certificates.  See `T.ewar`, `I.btosc` and `T.abfd`.
+SHIPPING: str = "2026-10-23"
 
 
 # How long the `slow` fault waits.  Long enough that several processes
@@ -203,15 +311,13 @@ HANG_SECONDS: float = 3.0
 def cases() -> tuple[str, ...]:
     """Return the case labels the all-case tests should exercise.
 
-    `EZPKG_TEST` chooses.  Unset or `FAST`, which is the usual
-    way to run, gives `FAST_CASES`.  `COMPLETE` gives every case
-    `bootstrap.py` defines, which is thorough and slow.  Anything else
-    is read as case names separated by commas, such as `venv3` or
-    `pip1,pip2`, which is how `ezpkg_coverage.py --per-case` runs
-    the suite once per case.  Names are case sensitive, as the
-    `case` labels in `bootstrap.py` are.  `NONE` gives no cases at
-    all, which is that tool's baseline: everything the suite covers
-    without running a single bootstrap.
+    `EZPKG_TEST` chooses.  Unset or `FAST`, which is the usual way to
+    run, gives every case `bootstrap.py` defines, which is now only the
+    shipping one.  `NONE` gives no cases at all, which is the baseline
+    of `ezpkg_coverage.py --per-case`: everything the suite covers
+    without running a single bootstrap.  Anything else is read as case
+    names separated by commas, which is how that tool runs the suite
+    once per case.
 
     Returns:
     * (`tuple[str, ...]`): The labels, in `bootstrap.py` order.
@@ -225,8 +331,6 @@ def cases() -> tuple[str, ...]:
     # The two choices first, then a list of names.
     choice: str = os.environ.get("EZPKG_TEST", "FAST")
     if choice.upper() == "FAST":
-        return FAST_CASES
-    if choice.upper() == "COMPLETE":
         return tuple(bootstrap.MECHANISMS)
     if choice.upper() == "NONE":
         return ()
@@ -234,9 +338,8 @@ def cases() -> tuple[str, ...]:
     unknown: list[str] = sorted(named - set(bootstrap.MECHANISMS))
     if unknown:
         raise ValueError(
-            f"EZPKG_TEST is {choice!r}; use FAST, COMPLETE, NONE or "
-            f"case names from bootstrap.py, and {', '.join(unknown)} is "
-            f"none of them")
+            f"EZPKG_TEST is {choice!r}; use FAST, NONE or case names "
+            f"from bootstrap.py, and {', '.join(unknown)} is none of them")
     return tuple(label for label in bootstrap.MECHANISMS if label in named)
 
 
@@ -244,11 +347,10 @@ def selected(*labels: str) -> tuple[str, ...]:
     """Return which of `labels` a test that names its cases may run.
 
     Most tests that run a case take theirs from `cases`.  A few cannot,
-    because they exist for one particular case: the matcher belongs to
-    `nopip1` and `nopip2`, and the no-`pip` test to `nopip3`.  Under
-    `FAST` and `COMPLETE` they run regardless, as they always have.
-    When `EZPKG_TEST` names cases, they run only for those, so that
-    a per-case coverage run measures that case and not these as well.
+    because they exist for one particular case, such as the no-`pip`
+    test for the shipping one.  Under `FAST` they run regardless.  When
+    `EZPKG_TEST` names cases, they run only for those, so that a
+    per-case coverage run measures that case and not these as well.
 
     Arguments:
     * `labels` (`str`):
@@ -257,9 +359,9 @@ def selected(*labels: str) -> tuple[str, ...]:
     Returns:
     * (`tuple[str, ...]`): Those of `labels` to run, possibly none.
     """
-    # Named cases narrow the set; the two choices leave it alone.
+    # Named cases narrow the set; `FAST` leaves it alone.
     choice: str = os.environ.get("EZPKG_TEST", "FAST")
-    if choice.upper() in ("FAST", "COMPLETE"):
+    if choice.upper() == "FAST":
         return labels
     chosen: tuple[str, ...] = cases()
     return tuple(label for label in labels if label in chosen)
@@ -274,8 +376,8 @@ def runs_cases(test: Marked) -> Marked:
 
     `ezpkg_coverage.py --per-case` measures the suite once with no
     cases, as a baseline, and then only the marked tests once per case,
-    which is what makes measuring sixteen cases take minutes rather
-    than hours.  An unmarked test that runs a case would be missing
+    which is what makes measuring a case take minutes rather than the
+    whole suite's time.  An unmarked test that runs a case would be missing
     from every per-case run, so its coverage would be credited to no
     case at all.  `test_case_runners_are_marked` checks the marking
     against the source.
@@ -321,10 +423,10 @@ def run_bootstrap_case(label: str, home: Path, index_url: str,
       the no-`pip` test passes one that has never had `pip`.
     * `safe_path` (`bool`):
       Run with `-P`, so that this directory, which holds `ezpkg.py`,
-      is not put on the child's `sys.path`.  Without it `nopip4` imports
-      the working copy and fetches nothing, which is right for a program
-      but defeats every test of the fetch.  Only the test that wants the
-      working copy found passes `False`.
+      is not put on the child's `sys.path`.  Without it the bootstrap
+      imports the working copy and fetches nothing, which is right for a
+      program but defeats every test of the fetch.  Only the test that
+      wants the working copy found passes `False`.
 
     Returns:
     * (`subprocess.CompletedProcess[str]`): The finished child.
@@ -394,10 +496,9 @@ def build_wheel(module: Path, distribution: str, version: str,
     any platform, which is what makes a wheel `pip` installable
     everywhere without a compiled component.  Another tag can be given,
     and then the wheel is pure Python wearing a compiled wheel's name.
-    That is a faithful input for anything which reads wheel filenames,
-    such as the matcher in `nopip1` and `nopip2` of `bootstrap.py`, because
-    that code never opens the archive; it is not a substitute for a
-    genuinely compiled wheel.  See 6.5.11 of `T.ccp`.
+    That is a faithful input for anything which reads wheel filenames
+    without opening the archive; it is not a substitute for a genuinely
+    compiled wheel.  See 6.5.11 of `T.ccp`.
 
     Arguments:
     * `module` (`Path`):
@@ -719,9 +820,9 @@ def dating_pip() -> Path | None:
 def pip_wheel() -> tuple[str, bytes]:
     """Return a runnable `pip` wheel built from the one installed here.
 
-    `nopip3` of `bootstrap.py` fetches `pip` itself from the JSON API,
-    and the suite never reaches the network, so every index has to be
-    able to hand out a `pip`.  The installed `pip` package is zipped as
+    `EZPkg.own_pip` fetches `pip` itself from the JSON API, and the
+    suite never reaches the network, so every index has to be able to
+    hand out a `pip`.  The installed `pip` package is zipped as
     it stands, with just enough `.dist-info` to be called a wheel.  It
     is never installed, only run as `python pip.whl/pip`, which needs
     nothing but `pip/__main__.py` and the vendored libraries beside it.
@@ -818,7 +919,7 @@ def build_index(wheels: list[Path],
         for wheel in files:
             (directory / wheel.name).write_bytes(wheel.read_bytes())
 
-    # Publish `pip` as well, so that `nopip3` has one to fetch.
+    # Publish `pip` as well, so that `EZPkg.own_pip` has one to fetch.
     name: str
     contents: bytes
     name, contents = pip_wheel()
@@ -908,14 +1009,14 @@ class _IndexHandler(http.server.SimpleHTTPRequestHandler):
     exactly what the two levels of a PEP 503 tree ask for.  Two things
     are added.  The request log is silenced, because it would
     otherwise interleave with the test output on standard error.  And
-    `/pypi/{project}/json` is answered from the tree, because `nopip1`
-    and `nopip2` of `bootstrap.py` read that endpoint with `urllib` rather
-    than going through `pip`.
+    `/pypi/{project}/json` is answered from the tree, because the
+    bootstrap and `EZPkg.own_pip` read that endpoint with `urllib`
+    rather than going through `pip`.
 
     The JSON is the modern per release shape, `{"urls": [...]}` with a
-    `filename` and a `url` in each entry, which is what those two
-    cases parse.  It is not PyPI's full payload; it is the subset they
-    read, which is the only part a test can check them against.
+    `filename` and a `url` in each entry, plus `releases`.  It is not
+    PyPI's full payload; it is the subset they read, which is the only
+    part a test can check them against.
 
     Constructor:
     * `_IndexHandler(...)`, by `http.server` rather than by hand.  The
@@ -1057,8 +1158,8 @@ class _IndexHandler(http.server.SimpleHTTPRequestHandler):
             self.send_error(404, f"no project {normalized}")
             return
 
-        # Build the subset of the payload that the `nopip` cases read:
-        # `urls` for `nopip1` and `nopip2`, and `releases` for `nopip3`,
+        # Build the subset of the payload that is read: `urls` and
+        # `digests` for the bootstrap, and `releases` for `EZPkg.own_pip`,
         # which chooses a `pip` by `requires_python` and `upload_time` and
         # checks it against `digests`.
         # Both are taken from the wheels themselves, the floor from their
@@ -1338,9 +1439,6 @@ class EZPkgTest(unittest.TestCase):
       The temporary directory holding everything this class builds.
     * `server` (`_IndexServer`):
       The server publishing `index`.
-    * `tagged` (`Path`):
-      A second wheel of the same package, wearing this interpreter's
-      compiled tag and carrying a `.data/purelib` member.
     * `wheel` (`Path`):
       The wheel built from `ezpkg.py`, tagged `py3-none-any`.
 
@@ -1353,7 +1451,6 @@ class EZPkgTest(unittest.TestCase):
     index_url: str
     root: Path
     server: _IndexServer
-    tagged: Path
     wheel: Path
 
     @classmethod
@@ -1364,17 +1461,7 @@ class EZPkgTest(unittest.TestCase):
         module: Path = Path(__file__).resolve().parent / f"{MODULE}.py"
         cls.wheel = build_wheel(module, DISTRIBUTION, VERSION, SUMMARY,
                                 cls.root / "dist", floor=FLOOR)
-        # A second wheel, wearing this interpreter's compiled tag and
-        # carrying a `.data/purelib` member.  `nopip1` and `nopip2` prefer it,
-        # which is the only way to reach their platform branch and their
-        # `.data` move; see 6.5.11 of `T.ccp`.
-        cls.tagged = build_wheel(module, DISTRIBUTION, VERSION, SUMMARY,
-                                 cls.root / "dist", tag=platform_tag(),
-                                 floor=FLOOR)
-        add_data_member(cls.tagged, "purelib", "beside_ezpkg.py",
-                        "BESIDE = True\n")
-        cls.index = build_index([cls.wheel, cls.tagged],
-                                cls.root / "index")
+        cls.index = build_index([cls.wheel], cls.root / "index")
 
         # Start the server last, so nothing can fail after it is up.
         cls.server, cls.index_url = serve_index(cls.index)
@@ -1560,20 +1647,6 @@ class EZPkgTest(unittest.TestCase):
         self.assertNotEqual(done.returncode, 0)
         self.assertFalse((target / f"{MODULE}.py").exists())
 
-    @runs_cases
-    def test_a_truncated_wheel_fails_nopip1(self) -> None:
-        """`nopip1` unzips the wheel itself, so it must fail too."""
-        # `zipfile` is what notices, since the fetch itself succeeded.
-        # `T.eoff` replaced the traceback with one line, so the
-        # assertion reads the message rather than the module name.
-        self.inject(".whl", "truncate")
-        if not selected("nopip1"):
-            self.skipTest("nopip1 is not selected")
-        done: subprocess.CompletedProcess[str] = self.run_case("nopip1")
-        self.assertNotEqual(done.returncode, 0)
-        self.assertIn(f"cannot fetch {MODULE}", done.stderr)
-        self.assertIn("not a zip file", done.stderr)
-
     def test_a_missing_project_page_fails_the_install(self) -> None:
         """A 404 for the project page is reported, not worked around."""
         # This is the missing `index.html` case carried over from Task 3.
@@ -1608,10 +1681,8 @@ class EZPkgTest(unittest.TestCase):
     def test_a_failed_fetch_is_one_line(self) -> None:
         """A case that cannot reach the index says so, without a traceback.
 
-        This is the `I.whwnn` issue.  Before `T.eoff`, `nopip1` buried
-        `Connection refused` under 47 lines of traceback and `pip1`
-        ended in `RuntimeError: pip failed` without ever mentioning the
-        network.
+        This is the `I.whwnn` issue: before `T.eoff`, a bootstrap could
+        bury `Connection refused` under 47 lines of traceback.
         """
         # A port nothing listens on stands in for a missing network.
         dead: str = "http://127.0.0.1:1/"
@@ -1627,24 +1698,21 @@ class EZPkgTest(unittest.TestCase):
                     {"PIP_RETRIES": "0", "PIP_TIMEOUT": "2"})
                 self.assertNotEqual(done.returncode, 0)
                 self.assertNotIn("Traceback", done.stderr)
-                # `nopip3` names its stage, since it may fail fetching
-                # the program's packages rather than `ezpkg` itself.
-                self.assertRegex(done.stderr, rf"cannot fetch {MODULE}"
-                                 rf"|{MODULE}: [a-z_ ]+ failed: ")
+                # The bootstrap names its stage, since it may fail
+                # fetching the program's packages rather than `ezpkg`.
+                self.assertRegex(done.stderr, rf"{MODULE}: [a-z_ ]+ failed: ")
 
     def test_json_api_lists_the_wheel(self) -> None:
-        """The synthesized JSON API answers in the shape `nopip1` reads."""
-        # Ask the way `nopip1` asks, by import name rather than PyPI name.
+        """The synthesized JSON API answers as the bootstrap reads it."""
+        # Ask the way the bootstrap asks, by import name, not PyPI name.
         url: str = f"{self.index_url}pypi/{MODULE}/json"
         payload: dict[str, Any]
         with urllib.request.urlopen(url, timeout=30) as response:
             payload = json.load(response)
 
-        # Both wheels are listed, the pure one and the tagged one, so
-        # that `nopip1` and `nopip2` have something to choose between.
-        listed: list[str] = sorted(entry["filename"]
-                                   for entry in payload["urls"])
-        self.assertEqual(listed, sorted([self.wheel.name, self.tagged.name]))
+        # The one wheel is listed, with the URL it is fetched from.
+        listed: list[str] = [entry["filename"] for entry in payload["urls"]]
+        self.assertEqual(listed, [self.wheel.name])
         entry: dict[str, Any]
         for entry in payload["urls"]:
             self.assertTrue(entry["url"].endswith(entry["filename"]))
@@ -1682,17 +1750,12 @@ class EZPkgTest(unittest.TestCase):
     def test_every_case_bootstraps_repeatedly(self) -> None:
         """Three runs in one cache all succeed.
 
-        This is the warm path, which nothing tested before.  It is
-        where `I.cctfd` lived: the guard every case uses asks whether
-        the package is a directory, a single module install is not
-        one, and `venv4` deletes the `pip` it would need for the
-        second fetch.  `EZPkg.repair_module_layout` is what
-        makes this pass.
-
-        Three runs rather than two, because the repair has to be
-        idempotent.  An earlier version of it passed two runs and broke
-        the cache on the third, by treating the `__init__.py` it had
-        just written as another single module to move.
+        This is the warm path, where `I.cctfd` lived: the guard of the
+        early bootstraps asked whether the package was a directory, and
+        a single module install is not one.  Three runs rather than two,
+        because `EZPkg.repair_module_layout`, which fixed that, has to be
+        idempotent: an earlier version of it broke the cache on the
+        third run.
         """
         # One HOME per case, used three times: cold, then warm twice.
         label: str
@@ -1717,77 +1780,6 @@ class EZPkgTest(unittest.TestCase):
         self.assertTrue(source.is_file())
 
     @runs_cases
-    def test_the_stdlib_cases_choose_the_tagged_wheel(self) -> None:
-        """`nopip1` and `nopip2` prefer the compiled tag, and move its `.data`.
-
-        Both regions were dead until the index carried a wheel with this
-        interpreter's tag: the matcher's platform branch short-circuits
-        on `py3-none-any`, and its `.data` move needs a wheel with a
-        `.data` tree.  See `I.wtmifs` and 6.5.11 of `T.ccp`.
-
-        What this cannot check is that a genuinely compiled wheel would
-        import, since ours is pure Python wearing a compiled name.
-        """
-        # The `.data/purelib` member is the evidence: it only appears
-        # beside the module if the move ran.
-        label: str
-        home: Path
-        done: subprocess.CompletedProcess[str]
-        wanted: tuple[str, ...] = selected("nopip1", "nopip2")
-        if not wanted:
-            self.skipTest("neither nopip1 nor nopip2 is selected")
-        for label in wanted:
-            with self.subTest(case=label):
-                home = Path(tempfile.mkdtemp(prefix=f"tagged-{label}-",
-                                             dir=self.root))
-                done = run_bootstrap_case(label, home, self.index_url)
-                self.assertEqual(done.returncode, 0, done.stderr[-400:])
-                moved: list[Path] = list(
-                    (home / ".ezpkg").rglob("beside_ezpkg.py"))
-                self.assertEqual(len(moved), 1, done.stdout)
-                self.assertNotIn(".data", str(moved[0]))
-
-    @runs_cases
-    def test_no_compatible_wheel_is_reported(self) -> None:
-        """A wheel for another platform is refused, not installed.
-
-        The `raise RuntimeError("no compatible wheel found")` in `nopip1`
-        and `nopip2` had never executed.  This is as close as a Linux machine
-        can get to the failure `I.wtmifs` predicts, which is a manylinux
-        wheel being taken on Alpine: here the only wheel on offer is
-        tagged for Windows, so nothing matches.
-        """
-        # An index of its own, holding one wheel for the wrong platform.
-        module: Path = Path(__file__).resolve().parent / f"{MODULE}.py"
-        wrong: Path = build_wheel(module, DISTRIBUTION, VERSION, SUMMARY,
-                                  self.root / "wrong-dist",
-                                  tag="cp312-cp312-win_amd64")
-        index: Path = build_index([wrong], self.root / "wrong-index")
-        server: _IndexServer
-        url: str
-        server, url = serve_index(index)
-        self.addCleanup(server.server_close)
-        self.addCleanup(server.shutdown)
-
-        # Both cases read the JSON API, so both see the tag and give
-        # up.  `nopip2` as well as `nopip1`, because each carries its own
-        # copy of the matcher and its own `raise`.
-        label: str
-        home: Path
-        done: subprocess.CompletedProcess[str]
-        wanted: tuple[str, ...] = selected("nopip1", "nopip2")
-        if not wanted:
-            self.skipTest("neither nopip1 nor nopip2 is selected")
-        for label in wanted:
-            with self.subTest(case=label):
-                home = Path(tempfile.mkdtemp(prefix=f"wrong-{label}-",
-                                             dir=self.root))
-                done = run_bootstrap_case(label, home, url)
-                self.assertNotEqual(done.returncode, 0)
-                self.assertIn("no compatible wheel found", done.stderr)
-                self.assertNotIn("Traceback", done.stderr)
-
-    @runs_cases
     def test_the_shipping_case_says_which_stage_failed(self) -> None:
         """A failure names the stage it happened in, and the error's type.
 
@@ -1810,8 +1802,8 @@ class EZPkgTest(unittest.TestCase):
         """An `ezpkg` already on `sys.path` is used, and nothing fetched.
 
         Under `uv run`, or beside a working copy, `ezpkg` imports
-        before the bootstrap has done anything.  `nopip3` fetched `pip`
-        and `ezpkg` regardless, and failed with no network.  Here the
+        before the bootstrap has done anything.  An early bootstrap
+        fetched them regardless, and failed with no network.  Here the
         index is dead and this directory, with `ezpkg.py` in it, is on
         the child's `sys.path`.  See `T.ewar` and `I.apiia`.
         """
@@ -1831,10 +1823,9 @@ class EZPkgTest(unittest.TestCase):
     def test_the_shipping_case_refuses_a_damaged_wheel(self) -> None:
         """An `ezpkg` wheel that fails its SHA-256 is refused, not kept.
 
-        Without the check a truncated download became `pip.whl`, and the
-        failure surfaced one stage later as a zip error from running it,
-        which said nothing about the download.  `nopip8` keeps `ezpkg`'s
-        wheel the same way.  See issue `I.fpfipe`.
+        Without the check a truncated download would be kept as
+        `ezpkg.whl`, and the failure would surface later as a zip error,
+        which says nothing about the download.  See issue `I.fpfipe`.
         """
         # Half of every wheel, so the digest PyPI lists cannot match.
         if not selected(SHIPPING):
@@ -1854,9 +1845,8 @@ class EZPkgTest(unittest.TestCase):
         floor is exactly this Python, and the newest, which wants a
         Python that does not exist yet.  The middle one is right.  When
         `pip` drops a Python, this is what keeps every pasted bootstrap
-        on that Python working; see issue `I.bfnprp`.  `nopip7` chose
-        here; since `nopip8`, `EZPkg.own_pip` does, from the index
-        `PIP_INDEX_URL` names (`json_api`).
+        on that Python working; see issue `I.bfnprp`.  `EZPkg.own_pip`
+        chooses, from the index `PIP_INDEX_URL` names (`json_api`).
         """
         # Stand-in `pip` wheels, uploaded oldest to newest.
         minor: int = sys.version_info[1]
@@ -1891,22 +1881,6 @@ class EZPkgTest(unittest.TestCase):
         with zipfile.ZipFile(home / ".ezpkg" / "pip.whl") as kept:
             self.assertIn("pip-98.0.dist-info/METADATA", kept.namelist())
 
-    @runs_cases
-    def test_json_api_cases_bootstrap_end_to_end(self) -> None:
-        """`nopip1` and `nopip2` fetch and import through the JSON API."""
-        # These two are the only cases that bypass pip entirely.
-        label: str
-        done: subprocess.CompletedProcess[str]
-        wanted: tuple[str, ...] = selected("nopip1", "nopip2")
-        if not wanted:
-            self.skipTest("neither nopip1 nor nopip2 is selected")
-        for label in wanted:
-            with self.subTest(case=label):
-                done = self.run_case(label)
-                self.assertEqual(done.returncode, 0, done.stderr)
-                self.assertIn(f"module {MODULE}", done.stdout)
-                self.assertIn(ezpkg.__version__, done.stdout)
-
     def cached_module(self, name: str) -> tuple[Path, Path]:
         """Plant a copy of this module where a case would install it.
 
@@ -1917,8 +1891,8 @@ class EZPkgTest(unittest.TestCase):
         Returns:
         * (`tuple[Path, Path]`): The cache root, and the planted
           `ezpkg.py` inside it.  The path is the deep one that
-          the six virtual environment cases install into, because that
-          is the harder of the two for the repair to find.
+          a virtual environment installs into, because that is the
+          harder place for the repair to find.
         """
         # Plant it deep, where `sysconfig` puts a venv's purelib.
         root: Path = self.root / name
@@ -2011,41 +1985,49 @@ class EZPkgTest(unittest.TestCase):
         """A typo in `EZPKG_TEST` is refused, not ignored."""
         # Silently running the fast tests would be worse than a refusal.
         with (unittest.mock.patch.dict(
-                  os.environ, {"EZPKG_TEST": "COMPLEET"}),
+                  os.environ, {"EZPKG_TEST": "FAAST"}),
               self.assertRaises(ValueError) as caught):
             cases()
-        self.assertIn("COMPLEET", str(caught.exception))
+        self.assertIn("FAAST", str(caught.exception))
 
-        # And the slow choice really does mean every case.
-        with unittest.mock.patch.dict(
-                os.environ, {"EZPKG_TEST": "COMPLETE"}):
+        # And the usual choice means every case.
+        with unittest.mock.patch.dict(os.environ, {"EZPKG_TEST": "FAST"}):
             self.assertEqual(cases(), tuple(bootstrap.MECHANISMS))
 
     def test_cases_accepts_case_names(self) -> None:
-        """Names select those cases, in `bootstrap.py` order."""
-        # Out of order and padded, and still read the way it was meant.
+        """Names select those cases, and `NONE` selects none."""
+        # Padded, and still read the way it was meant.
         with unittest.mock.patch.dict(
-                os.environ, {"EZPKG_TEST": "pip2, venv1"}):
-            self.assertEqual(cases(), ("venv1", "pip2"))
-            self.assertEqual(selected("nopip1", "pip2"), ("pip2",))
-            self.assertEqual(selected("nopip1"), ())
+                os.environ, {"EZPKG_TEST": f" {SHIPPING} "}):
+            self.assertEqual(cases(), (SHIPPING,))
+            self.assertEqual(selected(SHIPPING, "other"), (SHIPPING,))
 
-        # The two choices leave a test's own cases alone.
+        # `FAST` leaves a test's own cases alone.
         with unittest.mock.patch.dict(os.environ, {"EZPKG_TEST": "FAST"}):
-            self.assertEqual(selected("nopip1", "nopip2"),
-                             ("nopip1", "nopip2"))
+            self.assertEqual(selected(SHIPPING, "other"),
+                             (SHIPPING, "other"))
 
         # `NONE` is the baseline, and selects nothing anywhere.
         with unittest.mock.patch.dict(os.environ, {"EZPKG_TEST": "none"}):
             self.assertEqual(cases(), ())
-            self.assertEqual(selected("nopip1", "nopip2"), ())
+            self.assertEqual(selected(SHIPPING), ())
 
         # A name that is not a case is refused like any other typo.
         with (unittest.mock.patch.dict(
-                  os.environ, {"EZPKG_TEST": "pip2,venv9"}),
+                  os.environ, {"EZPKG_TEST": f"{SHIPPING},nopip1"}),
               self.assertRaises(ValueError) as caught):
             cases()
-        self.assertIn("venv9", str(caught.exception))
+        self.assertIn("nopip1", str(caught.exception))
+
+    def test_a_nonsense_argument_gets_the_usage_line(self) -> None:
+        """`bootstrap.py` refuses an argument that names no bootstrap."""
+        # Quick, and needs no network.
+        script: Path = Path(__file__).resolve().parent / "bootstrap.py"
+        done: subprocess.CompletedProcess[str] = subprocess.run(
+            [sys.executable, str(script), "not-a-case"],
+            capture_output=True, text=True, check=False)
+        self.assertNotEqual(done.returncode, 0)
+        self.assertIn(f"NAME is one of {SHIPPING}", done.stderr)
 
     def test_case_runners_are_marked(self) -> None:
         """A test runs a bootstrap case exactly when it is `runs_cases`.
@@ -2054,12 +2036,12 @@ class EZPkgTest(unittest.TestCase):
         test that runs a case without the mark would have its coverage
         credited to no case, and a decision to delete a case would rest
         on numbers that are quietly wrong.  Reading the source is crude,
-        and that is the point: the three helpers are the only ways a test
+        and that is the point: the two helpers are the only ways a test
         reaches a case, so naming one of them is what has to be marked.
         """
         # Spelled in pieces, so that this test does not match itself.
         calls: list[str] = [f"{name}(" for name in
-                            ("run_case", "run_bootstrap_case", "real_case")]
+                            ("run_case", "run_bootstrap_case")]
         found: int = 0
         holder: object
         for holder in list(vars(sys.modules[__name__]).values()):
@@ -2320,7 +2302,7 @@ class TlsTest(unittest.TestCase):
 
         `SSL_CERT_FILE` is what `urllib` honours, through OpenSSL's own
         default verify paths, and `PIP_CERT` is what `pip` honours.
-        Both are environment variables, so the `nopip` cases need no
+        Both are environment variables, so the bootstrap needs no
         `ssl` context written into them and no case gains a line.
         """
         # One trust store, two spellings, because two clients read it.
@@ -2731,7 +2713,7 @@ class InstallTest(unittest.TestCase):
 
         This is the claim `README.md` makes: Python and the pasted
         bootstrap are all that is needed.  An interpreter that has never
-        had `pip` stands in for such a machine.  `nopip8` fetches this
+        had `pip` stands in for such a machine.  The bootstrap fetches this
         project's wheel and imports from it, and `EZPkg` then fetches
         `pip`'s wheel, keeps it as `pip.whl`, and uses it to fetch what
         the program declares.
@@ -3645,8 +3627,11 @@ class InstallTest(unittest.TestCase):
 
     @unittest.skipIf(dating_pip() is None,
                      "no pip here filters by upload date")
-    def test_an_import_newer_than_the_stash_date_says_upgrade(self) -> None:
-        """The stash's date stops a newer import, and `upgrade` is named."""
+    def test_an_import_newer_than_the_stash_date_moves_it(self) -> None:
+        """The stash's date moves to today for a newer import, and says so.
+
+        Only a date written into Part 1 stops the run (Wayne, 2026-10-24).
+        """
         # Every `sprocket` is dated after 2019, and `widget` before.
         self.dated_sprocket()
         wheel: Path
@@ -3673,14 +3658,21 @@ class InstallTest(unittest.TestCase):
         record.write_text(json.dumps(kept))
         written: str = program.read_text()
         done: subprocess.CompletedProcess[str] = self.run_program(program)
-        self.assertNotEqual(done.returncode, 0)
+        self.assertEqual(done.returncode, 0, done.stderr)
         flat: str = " ".join(done.stderr.split())
-        self.assertRegex(flat, r"prog\.py line \d+ imports `sprocket`, but "
-                         r"no release of it existed before 2019-01-01, the "
-                         r"date prog\.py's versions are frozen at\. To "
-                         r'upgrade .*, set `update-frequency = "daily"` in '
-                         r"prog\.py\.toml and run prog\.py again\.")
+        self.assertRegex(flat, r"prog\.py line \d+ imports `sprocket`, "
+                         r"which is newer than 2019-01-01, so prog\.py "
+                         r"moves to today's versions of all its packages")
         self.assertEqual(program.read_text(), written)
+
+        # Dated afresh, and nothing to say on the next run.
+        kept = json.loads(record.read_text())
+        self.assertNotEqual(kept["stash"].get("exclude-newer"),
+                            "2019-01-01T00:00:00Z")
+        self.assertTrue(kept["stash"].get("exclude-newer"))
+        again: subprocess.CompletedProcess[str] = self.run_program(program)
+        self.assertEqual(again.returncode, 0, again.stderr)
+        self.assertNotIn("newer than", again.stderr)
 
     def dated_sprocket(self) -> None:
         """Date `sprocket` 1.0.0 to 2020 and 2.0.0 to 2024 on the index.
@@ -4081,7 +4073,7 @@ class InstallTest(unittest.TestCase):
         self.assertEqual(ezpkg.EZPkg(root).details([wheel]),
                          ["1. cowsay 6.1: Moo."])
 
-        # `nopip8` passes nothing: its `ezpkg.whl`, in a cache with
+        # The bootstrap passes nothing: its `ezpkg.whl`, in a cache with
         # nothing installed yet, is what says a first run.
         fetched: Path = self.root / "fetched-cache"
         fetched.mkdir()
@@ -5154,7 +5146,7 @@ class InstallTest(unittest.TestCase):
         from this tree; a `zipapp` needs the real thing, because the
         build takes it out.  `ezpkg` cannot be fetched from the local
         index the way the bootstrap fetches it from PyPI, so the HOME
-        already holds it where `nopip8` keeps it, `ezpkg.whl`, holding
+        already holds it where the bootstrap keeps it, `ezpkg.whl`, holding
         this tree's `ezpkg.py` and no `.dist-info`, as a source copy
         would (`from_wheel`); `stamp_wheel` adds one.
 
@@ -6852,145 +6844,6 @@ class InstallTest(unittest.TestCase):
         self.assertEqual(done.stdout.split(), ["[]", "None"])
 
 
-class HarnessTest(unittest.TestCase):
-    """Exercise `bootstrap.py`'s measurement harness.
-
-    Those functions run when `bootstrap.py` is invoked with no arguments
-    to print its table, which the suite never does, so they were the
-    largest uncovered region in the project.  Three of the four are pure
-    and quick; `run_tests` is not, because it runs every case three
-    times, and stays uncovered on purpose.
-
-    Constructor:
-    * `HarnessTest()`, by `unittest` rather than by hand.
-    """
-
-    def test_measure_source_counts_the_shipping_case(self) -> None:
-        """The counts come from parsing the file, not from a table."""
-        # `SHIPPING` is the one that ships; see `T.npp`.
-        counts: dict[str, tuple[int, int]] = bootstrap.measure_source()
-        self.assertEqual(sorted(counts), sorted(bootstrap.MECHANISMS))
-        imports: int
-        lines: int
-        imports, lines = counts[SHIPPING]
-        self.assertEqual(imports, 4)
-        self.assertGreater(lines, 5)
-
-    def test_the_recorded_table_matches_the_measurement(self) -> None:
-        """The table in the docstring agrees with the code it describes.
-
-        This is the test that was missing on 2026-09-29, when the
-        `paste` column was found to have been three lines short in every
-        row since `SHARED_LINES` changed.  A hand pasted table drifts;
-        this is what notices.
-        """
-        # Parse the table out of the module docstring and compare.
-        counts: dict[str, tuple[int, int]] = bootstrap.measure_source()
-        document: str = bootstrap.__doc__ or ""
-        rows: int = 0
-        line: str
-        for line in document.splitlines():
-            fields: list[str] = [one.strip() for one in line.split("|")]
-            if len(fields) != 10 or fields[1] not in bootstrap.MECHANISMS:
-                continue
-            rows += 1
-            label: str = fields[1]
-            with self.subTest(case=label):
-                self.assertEqual(int(fields[3]), counts[label][0],
-                                 "imports column")
-                self.assertEqual(int(fields[4]), counts[label][1],
-                                 "lines column")
-                self.assertEqual(
-                    int(fields[5]),
-                    counts[label][1] + bootstrap.SHARED_LINES,
-                    "paste column")
-        self.assertEqual(rows, len(bootstrap.MECHANISMS), document[:200])
-
-    def test_directory_size_steps_over_what_it_cannot_stat(self) -> None:
-        """An entry that vanishes mid-walk is skipped, not fatal.
-
-        Only a race reaches this in earnest -- a file removed between the
-        listing and the look -- so `lstat` is patched to make it
-        deterministic.
-        """
-        # The tree measures zero rather than raising.
-        root: Path = Path(tempfile.mkdtemp(prefix="harness-gone-"))
-        self.addCleanup(shutil.rmtree, root, ignore_errors=True)
-        (root / "vanishing.bin").write_bytes(b"x" * 4096)
-        with unittest.mock.patch.object(
-                bootstrap.pathlib.Path, "lstat",
-                side_effect=OSError("it went away")):
-            self.assertEqual(bootstrap.directory_size(root), 0)
-
-    def test_directory_size_counts_a_tree(self) -> None:
-        """A tree measures more than nothing, and a missing one zero."""
-        # Blocks rather than apparent size, so only the shape is checked.
-        root: Path = Path(tempfile.mkdtemp(prefix="harness-"))
-        self.addCleanup(shutil.rmtree, root, ignore_errors=True)
-        (root / "inner").mkdir()
-        (root / "inner" / "big.bin").write_bytes(b"x" * 40000)
-        self.assertGreater(bootstrap.directory_size(root), 0)
-        self.assertEqual(bootstrap.directory_size(root / "absent"), 0)
-
-    def test_the_report_names_cases_that_failed(self) -> None:
-        """A case that fails is reported as a failure, by name.
-
-        The report's whole purpose is measurement, so the interesting
-        path is the one where a case does not work: the numbers are
-        meaningless then, and saying which case broke is the only useful
-        output.  `subprocess.run` is patched rather than breaking a real
-        index, which makes sixteen cases times three repetitions
-        instantaneous instead of minutes.
-        """
-        # Every case "fails", so every case must be named.
-        refused: subprocess.CompletedProcess[str] = (
-            subprocess.CompletedProcess(
-                args=["python3"], returncode=1, stdout="",
-                stderr="pretend the index was unreachable"))
-        printed: io.StringIO = io.StringIO()
-        # `run_tests` imports `subprocess` inside itself, so there is no
-        # attribute on `bootstrap` to patch; the module is shared.
-        with (unittest.mock.patch.object(subprocess, "run",
-                                         return_value=refused),
-              contextlib.redirect_stdout(printed),
-              contextlib.redirect_stderr(io.StringIO())):
-            bootstrap.run_tests()
-
-        report: str = printed.getvalue()
-        self.assertIn("FAILURES:", report)
-        self.assertIn("pretend the index was unreachable", report)
-        label: str
-        for label in bootstrap.MECHANISMS:
-            with self.subTest(case=label):
-                self.assertIn(f"case {label}:", report)
-
-    def test_format_table_is_rectangular(self) -> None:
-        """Every line comes out exactly `TABLE_WIDTH` wide.
-
-        Including the continuation lines a long mechanism name wraps
-        onto, which is the part that would go wrong unnoticed.
-        """
-        # One short row and one whose description has to wrap.
-        rows: list[list] = [
-            ["pip2", "no venv, pip subprocess", 1, 10, 16, "2.7 s", "0.1 s",
-             1762],
-            ["nopip2", ("venv(no pip), stdlib wheel and a very long tail that "
-                    "must wrap"), 7, 51, 57, "1.4 s", "0.2 s", 1714],
-        ]
-        table: str = bootstrap.format_table(rows)
-        rendered: str
-        for rendered in table.splitlines():
-            with self.subTest(line=rendered):
-                self.assertEqual(len(rendered), bootstrap.TABLE_WIDTH)
-
-        # The mechanism column wraps, so the text arrives in pieces;
-        # that it wraps at all is what this is checking.
-        self.assertIn("no venv, pip", table)
-        self.assertIn("subprocess", table)
-        self.assertIn("wrap", table)
-        self.assertEqual(table.count("| nopip2 |"), 1, table)
-
-
 class BootstrapCheckTest(unittest.TestCase):
     """Recognise a pasted bootstrap, and say whether it is current.
 
@@ -7612,41 +7465,43 @@ class CoverageToolTest(unittest.TestCase):
     def test_compare_attributes_lines_to_cases(self) -> None:
         """Beyond, only, own body and the greedy order all add up.
 
-        The shipping case goes first in the greedy order however little
-        it adds, and a case's `def` line, which runs whenever the file is
-        imported, is nobody's.
+        `bootstrap.py` has one case, so two pretend ones join it here,
+        with no body of their own.  The shipping case goes first in the
+        greedy order however little it adds, and a case's `def` line,
+        which runs whenever the file is imported, is nobody's.
         """
-        # `nopip1` adds 12 and 13, `nopip2` only 12, and the shipping
-        # case 12 and 14, all over a baseline of 10 and 11.
+        # The shipping case adds 12 and 14 and runs one statement of its
+        # own; `first` adds 12 and 13, and `second` only 12, all over a
+        # baseline of 10 and 11.
         bodies: dict[str, tuple[set[int], set[int]]] = (
             ezpkg_coverage.case_bodies())
-        statement: int = min(bodies["nopip1"][1])
-        def_line: int = min(bodies["nopip1"][0])
+        statement: int = min(bodies[SHIPPING][1])
+        def_line: int = min(bodies[SHIPPING][0])
         self.save(ezpkg_coverage.BASELINE,
                   [("ezpkg.py", 10), ("ezpkg.py", 11)])
-        self.save("nopip1", [("ezpkg.py", 10), ("ezpkg.py", 12),
-                             ("ezpkg.py", 13),
-                             ("bootstrap.py", statement)])
-        self.save("nopip2", [("ezpkg.py", 12)])
-        # `nopip3` no longer ships but is still a fast case, and adds
-        # nothing here.
-        self.save("nopip3", [])
         self.save(SHIPPING, [("ezpkg.py", 12), ("ezpkg.py", 14),
-                             ("bootstrap.py", def_line)])
-        text: str = ezpkg_coverage.compare(self.root)
+                             ("bootstrap.py", statement)])
+        self.save("first", [("ezpkg.py", 10), ("ezpkg.py", 12),
+                            ("ezpkg.py", 13), ("bootstrap.py", def_line)])
+        self.save("second", [("ezpkg.py", 12)])
+        mechanisms: dict[str, Callable[[], None]] = dict(
+            bootstrap.MECHANISMS, first=print, second=print)
+        with unittest.mock.patch.object(bootstrap, "MECHANISMS",
+                                        mechanisms):
+            text: str = ezpkg_coverage.compare(self.root)
 
         # The per-case table, the greedy order, and the line listings.
         self.assertIn("The baseline covers 2 lines", text)
         self.assertNotIn("No counts for", text)
-        self.assertIn("| nopip1 | 1 of ", text)
-        self.assertIn(" | 2 | 2 | 1 | 1 |", text)
-        self.assertIn(f"| {SHIPPING} | 0 of ", text)
+        self.assertIn(f"| {SHIPPING} | 1 of ", text)
+        self.assertIn("| first | 0 of 0 | 2 | 2 | 1 | 1 |", text)
         self.assertIn(f"| 1 | {SHIPPING} | 2 | 4 |", text)
-        self.assertIn("| 2 | nopip1 | 1 | 5 |", text)
-        self.assertIn("| 3 | nopip2 | 0 | 5 |", text)
+        self.assertIn("| 2 | first | 1 | 5 |", text)
+        self.assertIn("| 3 | second | 0 | 5 |", text)
         self.assertIn(f"## Only `{SHIPPING}`", text)
+        self.assertIn("ezpkg.py:13:", text)
         self.assertIn("ezpkg.py:14:", text)
-        self.assertNotIn("## Only `nopip2`", text)
+        self.assertNotIn("## Only `second`", text)
         self.assertNotIn(f"bootstrap.py:{def_line}:", text)
 
     def test_compare_names_missing_runs(self) -> None:
@@ -7723,16 +7578,16 @@ class CoverageToolTest(unittest.TestCase):
                 ezpkg_coverage.subprocess, "run",
                 return_value=finished) as run:
             name, status, seconds = ezpkg_coverage.measure_one(
-                "pip2", "pip2", True, self.root)
-        self.assertEqual((name, status), ("pip2", 0))
+                SHIPPING, SHIPPING, True, self.root)
+        self.assertEqual((name, status), (SHIPPING, 0))
         self.assertGreaterEqual(seconds, 0.0)
-        self.assertTrue((self.root / "pip2" / "log.txt").is_file())
+        self.assertTrue((self.root / SHIPPING / "log.txt").is_file())
         command: list[str] = run.call_args.args[0]
-        self.assertIn(str(self.root / "pip2"), command)
+        self.assertIn(str(self.root / SHIPPING), command)
         self.assertIn("--children", command)
         self.assertIn("--marked-only", command)
         self.assertEqual(run.call_args.kwargs["env"]["EZPKG_TEST"],
-                         "pip2")
+                         SHIPPING)
 
         # The baseline runs everything, so it asks for no narrowing.
         with unittest.mock.patch.object(
@@ -7773,7 +7628,7 @@ class CoverageToolTest(unittest.TestCase):
         self.assertIn("FAILED", told.getvalue())
         self.assertEqual(sorted(calls), sorted(
             [(ezpkg_coverage.BASELINE, "NONE", False)]
-            + [(label, label, True) for label in FAST_CASES]))
+            + [(label, label, True) for label in bootstrap.MECHANISMS]))
 
     def test_main_compare_needs_a_directory(self) -> None:
         """`--compare` alone is refused, as `argparse` refuses things."""
@@ -7832,101 +7687,6 @@ class CoverageToolTest(unittest.TestCase):
             self.assertEqual(ezpkg_coverage.main(), 0)
         self.assertEqual(ran.call_args.args[0][1],
                          str(copy / "ezpkg_coverage.py"))
-
-
-@unittest.skipUnless(os.environ.get("EZPKG_REPORT"),
-                     "set EZPKG_REPORT to run bootstrap.py's own report")
-class ReportTest(unittest.TestCase):
-    """Run `bootstrap.py` with no arguments, which prints its table.
-
-    `run_tests` is the largest thing in this project that the suite
-    never reaches: it runs every case `REPETITIONS` times, cold and
-    warm, which is minutes of virtual environment building.  Opt in for
-    that reason, not because it is unimportant -- the table it produces
-    is what every `paste` figure in the logbook is quoted from.
-
-    Attributes:
-    * `root` (`Path`):
-      A temporary directory holding the index it is aimed at.
-    * `server` (`_IndexServer`):
-      The server publishing that index.
-    * `index_url` (`str`):
-      Its base URL.
-
-    Constructor:
-    * `ReportTest()`, by `unittest` rather than by hand.
-    """
-
-    root: Path
-    server: _IndexServer
-    index_url: str
-
-    @classmethod
-    def setUpClass(cls) -> None:
-        """Publish this project into a throwaway index."""
-        # The cases fetch `ezpkg` itself, so that is what is served.
-        cls.root = Path(tempfile.mkdtemp(prefix="report-"))
-        module: Path = Path(__file__).resolve().parent / f"{MODULE}.py"
-        wheel: Path = build_wheel(module, DISTRIBUTION, VERSION, SUMMARY,
-                                  cls.root / "dist", floor=FLOOR)
-        cls.server, cls.index_url = serve_index(
-            build_index([wheel], cls.root / "index"))
-
-    @classmethod
-    def tearDownClass(cls) -> None:
-        """Stop the server and remove what the class built."""
-        # Stop serving before the tree underneath goes away.
-        cls.server.shutdown()
-        cls.server.server_close()
-        shutil.rmtree(cls.root, ignore_errors=True)
-
-    def test_the_report_runs_every_case_and_prints_a_table(self) -> None:
-        """The whole measurement harness, end to end.
-
-        Every case is run, timed, measured for disk use, and rendered.
-        The assertions are deliberately about shape rather than about
-        numbers: the numbers are measurements of this machine and will
-        differ on the next one.
-        """
-        # `HOME` is given a throwaway per case by `run_tests` itself, so
-        # the real `~/.ezpkg` is untouched.
-        script: Path = Path(__file__).resolve().parent / "bootstrap.py"
-        environment: dict[str, str] = dict(
-            os.environ, PIP_INDEX_URL=self.index_url,
-            BOOTSTRAP_PACKAGE=MODULE,
-            BOOTSTRAP_JSON_API=f"{self.index_url}pypi", CI="1")
-        environment.pop("VIRTUAL_ENV", None)
-        done: subprocess.CompletedProcess[str] = subprocess.run(
-            [sys.executable, str(script)], env=environment,
-            cwd=str(self.root), capture_output=True, text=True, check=False)
-        self.assertEqual(done.returncode, 0, done.stderr[-2000:])
-
-        # One row per case, and every line the width the table promises.
-        # The label column's width comes from `bootstrap.py` rather than
-        # being written down here: it was 4 until the cases were named,
-        # and this test went on looking for `| venv1 |` after it became
-        # 6, which only an opt-in run could notice.
-        width: int = bootstrap.COLUMN_WIDTHS[0]
-        label: str
-        for label in bootstrap.MECHANISMS:
-            with self.subTest(case=label):
-                self.assertIn(f"| {label:<{width}} |", done.stdout)
-        rules: int = done.stdout.count("+" + "-" * (width + 2) + "+")
-        self.assertGreaterEqual(rules, 3, done.stdout[:400])
-
-    def test_a_nonsense_argument_gets_the_usage_line(self) -> None:
-        """An argument that names no case is refused, quickly.
-
-        The one branch of the entry point that needs neither a network
-        nor a measurement.
-        """
-        # Fast, and it costs nothing to keep honest.
-        script: Path = Path(__file__).resolve().parent / "bootstrap.py"
-        done: subprocess.CompletedProcess[str] = subprocess.run(
-            [sys.executable, str(script), "not-a-case"],
-            capture_output=True, text=True, check=False)
-        self.assertNotEqual(done.returncode, 0)
-        self.assertIn("takes no arguments", done.stderr)
 
 
 class MetadataTest(unittest.TestCase):
@@ -10665,38 +10425,6 @@ class PyPITest(unittest.TestCase):
         self.assertIn("checked", printed)
         self.assertIn(".dev", printed)
 
-    def real_case(self, label: str, package: str) -> str:
-        """Run one `bootstrap.py` case against real PyPI.
-
-        `nopip1` and `nopip2` are the two that choose a wheel themselves, with
-        the five line matcher of issue `I.wtmifs`, rather than leaving it
-        to `pip`.  Everything else has only ever met wheels this project
-        built, so this is the first real tag soup they have seen.
-
-        Arguments:
-        * `label` (`str`):
-          The case to run.
-        * `package` (`str`):
-          A distribution whose name is also its import name, because
-          `bootstrap.py` has one `PACKAGE` for both.
-
-        Returns:
-        * (`str`): The last line the case printed, or its diagnosis.
-        """
-        # A `HOME` of its own, since every case installs into `~`.
-        home: Path = Path(tempfile.mkdtemp(prefix=f"real-{label}-",
-                                           dir=self.root))
-        script: Path = Path(__file__).resolve().parent / "bootstrap.py"
-        environment: dict[str, str] = dict(
-            os.environ, HOME=str(home), BOOTSTRAP_PACKAGE=package,
-            BOOTSTRAP_JSON_API="https://pypi.org/pypi")
-        environment.pop("PIP_INDEX_URL", None)
-        environment.pop("VIRTUAL_ENV", None)
-        done: subprocess.CompletedProcess[str] = subprocess.run(
-            [sys.executable, str(script), label], env=environment,
-            capture_output=True, text=True, check=False)
-        return (done.stdout + done.stderr).strip().splitlines()[-1]
-
     @runs_cases
     def test_the_shipping_path_against_pypi(self) -> None:
         """No `pip`, the shipping bootstrap, then a real package, for real.
@@ -10768,51 +10496,6 @@ class PyPITest(unittest.TestCase):
         kept: bytes = (cache / "pip.whl").read_bytes()
         self.assertNotEqual(hashlib.sha256(kept).hexdigest(),
                             hashlib.sha256(pip_wheel()[1]).hexdigest())
-
-    @runs_cases
-    def test_the_matcher_handles_real_wheels(self) -> None:
-        """A pure wheel and a platform wheel both arrive, from PyPI.
-
-        `certifi` is `py3-none-any`; `coverage` ships a `cp312` wheel
-        for this machine and a pure fallback, so the preference order
-        is doing real work.
-        """
-        # Both cases that choose for themselves, both packages.
-        label: str
-        package: str
-        wanted: tuple[str, ...] = selected("nopip1", "nopip2")
-        if not wanted:
-            self.skipTest("neither nopip1 nor nopip2 is selected")
-        for label in wanted:
-            for package in ("certifi", "coverage"):
-                with self.subTest(case=label, package=package):
-                    self.assertIn(f"module {package} version",
-                                  self.real_case(label, package))
-
-    @(unittest.expectedFailure if ABI3_GAP else lambda method: method)
-    @runs_cases
-    def test_the_matcher_handles_abi3_wheels(self) -> None:
-        """A stable ABI wheel is missed, which is issue `I.wtmifs`.
-
-        Measured 2026-09-28: `cryptography` publishes
-        `cp39-abi3` and `cp311-abi3` wheels, because an abi3 wheel is
-        tagged with the **lowest** Python it supports and then serves
-        every later one.  The matcher looks for `cp312-abi3` on this
-        machine and finds nothing, so a package that `pip` installs
-        without comment cannot be fetched at all.
-
-        Written as an expected failure on purpose: it documents the gap
-        today, and the day the matcher learns about abi3 the suite
-        reports an unexpected success rather than staying quiet.  Only
-        from 3.12, though: under 3.11 the `cp311-abi3` wheel is an exact
-        match, the gap does not show, and the test simply passes; see
-        `ABI3_GAP`.
-        """
-        # `pip` has no difficulty with this package; we do.
-        if not selected("nopip1"):
-            self.skipTest("nopip1 is not selected")
-        self.assertIn("module cryptography version",
-                      self.real_case("nopip1", "cryptography"))
 
     def test_a_real_wheel_carries_a_pth_file(self) -> None:
         """`setuptools` ships `.pth`, which `T.pf` is about.

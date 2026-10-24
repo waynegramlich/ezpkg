@@ -48,3 +48,15 @@ Earlier entries are in `History.md`.
   also mends an existing cache).
 * The quick suite is `./ezpkg_test.py` (`FAST`): it must run the latest
   bootstrap's case.  `EZPKG_TEST=NONE` is only the coverage baseline.
+
+## 2026-10-24
+
+* `T.rsbr` (README sweep) closed; `T.utpat` is the only open child.
+* Code changed today, so the next test.pypi.org rehearsal must upload
+  a fresh build (bootstrap `2026-10-23`, `too_new` moves a developer's
+  date, `bootstrap.py` has one case).  `email_check.py` was broken by
+  the 2026-10-23 template (`version`, not `release = "1.0.0"`) and is
+  fixed; `email_check.yml` has not run since.
+* Next (Wayne, 2026-10-24): after his commit, a couple of coverage runs
+  (`./ezpkg_test_all.py DIR`, or `./ezpkg_coverage.py --children DIR`)
+  with tests added for missed lines; then the rehearsal and `T.utpat`.

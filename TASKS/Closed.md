@@ -5,6 +5,7 @@
 These items are only listed by tag and title; `ai_contexts TAG
 show` shows the rest.
 
+- `T.cvca` Choose the version control arrangement
 - `T.cbc` Create the bootstrap code
 - `T.mpaps` Master `pip` and package servers
 - `T.cltnf` Convert the logbook to the new format
