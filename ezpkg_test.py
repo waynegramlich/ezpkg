@@ -3420,8 +3420,8 @@ class InstallTest(unittest.TestCase):
         self.built: Path = ezpkg.release_files(program, version)[
             ezpkg.EXPORT_FORMS.index(form)]
         settings: Path = program.with_name(f"{program.name}.toml")
-        settings.write_text(f'release = '
-                            f'"{version}"\nexports = ["{form}"]\n')
+        settings.write_text(f'version = '
+                            f'"{version}"\nrelease = ["{form}"]\n')
         try:
             return self.run_program(program, **extra)
         finally:
@@ -3562,7 +3562,7 @@ class InstallTest(unittest.TestCase):
         done: subprocess.CompletedProcess[str] = self.run_program(program)
         self.assertNotEqual(done.returncode, 0)
         self.assertIn("may be the conflict", done.stderr)
-        self.assertIn("set `upgrade = true` in `prog.py.toml`",
+        self.assertIn('set `update-frequency = "daily"` in `prog.py.toml`',
                       " ".join(done.stderr.split()))
 
     @editing
@@ -3678,7 +3678,7 @@ class InstallTest(unittest.TestCase):
         self.assertRegex(flat, r"prog\.py line \d+ imports `sprocket`, but "
                          r"no release of it existed before 2019-01-01, the "
                          r"date prog\.py's versions are frozen at\. To "
-                         r"upgrade .*, set `upgrade = true` in "
+                         r'upgrade .*, set `update-frequency = "daily"` in '
                          r"prog\.py\.toml and run prog\.py again\.")
         self.assertEqual(program.read_text(), written)
 
@@ -4791,17 +4791,18 @@ class InstallTest(unittest.TestCase):
         self.assertIn(", 2.0 MB, no longer there\n", listed())
         self.assertTrue(record.exists())
 
-    def test_cull_days_keeps_a_programs_latest_packages_longer(self) -> None:
-        """`cull-days` keeps the latest request the program uses.
+    def test_purge_unused_after_ages_a_programs_latest_request(self) -> None:
+        """`purge-unused-after` ages the latest request the program uses.
 
-        An older request of the same program goes at the default age.
+        Shorter than the default, too (Wayne, 2026-10-23).  An older
+        request of the same program goes at the default age.
         """
-        # A developer's program that asks for a year.
+        # A developer's program that asks for a day.
         target: Path = self.root / "patient"
         venv: ezpkg.EZPkg = ezpkg.EZPkg(target)
         program: Path = self.root / "patient_prog.py"
         program.write_text("print('ran')\n")
-        self.developer_settings(program, "cull-days = 365\n")
+        self.developer_settings(program, 'purge-unused-after = "day"\n')
         record: Path
         kept: dict[str, Any]
         record, kept = venv.development_record(program)
@@ -4809,10 +4810,10 @@ class InstallTest(unittest.TestCase):
         older: Path = venv.paths()[3] / f"{'c' * 64}.json"
         for one in (latest, older):
             one.write_text("{}")
-            self.age(one, 2 * ezpkg.CULL_DAYS)
+            self.age(one, 2 * 86400.0)
         venv.keep(record, kept, stash={}, requests=[latest.stem])
-        self.assertEqual(venv.stale(), [older])
-        self.age(latest, 365 * 86400.0)
+        self.assertEqual(venv.stale(), [latest])
+        self.age(older, 2 * ezpkg.CULL_DAYS)
         self.assertEqual(venv.stale(), sorted([latest, older]))
 
     def test_a_stale_request_takes_its_packages_with_it(self) -> None:
@@ -4920,6 +4921,22 @@ class InstallTest(unittest.TestCase):
         venv: ezpkg.EZPkg = ezpkg.EZPkg(self.root / "dangling_json")
         requests: Path = venv.paths()[3]
         (requests / "gone.json").symlink_to(requests / "never-existed")
+        self.assertEqual(venv.stale(), [])
+
+    def test_stale_steps_over_a_program_record_it_cannot_read(self) -> None:
+        """A `develop/` record that is not JSON, or not a table, is skipped.
+
+        Neither is aged nor removed: `stale` has no program to judge
+        them by, and `litter` is not their business either.
+        """
+        # One record that does not parse, one that is a list.
+        venv: ezpkg.EZPkg = ezpkg.EZPkg(self.root / "unreadable_develop")
+        develop: Path = venv.root / "develop"
+        develop.mkdir(parents=True, exist_ok=True)
+        (develop / "broken.json").write_text("{")
+        (develop / "listed.json").write_text("[]")
+        for one in develop.glob("*.json"):
+            self.age(one, 2 * ezpkg.CULL_DAYS)
         self.assertEqual(venv.stale(), [])
 
     def test_cull_survives_a_record_it_cannot_remove(self) -> None:
@@ -5576,13 +5593,13 @@ class InstallTest(unittest.TestCase):
         self.assertEqual(done.stdout.strip(), "1.0.0")
 
     def test_changing_release_builds_a_release(self) -> None:
-        """Once `exports` and `release` are set, a new `release` releases.
+        """Once `version` and `release` are set, a new `version` releases.
 
         Releases are off until the developer removes the `#`s from the
-        template's `exports` entries and its `release` line, so a first
+        template's `version` line and its `release` entries, so a first
         run builds nothing.  Then a run builds 1.0.0, every form, beside
         the program, adds it to `prog.py.releases` and runs the program;
-        the next run builds nothing; a new `release` builds that version
+        the next run builds nothing; a new `version` builds that version
         in place of the last one's files, even an older one (Wayne,
         2026-10-22).
         """
@@ -5613,20 +5630,20 @@ class InstallTest(unittest.TestCase):
             # The record's versions, oldest first.
             return [one["version"] for one in ezpkg.read_releases(program)]
 
-        # The template as it comes, then with only `exports` set: no
+        # The template as it comes, then with only `version` set: no
         # release at all.
         self.assertNotIn("Released", run())
-        settings.write_text(re.sub(
-            r'^#( +"(?:email|zipapp|uv)",)', r" \1", settings.read_text(),
-            flags=re.MULTILINE))
-        self.assertEqual(ezpkg.read_settings(settings).exports,
-                         ezpkg.EXPORT_FORMS)
+        settings.write_text(settings.read_text().replace(
+            '# version = "1.0.0"', 'version = "1.0.0"'))
         self.assertNotIn("Released", run())
         self.assertEqual((beside(), versions()), ([], []))
 
         # `release` too: everything, then the program.
-        settings.write_text(settings.read_text().replace(
-            '# release = "1.0.0"', 'release = "1.0.0"'))
+        settings.write_text(re.sub(
+            r'^#( +"(?:email|zipapp|uv)",)', r" \1", settings.read_text(),
+            flags=re.MULTILINE))
+        self.assertEqual(ezpkg.read_settings(settings).release,
+                         ezpkg.EXPORT_FORMS)
         said: str = run()
         self.assertIn("released `prog.py` 1.0.0: ", said)
         self.assertEqual(beside(), ["prog-1.0.0-uv.py",
@@ -5634,19 +5651,19 @@ class InstallTest(unittest.TestCase):
                                     "prog-1.0.0.py", "prog-1.0.0.pyz"])
         self.assertEqual(versions(), ["1.0.0"])
 
-        # Then nothing, until `release` changes, when the last one's
+        # Then nothing, until `version` changes, when the last one's
         # files go.
         self.assertNotIn("Released", run())
         settings.write_text(settings.read_text().replace(
-            'release = "1.0.0"', 'release = "1.0.1"'))
+            'version = "1.0.0"', 'version = "1.0.1"'))
         self.assertIn("released `prog.py` 1.0.1", run())
         self.assertEqual(beside(), ["prog-1.0.1-uv.py",
                                     "prog-1.0.1-uv.py.lock",
                                     "prog-1.0.1.py", "prog-1.0.1.pyz"])
 
         # Back to 1.0.0, which is built again and recorded again.
-        settings.write_text('release = "1.0.0"\n'
-                            'exports = ["email"]\n')
+        settings.write_text('version = "1.0.0"\n'
+                            'release = ["email"]\n')
         self.assertIn("released `prog.py` 1.0.0", run())
         self.assertEqual(beside(), ["prog-1.0.0.py"])
         self.assertEqual(versions(), ["1.0.0", "1.0.1", "1.0.0"])
@@ -5668,7 +5685,7 @@ class InstallTest(unittest.TestCase):
             "carried", 'dependencies = ["paned"]',
             "import paned\nimport widget\nprint(paned.__version__)")
         self.developer_settings(program,
-                                'release = "1.0.0"\nexports = ["email"]\n')
+                                'version = "1.0.0"\nrelease = ["email"]\n')
         written: str = program.read_text()
         done: subprocess.CompletedProcess[str] = self.run_program(
             program, HOME=str(home))
@@ -6037,10 +6054,12 @@ class InstallTest(unittest.TestCase):
         self.assertEqual(program.read_text(), unimported)
         self.assertEqual(self.declared_now(program), ["widget"])
 
-    def test_upgrade_takes_the_newest_versions(self) -> None:
-        """`upgrade = true` passes over the stash's lock and date.
+    def test_update_frequency_takes_the_newest_versions(self) -> None:
+        """`update-frequency` passes over the stash's lock and date when due.
 
-        Commented out again, the versions freeze at that run's.
+        Due once the stash's date is older than it allows; until then the
+        versions stay, and with `never`, the default, they stay at the
+        last update's (Wayne, 2026-10-23).
         """
         # Recorded at 1.0.0, then loosened: still locked.
         program: Path = self.declaring_program(
@@ -6062,8 +6081,20 @@ class InstallTest(unittest.TestCase):
         written: str = program.read_text()
         self.assertEqual(run(), "1.0.0")
 
-        # Upgraded, then frozen there; the file never changes.
-        settings.write_text("upgrade = true\n")
+        # Daily, but dated today: not due yet.
+        settings.write_text('update-frequency = "daily"\n')
+        self.assertEqual(run(), "1.0.0")
+
+        # Dated two days ago: updated, then frozen there; the file never
+        # changes.
+        where: str = str(program.resolve())
+        record: Path = (program.parent / "cache" / "develop"
+                        / f"{hashlib.sha256(where.encode()).hexdigest()[:16]}"
+                          ".json")
+        kept: dict[str, Any] = json.loads(record.read_text())
+        kept["stash"]["exclude-newer"] = time.strftime(
+            "%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time() - 2 * 86400.0))
+        record.write_text(json.dumps(kept))
         self.assertEqual(run(), "2.0.0")
         settings.write_text('verbosity = "low"\n')
         self.assertEqual(run(), "2.0.0")
@@ -6149,11 +6180,11 @@ class InstallTest(unittest.TestCase):
 
     @editing
     def test_a_release_happens_once_per_value(self) -> None:
-        """A new `release` value releases, once, and the program runs.
+        """A new `version` value releases, once, and the program runs.
 
         Every release gives bare entries ranges (S5.1b); `prog.py.releases`
         records it; the next run with the same value just runs
-        (`T.abfd`).  `exports` names a form, since without one there are
+        (`T.abfd`).  `release` names a form, since without one there are
         no releases; with no pasted bootstrap, none is built.
         """
         # Released: ranged, recorded, and run.
@@ -6161,7 +6192,7 @@ class InstallTest(unittest.TestCase):
             "released", 'dependencies = ["widget", "sprocket>=1"]',
             "import widget\nimport sprocket\nprint('ran')")
         self.developer_settings(program,
-                                'release = "1.0.0"\nexports = ["email"]\n')
+                                'version = "1.0.0"\nrelease = ["email"]\n')
         done: subprocess.CompletedProcess[str] = self.run_program(program)
         self.assertEqual(done.returncode, 0, done.stderr[-400:])
         self.assertEqual(done.stdout, "ran\n")
@@ -6173,7 +6204,7 @@ class InstallTest(unittest.TestCase):
         entries: list[dict[str, Any]] = ezpkg.read_releases(program)
         self.assertEqual([one["version"] for one in entries], ["1.0.0"])
         self.assertEqual(entries[0]["warnings"], [
-            ('`prog.py.toml` line 2, `exports = ["email"]`: `prog.py` has '
+            ('`prog.py.toml` line 2, `release = ["email"]`: `prog.py` has '
              "no pasted bootstrap, so its release builds no email.")])
         self.assertEqual(entries[0]["dependencies"],
                          ["widget>=1.2.3,<2", "sprocket>=1"])
@@ -6197,7 +6228,7 @@ class InstallTest(unittest.TestCase):
             'dependencies = ["ezpkg>=0.0.1.dev0,<0.1", "widget"]',
             "import widget\nprint('ran')")
         self.developer_settings(program,
-                                'release = "1.0.0"\nexports = ["email"]\n')
+                                'version = "1.0.0"\nrelease = ["email"]\n')
         done: subprocess.CompletedProcess[str] = self.run_program(program)
         self.assertEqual(done.returncode, 0, done.stderr[-400:])
         self.assertEqual(self.declared_now(program),
@@ -7161,7 +7192,7 @@ class BootstrapCheckTest(unittest.TestCase):
                          first.stderr)
         self.assertRegex(" ".join(first.stderr.split()),
                          r"`prog\.py` carries the bootstrap `nopip6` \(lines "
-                         r"6-\d+\), but `ezpkg` now has `nopip8`\. The next "
+                         r"6-\d+\), but `ezpkg` now has `2026-10-23`\. The next "
                          r"release replaces it\.")
         second: subprocess.CompletedProcess[str] = run()
         self.assertEqual((second.returncode, second.stderr), (0, ""))
@@ -7180,17 +7211,17 @@ class BootstrapCheckTest(unittest.TestCase):
                       " ".join(wrong.stderr.split()))
 
         # A release replaces it, indented as it was, and runs.  A release
-        # needs an `exports` form, and this one's fails, since nothing
+        # needs a `release` form, and this one's fails, since nothing
         # came from a cache for a `.pyz` to carry; but the bootstrap and
         # the `ezpkg` entry come first, so both are brought up to date.
-        settings.write_text('release = "1.0.0"\n'
-                            'exports = ["zipapp"]\n')
+        settings.write_text('version = "1.0.0"\n'
+                            'release = ["zipapp"]\n')
         released: subprocess.CompletedProcess[str] = run()
         self.assertEqual((released.returncode, released.stdout),
                          (0, "ran\n"), released.stderr)
         flat: str = " ".join(released.stderr.split())
         self.assertRegex(flat, r"Replaced the bootstrap `nopip6` \(lines "
-                         r"6-\d+ of `prog\.py`\) with `nopip8`\.")
+                         r"6-\d+ of `prog\.py`\) with `2026-10-23`\.")
         self.assertIn("`prog.py` 1.0.0 was not released: the declared "
                       "packages did not come from the cache", flat)
         text: str = program.read_text()
@@ -7224,16 +7255,16 @@ class BootstrapCheckTest(unittest.TestCase):
                              + textwrap.indent(edited, indent))
                 first: int = 3 if indent else 2
                 refusal: str | None = ezpkg.bootstrap_refusal(
-                    Path("prog.py"), text, "nopip8")
+                    Path("prog.py"), text, "2026-10-23")
                 assert refusal is not None
                 self.assertIn("ezpkg: prog.py: its bootstrap (lines "
                               f"{first}-", refusal)
                 self.assertIn(
-                    f'  line {first + offset}: s = "download ezpkgx"; d = '
+                    f'  line {first + offset}:    s = "download ezpkgx"; d = '
                     'g("https://pypi.org/pypi/ezpkg/json")\n'
-                    '  nopip8:  s = "download ezpkg"; d = '
+                    '  2026-10-23: s = "download ezpkg"; d = '
                     'g("https://pypi.org/pypi/ezpkg/json")\n'
-                    "                              |\n", refusal)
+                    "                                 |\n", refusal)
                 self.assertTrue(refusal.endswith("then run it again."))
 
     def test_only_indentation_and_staleness_pass(self) -> None:
@@ -7246,8 +7277,8 @@ class BootstrapCheckTest(unittest.TestCase):
         # Published code, wherever it is indented.
         block: str = self.shipping()
         fine: list[tuple[str, str]] = [
-            (block, "nopip8"),
-            ("if True:\n" + textwrap.indent(block, "    "), "nopip8"),
+            (block, "2026-10-23"),
+            ("if True:\n" + textwrap.indent(block, "    "), "2026-10-23"),
             (ezpkg.OLD_BOOTSTRAP_TEXTS["nopip5 of 2026-10-12"], "nopip5"),
         ]
         text: str
@@ -7269,7 +7300,7 @@ class BootstrapCheckTest(unittest.TestCase):
         for text in edits:
             with self.subTest(edit=text):
                 self.assertIsNotNone(ezpkg.bootstrap_refusal(
-                    Path("prog.py"), text, "nopip8"))
+                    Path("prog.py"), text, "2026-10-23"))
 
     def test_added_and_missing_lines_say_where(self) -> None:
         """A line only one side has is named, and long lists are cut."""
@@ -7281,13 +7312,13 @@ class BootstrapCheckTest(unittest.TestCase):
         added: str = "".join([lines[0], '    print("hi")\n', *lines[1:]])
         dropped: str = "".join([*lines[:gone], *lines[gone + 1:]])
         more: str | None = ezpkg.bootstrap_refusal(Path("prog.py"), added,
-                                                   "nopip8")
+                                                   "2026-10-23")
         fewer: str | None = ezpkg.bootstrap_refusal(Path("prog.py"),
-                                                    dropped, "nopip8")
+                                                    dropped, "2026-10-23")
         assert more is not None and fewer is not None
-        self.assertIn('  line 2:  print("hi")\n'
-                      "           (not in nopip8)\n", more)
-        self.assertIn(f"  nopip8:  {lines[gone].strip()}\n", fewer)
+        self.assertIn('  line 2:     print("hi")\n'
+                      "              (not in 2026-10-23)\n", more)
+        self.assertIn(f"  2026-10-23: {lines[gone].strip()}\n", fewer)
         self.assertIn(f"(missing after line {gone})\n", fewer)
 
         # Seven changed lines show six, then a count.  Trailing space
@@ -7295,7 +7326,7 @@ class BootstrapCheckTest(unittest.TestCase):
         many: str = "".join(f"{line.rstrip()}  # Seven.\n" if 0 < index < 8
                             else line for index, line in enumerate(lines))
         cut: str | None = ezpkg.bootstrap_refusal(Path("prog.py"), many,
-                                                  "nopip8")
+                                                  "2026-10-23")
         assert cut is not None
         self.assertEqual(cut.count("|\n"), 6, cut)
         self.assertIn("  ... and 1 more\n", cut)
@@ -7323,7 +7354,7 @@ class BootstrapCheckTest(unittest.TestCase):
 
         # A caller naming a bootstrap the program does not have.
         missing: str | None = ezpkg.bootstrap_refusal(
-            Path("prog.py"), "print('hello')\n", "nopip8")
+            Path("prog.py"), "print('hello')\n", "2026-10-23")
         assert missing is not None
         self.assertIn("no ezpkg bootstrap was found", missing)
 
@@ -8224,6 +8255,14 @@ class MetadataTest(unittest.TestCase):
         ezpkg.EZPkg(cache).paths()
         script: Path = cache / "remove.py"
         self.assertEqual(script.read_text(), ezpkg.REMOVE_SCRIPT)
+
+        # It runs as a command, and an older cache's copy is mended.
+        if os.name != "nt":
+            for name in ("remove.py", "list.py", "quick_start.py"):
+                self.assertTrue(os.access(cache / name, os.X_OK), name)
+            script.chmod(0o644)
+            ezpkg.EZPkg(cache).paths()
+            self.assertEqual(script.stat().st_mode & 0o777, 0o755)
         done: subprocess.CompletedProcess[str] = subprocess.run(
             [sys.executable, str(script)], capture_output=True, text=True,
             check=False, cwd=cache)
@@ -8407,13 +8446,18 @@ class MetadataTest(unittest.TestCase):
             import twice
             if sys.version_info >= (3, 12):
                 import unread
+            if sys.platform == "win32":
+                match sys.argv:
+                    case []:
+                        import matched
             """)
         self.assertEqual(ezpkg.import_markers(text), {
             "win32api": "sys_platform == 'win32'",
             "termios_helper": "sys_platform != 'win32'",
             "both": "sys_platform != 'darwin' and os_name == 'posix'",
             "negated": "platform_system != 'Linux'",
-            "linuxish": "sys_platform == 'linux'"})
+            "linuxish": "sys_platform == 'linux'",
+            "matched": "sys_platform == 'win32'"})
 
         # Judged on this computer, and nothing without a marker.
         here: str = f"sys_platform == '{sys.platform}'"
@@ -8659,7 +8703,7 @@ class MetadataTest(unittest.TestCase):
                       ezpkg.EZPkg, "staged", side_effect=failing),
                   contextlib.redirect_stderr(told)):
                 self.assertFalse(venv.release(
-                    ezpkg.Settings(release="1.0.0", exports=("email",)),
+                    ezpkg.Settings(version="1.0.0", release=("email",)),
                     [], [], "1.0.0"))
             said: str = " ".join(told.getvalue().split())
             self.assertIn("A warning. `prog.py.toml`: `prog.py` 1.0.0 was "
@@ -8691,10 +8735,10 @@ class MetadataTest(unittest.TestCase):
     def test_a_message_names_the_line_that_caused_it(self) -> None:
         """A key's line, an entry's line, its comment dropped."""
         # One-line keys, a list over several lines, and nothing found.
-        text: str = ('# Mine.\nrelease = "1.0.0"  # Next.\n'
+        text: str = ('# Mine.\nversion = "1.0.0"  # Next.\n'
                      'dependencies = [\n    "numpy>=2",\n    "x",\n]\n')
-        self.assertEqual(ezpkg.setting_place("p.toml", text, "release"),
-                         '`p.toml` line 2, `release = "1.0.0"`')
+        self.assertEqual(ezpkg.setting_place("p.toml", text, "version"),
+                         '`p.toml` line 2, `version = "1.0.0"`')
         self.assertEqual(
             ezpkg.setting_place("p.toml", text, "dependencies", "x"),
             '`p.toml` line 5, `"x",`')
@@ -8711,43 +8755,52 @@ class MetadataTest(unittest.TestCase):
             path: Path = Path(scratch) / "prog.py.toml"
             cases: list[tuple[str, str | ezpkg.Settings]] = [
                 ("", ezpkg.Settings()),
-                ("exports = []\n", ezpkg.Settings(exports=())),
-                ("cull-days = 90\n", ezpkg.Settings(cull_days=90)),
-                ("cull-days = 0\n",
-                 ("`prog.py.toml` line 1, `cull-days = 0`: `cull-days` must be a whole number "
-                  "of days, 1 or more")),
-                ("cull-days = true\n",
-                 ("`prog.py.toml` line 1, `cull-days = true`: `cull-days` must be a whole number "
-                  "of days, 1 or more")),
-                (('verbosity = "high"\nrelease = "1.2.0"\nexports = ["uv"]\n'
+                ("release = []\n", ezpkg.Settings(release=())),
+                ('purge-unused-after = "week"\n',
+                 ezpkg.Settings(purge_unused_after="week")),
+                ("purge-unused-after = 30\n",
+                 ("`prog.py.toml` line 1, `purge-unused-after = 30`: "
+                  '`purge-unused-after` must be one of "month", "week" or '
+                  '"day"')),
+                ('update-frequency = "weekly"\n',
+                 ezpkg.Settings(update_frequency="weekly")),
+                (('verbosity = "high"\nversion = "1.2.0"\nrelease = ["uv"]\n'
                  'bootstrap = "nopip6"\n'),
                  ezpkg.Settings("high", "1.2.0", ("uv",), "nopip6")),
+                ('release = ["uv"]\n',
+                 ('`prog.py.toml` line 1, `release = ["uv"]`: a release '
+                  'needs a `version`, such as `version = "1.0.0"`')),
+                ('verbosity = "low"\n# x\nverbosity = "high"\n',
+                 ("`prog.py.toml` lines 1 and 3: `verbosity` is set twice; "
+                  "keep only one of them")),
                 ('bootstrap = "nopip9"\n',
                  ('`prog.py.toml` line 1, `bootstrap = "nopip9"`: `bootstrap` must be "update" or a '
-                  'published bootstrap, "nopip3", "nopip4", "nopip5", '
-                  '"nopip6", "nopip7" or "nopip8"')),
-                ("\ncull_days = 9\n",
-                 ("`prog.py.toml` line 2, `cull_days = 9`: unknown setting `cull_days` "
-                 "(did you mean `cull-days`?)")),
+                  'published bootstrap, "2026-10-23"')),
+                ('\nupdate_frequency = "daily"\n',
+                 ('`prog.py.toml` line 2, `update_frequency = "daily"`: '
+                  "unknown setting `update_frequency` (did you mean "
+                  "`update-frequency`?)")),
                 ("\n\n[colour]\nx = 1\n",
                  ("`prog.py.toml` line 3, `[colour]`: unknown setting `colour` (the "
-                 "settings are `verbosity`, `release`, `exports`, "
-                 "`bootstrap`, `upgrade`, `cull-days`, `dependencies` and "
+                 "settings are `verbosity`, `version`, `release`, "
+                 "`bootstrap`, `update-frequency`, `purge-unused-after`, "
+                 "`dependencies` and "
                  "`requires-python`)")),
-                ('upgrade = "yes"\n',
-                 ("`prog.py.toml` line 1, `upgrade = \"yes\"`: `upgrade` must be `true` "
-                  "or `false`")),
+                ("update-frequency = true\n",
+                 ("`prog.py.toml` line 1, `update-frequency = true`: "
+                  '`update-frequency` must be one of "never", "monthly", '
+                  '"weekly" or "daily"')),
                 ('verbosity = "loud"\n',
                  ('`prog.py.toml` line 1, `verbosity = "loud"`: `verbosity` must be one of "none", '
                  '"low", "medium" or "high"')),
-                ("release = 1.0\n",
-                 ('`prog.py.toml` line 1, `release = 1.0`: `release` must be a version in '
+                ("version = 1.0\n",
+                 ('`prog.py.toml` line 1, `version = 1.0`: `version` must be a version in '
                  'quotes, such as "1.0.0"')),
-                ('exports = ["zip"]\n',
-                 ('`prog.py.toml` line 1, `exports = ["zip"]`: `exports` must be a list of '
+                ('release = ["zip"]\n',
+                 ('`prog.py.toml` line 1, `release = ["zip"]`: `release` must be a list of '
                  '"email", "zipapp" or "uv", each at most once')),
-                ('exports = ["uv", "uv"]\n',
-                 ('`prog.py.toml` line 1, `exports = ["uv", "uv"]`: `exports` must be a list of '
+                ('release = ["uv", "uv"]\n',
+                 ('`prog.py.toml` line 1, `release = ["uv", "uv"]`: `release` must be a list of '
                  '"email", "zipapp" or "uv", each at most once')),
                 ("verbosity = \n", ("prog.py.toml: Invalid value (at line 1, "
                  "column 13)")),
@@ -9152,6 +9205,32 @@ class MetadataTest(unittest.TestCase):
             program.write_text("print('changed')\n")
             self.assertEqual(ezpkg.commit_of(program), named + "+")
 
+            # A `git status` that cannot run still names the commit, and
+            # a `git` that cannot run at all leaves it to `hg`.
+            real: Callable[..., subprocess.CompletedProcess[str]] = (
+                subprocess.run)
+
+            def no_status(command: list[str], *args: Any, **kwargs: Any
+                          ) -> subprocess.CompletedProcess[str]:
+                # `git status` alone fails.
+                if command[:2] == ["git", "status"]:
+                    raise OSError("gone")
+                return real(command, *args, **kwargs)
+
+            def no_git(command: list[str], *args: Any, **kwargs: Any
+                       ) -> subprocess.CompletedProcess[str]:
+                # No `git`, and an `hg` that answers.
+                if command[0] == "git":
+                    raise OSError("gone")
+                return subprocess.CompletedProcess(command, 0, "abc123\n", "")
+
+            with unittest.mock.patch.object(ezpkg.subprocess, "run",
+                                            side_effect=no_status):
+                self.assertEqual(ezpkg.commit_of(program), named)
+            with unittest.mock.patch.object(ezpkg.subprocess, "run",
+                                            side_effect=no_git):
+                self.assertEqual(ezpkg.commit_of(program), "hg abc123")
+
     def test_a_release_entry_reads_back(self) -> None:
         """`release_entry` writes TOML that `read_releases` reads."""
         # Two entries, the second with a commit and no date.
@@ -9176,10 +9255,12 @@ class MetadataTest(unittest.TestCase):
             ezpkg.releases_path(program).write_text("[[release]\n")
             with self.assertRaisesRegex(ValueError, r"^prog\.py\.releases: "):
                 ezpkg.read_releases(program)
-            ezpkg.settings_path(program).write_text("cull-days = 0\n")
+            ezpkg.settings_path(program).write_text(
+                'purge-unused-after = "year"\n')
             self.assertEqual(ezpkg.cull_seconds(program, 7.0), 7.0)
-            ezpkg.settings_path(program).write_text("cull-days = 2\n")
-            self.assertEqual(ezpkg.cull_seconds(program, 7.0), 2 * 86400.0)
+            ezpkg.settings_path(program).write_text(
+                'purge-unused-after = "week"\n')
+            self.assertEqual(ezpkg.cull_seconds(program, 7.0), 7 * 86400.0)
 
     def test_part1_helpers_refuse_what_they_cannot_edit_safely(self) -> None:
         """A block these cannot read, or edit without changing more, is `None`.
@@ -9322,6 +9403,87 @@ class MetadataTest(unittest.TestCase):
             ezpkg, "main_path", return_value=program))
         return program, ezpkg.EZPkg(root / "cache")
 
+    def test_an_update_reads_whatever_date_the_stash_holds(self) -> None:
+        """A date-only or broken stash date is due; a recent one is not.
+
+        A date with no zone is UTC, as `pip` reads it, and one that does
+        not parse is as old as can be, so that it is replaced at once
+        (Wayne, 2026-10-23).
+        """
+        # Daily, then each stash date and what the run is frozen at.
+        venv: ezpkg.EZPkg = self.developer_here(
+            settings='update-frequency = "daily"\n')[1]
+        recent: str = time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime())
+        stamped: str
+        expected: str
+        for stamped, expected in [("2000-01-01", ""), ("not a date", ""),
+                                  (recent, recent)]:
+            with self.subTest(stamped=stamped):
+                venv.put_stash(**{"exclude-newer": stamped})
+                self.assertEqual(ezpkg.EZPkg(venv.root).declared_date(),
+                                 expected)
+
+    def test_an_empty_settings_file_is_filled_with_the_defaults(self) -> None:
+        """An empty `prog.py.toml` gets the template, and says so once.
+
+        Without `EDIT_PROGRAM`, there is no first-run note to point at:
+        every setting is at its default.
+        """
+        # Filled, said, and every default.
+        program: Path
+        venv: ezpkg.EZPkg
+        program, venv = self.developer_here(settings="")
+        told: io.StringIO = io.StringIO()
+        with contextlib.redirect_stderr(told):
+            self.assertEqual(venv.settings(), ezpkg.Settings())
+        self.assertEqual(ezpkg.settings_path(program).read_text(),
+                         ezpkg.SETTINGS_TEMPLATE)
+        self.assertIn("with every setting at its default",
+                      " ".join(told.getvalue().split()))
+
+    def test_a_named_bootstrap_says_what_the_program_carries(self) -> None:
+        """A program without the named bootstrap stops, saying what it has.
+
+        An edited one, or none at all, is said in words, since neither
+        has a name (Wayne, S5.1).
+        """
+        # Each state with no name, and the words for it.
+        venv: ezpkg.EZPkg = self.developer_here()[1]
+        settings: ezpkg.Settings = ezpkg.Settings(bootstrap="2026-10-23")
+        state: str
+        said: str
+        for state, said in [("edited", r"an\s+edited\s+one"),
+                            ("absent", "none")]:
+            with (self.subTest(state=state),
+                  unittest.mock.patch.object(
+                      venv, "bootstrap_status", return_value=(state, "")),
+                  self.assertRaisesRegex(
+                      SystemExit, rf"carries\s+{said},\s+not\s+`2026-10-23`")):
+                venv.named_bootstrap(settings)
+
+    def test_no_program_means_no_release_and_no_check(self) -> None:
+        """Without the program's file there is nothing to release or check."""
+        # `main_path` and `main_source` both find nothing.
+        venv: ezpkg.EZPkg = self.developer_here()[1]
+        with (unittest.mock.patch.object(ezpkg, "main_path",
+                                         return_value=None),
+              unittest.mock.patch.object(ezpkg, "main_source",
+                                         return_value=None)):
+            self.assertFalse(venv.release(
+                ezpkg.Settings(version="1.0.0", release=("email",)),
+                [], [], "1.0.0"))
+            venv.refuse_an_edited_bootstrap("2026-10-23")
+
+    def test_settings_that_are_not_utf8_are_refused(self) -> None:
+        """TOML is UTF-8, so other bytes stop the run, naming the file."""
+        # One byte no UTF-8 text has.
+        with tempfile.TemporaryDirectory() as scratch:
+            path: Path = Path(scratch) / "prog.py.toml"
+            path.write_bytes(b'verbosity = "\xff"\n')
+            with self.assertRaisesRegex(ValueError,
+                                        r"^prog\.py\.toml: 'utf-8' codec"):
+                ezpkg.read_settings(path)
+
     def test_the_stash_and_its_records_at_their_edges(self) -> None:
         """No program, an unreadable record, a date TOML left unquoted."""
         # An unquoted date in Part 1 seeds the stash as text, and wins.
@@ -9406,10 +9568,11 @@ class MetadataTest(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "script block of a copy"):
             venv.staged(["widget"])
 
-        # Upgrading: the stash's date of this run still goes in.
+        # Due an update: the stash's date of this run still goes in.
         program.write_text('# /// script\n# dependencies = ["widget"]\n'
                            "# ///\nimport widget\n")
-        ezpkg.settings_path(program).write_text("upgrade = true\n")
+        ezpkg.settings_path(program).write_text(
+            'update-frequency = "daily"\n')
         upgrading: ezpkg.EZPkg = ezpkg.EZPkg(venv.root)
         self.assertIn('# exclude-newer = "2026-10-22T00:00:00Z"\n',
                       upgrading.staged(["widget"])[0])

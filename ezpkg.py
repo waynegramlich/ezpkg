@@ -109,10 +109,25 @@ CULL_INTERVAL: float = 86400.0
 # How long anything in the cache may go unused before `cull` takes it:
 # a request and the packages that answered it, a scan, the record of a
 # program that no longer exists.  One number for all of it, 30 days
-# unless a program's `prog.py.toml` sets `cull-days` for what that
-# program holds (Wayne, 2026-10-22; it was six months).  The yes and the
-# stash of a program that still exists never go.  See `T.gc`.
+# unless a program's `prog.py.toml` sets `purge-unused-after` for what
+# that program holds (Wayne, 2026-10-22; it was six months).  The yes
+# and the stash of a program that still exists never go.  See `T.gc`.
 CULL_DAYS: float = 30.0 * 86400.0
+
+# What `purge-unused-after` may say, and how many seconds each is: a word
+# a person reads rather than a number of days (Wayne, 2026-10-23).
+PURGE_AFTER: dict[str, float] = {
+    "month": CULL_DAYS, "week": 7.0 * 86400.0, "day": 86400.0}
+
+# A bootstrap's name, the date it was published.
+DATED: re.Pattern[str] = re.compile(r"\d{4}-\d{2}-\d{2}")
+
+# What `update-frequency` may say, and how old the frozen date may grow,
+# in seconds, before a run moves to the newest versions.  `never` keeps
+# it for good, and is the default (Wayne, 2026-10-23).
+UPDATE_FREQUENCY: dict[str, float] = {
+    "never": 0.0, "monthly": 30.0 * 86400.0, "weekly": 7.0 * 86400.0,
+    "daily": 86400.0}
 
 # How often the private `pip` is checked for a newer release.  Weekly, as
 # `pip` checks itself, because each check asks the index and may fetch
@@ -125,7 +140,10 @@ PIP_INTERVAL: float = 7.0 * 86400.0
 # bootstrap means adding its fingerprint here; the test suite renders
 # the shipping case as pasted and fails until the last entry matches it.  Old
 # entries stay, because they are how a stale copy is recognised.  See
-# `T.fbanwiis`.
+# `T.fbanwiis`.  From `2026-10-23`, the first to reach PyPI, each is named
+# by its date (`DATED`); the `nopipN` ones before it were never released,
+# so no message offers them, and they stay only for the tests of a stale
+# copy (Wayne, 2026-10-23).
 BOOTSTRAPS: dict[str, str] = {
     "46336be666731d6a8999d4233d51b99a0cc327d479e57ece2f7b003290ffa466":
         "nopip3 of 2026-10-02",
@@ -137,8 +155,8 @@ BOOTSTRAPS: dict[str, str] = {
         "nopip6 of 2026-10-16",
     "670d697c070c800990a8b63cd25327e7470d16552c4e9e70b4706cb4a46b2d25":
         "nopip7 of 2026-10-17",
-    "d200c60b0ca90f33516417eeb799cf09c86d313a863f2fca3c16a46d3d47e9aa":
-        "nopip8 of 2026-10-20",
+    "265a75ce1d43a435dea4b01e7a03a8ed09bd67a0b43988931a81bb9e1471dbd6":
+        "2026-10-23",
 }
 
 # The constructor writes this into the cache as `remove.py`, so that
@@ -183,7 +201,8 @@ LIST_SCRIPT: str = '''#!/usr/bin/env python3
 
 Written by `ezpkg` (https://pypi.org/project/ezpkg/).  It changes
 nothing.  `ezpkg` removes what nothing has used for 30 days (or a
-program's own `cull-days`), and `remove.py` removes everything.
+program's own `purge-unused-after`), and `remove.py` removes
+everything.
 """
 
 import json
@@ -253,7 +272,8 @@ for _, row in sorted(rows, reverse=True):
 # written with `\x23`, which is `#`, so that this file's own source
 # holds only one PEP 723 block: two would be refused as ambiguous.
 QUICK_START: str = '''#!/usr/bin/env python3
-# Part 1: The packages this program needs.
+# Part 1: These lines look like `#` comments, but they are Python's inline
+# script metadata (PEP 723) that the EZPkg bootstrap needs.  Never remove them.
 \x23 /// script
 # requires-python = ">=3.11"
 # dependencies = ["ezpkg>=0.0.1.dev0,<0.1", "cowsay"]
@@ -292,7 +312,7 @@ try:  # Do not edit try block!  See https://pypi.org/project/ezpkg/
     if m is None:  # Python imports it straight from the wheel.
         s = "import ezpkg"; sys.path.insert(0, str(w))
         m = importlib.import_module("ezpkg")
-    s = "fetch packages"; m.EZPkg().install(bootstrap="nopip8")
+    s = "fetch packages"; m.EZPkg().install(bootstrap="2026-10-23")
 except Exception as x:
     raise SystemExit(f"ezpkg: {s} failed: {x!r}")  # Do not edit try block!
 # End the EZPkg bootstrap.  Your imports go below it.
@@ -939,91 +959,112 @@ def main_source() -> tuple[Path, str] | None:
 
 
 # What an empty `prog.py.toml` is filled with: every setting, commented
-# out at its default (`T.abfd`), except `exports`, whose empty list is
+# out at its default (`T.abfd`), except `release`, whose empty list is
 # left open so that each form is one `#` to remove (Wayne, 2026-10-21).
 # `README.md` shows it verbatim, so it names no particular program:
-# `PROG_NAME` is the README's word for one (Wayne, 2026-10-22).  With
+# `PROG_NAME` is the README's word for one (Wayne, 2026-10-22).  Wayne
+# rewrote it in the README for people new to EZPkg (2026-10-23).  With
 # `EDIT_PROGRAM` on, `first_run_note` follows it.
 SETTINGS_TEMPLATE: str = """\
-# PROG_NAME.py.toml: EZPkg settings for PROG_NAME.py, the program
-# beside this file.  More: https://pypi.org/project/ezpkg/
-#
-# This file makes you the program's developer.  If you delete this file,
-# you are no longer treated as a developer.  This file is the only place
-# where your development decisions get recorded (i.e. there are no unexpected
-# text prompts when the program runs).  All information that EZPkg collects
-# is stored in files in the `~/.ezpkg/` directory and not this file.
-#
-# On each run, EZPkg fetches the packages the program's imports need
-# and records the versions that were run.  A release writes both into
-# the copies it makes, so that whoever you send a release to gets
-# exactly those.  The program itself is never edited.  Without this file, the
-# program is an end user's: they are asked once, on its first run,
-# whether to keep its packages.
-#
-# Each setting below is shown at its default, mostly after a `#`.  To
-# change one, remove its `#` and edit its value.  A misspelled setting or
-# a wrong value stops the program, naming the line.  To see this text
-# again, empty this file and run the program.
+# Start of PROG_NAME.py.toml:
 
-# How much EZPkg says: "none", "low" (one-off notices), "medium" (also
-# each change to the packages) or "high" (also what was decided, and
-# why).
-# verbosity = "low"
+# This file is meant to be self-documenting.  It contains the EZPkg settings
+# for PROG_NAME.py (i.e. your program).  More: https://pypi.org/project/ezpkg/
 
-# The versions are frozen at the date of the program's first run, so
-# they never change by themselves.  With `upgrade = true`, every run
-# takes the newest versions; put the `#` back to freeze them at the
-# last run's date.
-# upgrade = false
+# This file is created as an empty file next to PROG_NAME.py, in the same
+# directory.  Depending upon which operating system you are running, one of
+# the following commands creates the empty file:
+# * Windows (PowerShell): `ni PROG_NAME.py.toml`
+# * Windows (`cmd.exe`): `type nul > PROG_NAME.py.toml`
+# * Linux/macOS: `touch PROG_NAME.py.toml`
 
-# How many days the packages the program uses may go unused before
-# EZPkg removes them from ~/.ezpkg (they are fetched again if needed).
-# cull-days = 30
+# The mere existence of PROG_NAME.py.toml classifies you as a developer of
+# PROG_NAME.py.  Conversely, if you remove this file, you are no longer
+# treated as a developer.  Instead, you will be asked on the program's first
+# run whether its packages can be kept in the ~/.ezpkg directory.
 
-# Releases: a release builds the copies you send to others, beside the
-# program, and records each one in PROG_NAME.py.releases.  Releases are
-# off until you remove the `#` from at least one entry of `exports` and
-# from `release` below.  Then each run where `release` differs from the
-# last one released builds that release, in place of the last one's
-# files, and then runs the program as usual.  Each release checks the
-# imports and the bootstrap, and gives each package without a version
-# a range.  Anything worth a second look, such as a package dropped
-# because nothing imports it any more, is listed under `warnings` in the
-# release's entry in PROG_NAME.py.releases, and the release's one line
-# says how many.
-exports = [  # Remove the `#`s of the forms each release builds.
-#   "email",   # PROG_NAME-VERSION.py, to send; for every computer.
-#   "zipapp",  # PROG_NAME-VERSION.pyz, no network; pure Python only.
-#   "uv",      # PROG_NAME-VERSION-uv.py and its lock, for `uv run`.
+# Whenever PROG_NAME.py.toml is empty and PROG_NAME.py is run, its contents
+# are initialized to the text you are currently reading (i.e. from
+# "# Start of PROG_NAME.py.toml:" to "# End of PROG_NAME.py.toml".)  After
+# this file is created, only you (the developer) get to edit it.  If you
+# want it reinitialized, empty the file and run PROG_NAME.py again.
+
+# This file is the only place where your EZPkg rules are configured.  Any
+# additional information collected by EZPkg is stored in various files in
+# the `~/.ezpkg/` directory.  EZPkg only ever fills this file when it is
+# empty, and never modifies it after that.
+
+# All possible settings that can be set are shown as commented-out TOML
+# lines.  To enable an option, just remove the preceding "# ".  For a list,
+# such as "release", remove the "#" from each entry you want.  If you
+# accidentally enable two conflicting options, EZPkg will produce an error
+# message with line numbers for you to fix.
+
+# The following configuration options exist:
+
+# "verbosity" specifies how much EZPkg prints while the program runs.
+# There are 4 levels of verbosity.  The default is "low":
+# verbosity = "high"    # Also what EZPkg decided, and why.
+# verbosity = "medium"  # Also each change to the packages.
+# verbosity = "low"     # Only one-off notices (default).
+# verbosity = "none"    # Nothing, except errors that stop the program.
+
+# "update-frequency" specifies how often your runs move to newer package
+# versions.  A release always carries the versions your last run used, so
+# whoever receives it gets exactly what you tested.
+# update-frequency = "never"    # Leave the current versions alone (default).
+# update-frequency = "monthly"  # Move to the newest versions once a month.
+# update-frequency = "weekly"   # Move to the newest versions once a week.
+# update-frequency = "daily"    # Move to the newest versions once a day.
+
+# "purge-unused-after" specifies how long a package may go unused before
+# EZPkg removes it from ~/.ezpkg (it is fetched again if it is needed).
+# purge-unused-after = "month"  # Unused for a month (default).
+# purge-unused-after = "week"   # Unused for a week.
+# purge-unused-after = "day"    # Unused for a day.
+
+# "version" specifies the release string.  Whenever it differs from the
+# last version released, the next run builds the releases listed in
+# "release", and then runs the program as usual.  Change it whenever you
+# like.  If you really need to, you can even reuse a previous value.
+# version = "1.0.0"  # 1.0.0 is usually the first functional release number.
+
+# "release" lists which releases to generate, each named with the VERSION
+# above.  Remove the "#" from 0, 1, or more of the entries in the list.
+release = [
+#   "email",   # PROG_NAME-VERSION.py; email .py (network needed).
+#   "zipapp",  # PROG_NAME-VERSION.pyz; pure Python (no network needed).
+#   "uv",      # PROG_NAME-VERSION-uv.py and its lock (`uv` needed).
 ]
+# Each release, and anything worth a second look, is recorded in
+# PROG_NAME.py.releases.
 
-# The version of the next release.  Change it whenever you like, even
-# to go back to an older number.
-# release = "1.0.0"
+# "bootstrap" specifies which EZPkg bootstrap the program carries.  Each
+# bootstrap is named by the date it was published ("YYYY-MM-DD").
+# bootstrap = "update"      # A release replaces an older one (default).
+# bootstrap = "2026-10-23"  # Keep exactly this one.
 
-# The bootstrap the program carries: "update" replaces an older one at
-# the next release; a name, such as "nopip8", keeps exactly that one.
-# bootstrap = "update"
+# The next options are rarely needed.  Most people can stop reading now.
+# They are needed for difficult situations that EZPkg simply cannot figure
+# out on its own.
 
-# Rarely needed: EZPkg works these out, and you set them only when it
-# gets one wrong.
+# "requires-python" specifies the oldest Python the program runs on.  EZPkg
+# works this out from the program and its packages (never older than 3.11,
+# which EZPkg itself needs).  Set it only when the program needs a newer
+# Python for its own reasons, such as a library function that is new.
+# requires-python = ">=3.11"  # The default: EZPkg itself needs 3.11.
 
-# The Pythons the program runs on.  Each release works this out from
-# the program's syntax and its packages (never older than 3.11, which
-# EZPkg needs).  Set it if the program needs a newer Python anyway, as
-# when it uses a library function that is new.
-# requires-python = ">=3.11"
-
-# Packages EZPkg cannot work out.  It finds a package for each import,
-# with a range from the version you ran, takes a marker from a guard
-# such as `if sys.platform == "win32":`, and adds a package when the
-# program stops because one is missing.  For anything else, write an
-# entry such as "numpy>=2.1" or "requests[socks]", a Python "dependency
-# specifier", as explained at
+# "dependencies" provides a way to manually specify values to be inserted
+# into the dependencies portion of the Python inline script metadata.  They
+# use the standard Python dependency specifier format.  See:
+#
 # https://packaging.python.org/en/latest/specifications/dependency-specifiers/
-# An entry here wins over the one EZPkg would choose for that package.
-# dependencies = []
+#
+# Put every entry in the one list, which may span several lines.  If an
+# entry conflicts with what EZPkg would choose, your entry wins.
+# dependencies = ["numpy>=2.1", "requests[socks]"]  # For example.
+
+# End of PROG_NAME.py.toml.
 """
 
 def first_run_note(name: str, adding: Sequence[str] | None) -> str:
@@ -1075,7 +1116,7 @@ RUNS_KEPT: int = 10
 # test suite only).
 EDIT_PROGRAM: bool = os.environ.get("EZPKG_EDIT_PROGRAM", "").lower() == "on"
 
-# What a release can build, in the order it builds them.  `exports`
+# What a release can build, in the order it builds them.  `release`
 # names none of them until the developer turns releases on (Wayne,
 # 2026-10-21: no release on a first run).
 EXPORT_FORMS: tuple[str, ...] = ("email", "zipapp", "uv")
@@ -1096,21 +1137,22 @@ class Settings:
     Attributes:
     * `verbosity` (`str`):
       How much `ezpkg` says, from `VERBOSITY`; see `EZPkg.say`.
-    * `release` (`str | None`):
+    * `version` (`str | None`):
       The version of the next release, such as `"1.0.0"`, or `None`
       for no release (`EZPkg.release_due`).
-    * `exports` (`tuple[str, ...]`):
+    * `release` (`tuple[str, ...]`):
       What a release builds, from `EXPORT_FORMS`; none unless the file
       says otherwise, and with none there are no releases.
     * `bootstrap` (`str`):
       `update`, or the short name of the published bootstrap the
-      program must carry, such as `nopip7` (Wayne, S5.1).
-    * `upgrade` (`bool`):
-      Take the newest versions on every run, rather than those of the
-      frozen date (`EZPkg.declared_date`).
-    * `cull_days` (`int | None`):
-      How many days what the program holds may go unused before `cull`
-      takes it, or `None` for `CULL_DAYS` (`cull_seconds`).
+      program must carry, such as `2026-10-23` (Wayne, S5.1).
+    * `update_frequency` (`str`):
+      How old the frozen date may grow before a run takes the newest
+      versions, from `UPDATE_FREQUENCY` (`EZPkg.declared_date`).
+    * `purge_unused_after` (`str | None`):
+      How long what the program holds may go unused before `cull`
+      takes it, from `PURGE_AFTER`, or `None` for `CULL_DAYS`
+      (`cull_seconds`).
     * `dependencies` (`tuple[str, ...]`):
       The developer's own requirements, for what the imports cannot say
       (an extra, an exact version), declared with Part 1's and kept as
@@ -1121,11 +1163,11 @@ class Settings:
     """
 
     verbosity: str = "low"
-    release: str | None = None
-    exports: tuple[str, ...] = ()
+    version: str | None = None
+    release: tuple[str, ...] = ()
     bootstrap: str = "update"
-    upgrade: bool = False
-    cull_days: int | None = None
+    update_frequency: str = "never"
+    purge_unused_after: str | None = None
     dependencies: tuple[str, ...] = ()
     requires_python: str | None = None
 
@@ -1299,9 +1341,9 @@ def commit_of(program: Path) -> str:
 def cull_seconds(program: Path, default: float = CULL_DAYS) -> float:
     """Return how long what a program holds may go unused, in seconds.
 
-    Its `prog.py.toml`'s `cull-days`, for a developer's program that
-    still has one; otherwise `default` (`CULL_DAYS`).  A settings file
-    that cannot be read is the default, since `cull` must not stop.
+    Its `prog.py.toml`'s `purge-unused-after`, for a developer's program
+    that still has one; otherwise `default` (`CULL_DAYS`).  A settings
+    file that cannot be read is the default, since `cull` must not stop.
 
     Arguments:
     * `program` (`Path`):
@@ -1315,10 +1357,10 @@ def cull_seconds(program: Path, default: float = CULL_DAYS) -> float:
     # Only a file that is there, reads, and sets it.
     try:
         if settings_path(program).is_file():
-            chosen: int | None = read_settings(
-                settings_path(program)).cull_days
+            chosen: str | None = read_settings(
+                settings_path(program)).purge_unused_after
             if chosen is not None:
-                return chosen * 86400.0
+                return PURGE_AFTER[chosen]
     except (OSError, ValueError):
         pass
     return default
@@ -1375,10 +1417,44 @@ def setting_line(text: str, key: str) -> int:
     return 0
 
 
+def setting_twice(text: str) -> tuple[str, int, int] | None:
+    """Return the first key that `prog.py.toml` sets twice, and where.
+
+    TOML refuses a key set twice, which is what removing the `#` from
+    two lines of one setting does, but `tomllib` says only "Cannot
+    overwrite a value".  Naming both lines lets the developer keep the
+    one they meant (Wayne, 2026-10-23).
+
+    Arguments:
+    * `text` (`str`):
+      The file's text.
+
+    Returns:
+    * (`tuple[str, int, int] | None`): The key and its two lines (from
+      1), or `None` when no key is set twice.
+    """
+    # A bare or quoted key, then `=`: the only top-level lines the file
+    # has, since it has no tables.
+    pattern: re.Pattern[str] = re.compile(
+        r"""\s*(?:"([^"]*)"|'([^']*)'|([A-Za-z0-9_-]+))\s*=""")
+    seen: dict[str, int] = {}
+    number: int
+    line: str
+    for number, line in enumerate(text.splitlines(), 1):
+        found: re.Match[str] | None = pattern.match(line)
+        if found is None:
+            continue
+        key: str = next(one for one in found.groups() if one is not None)
+        if key in seen:
+            return key, seen[key], number
+        seen[key] = number
+    return None
+
+
 def setting_place(name: str, text: str, key: str, entry: str = "") -> str:
     """Return where a setting is, to begin a message it caused.
 
-    Such as ``prog.py.toml` line 41, `release = "1.0.0"``, so that the
+    Such as ``prog.py.toml` line 41, `version = "1.0.0"``, so that the
     developer never has to guess which line a message is about (Wayne,
     2026-10-22).  For one entry of a list, such as one of
     `dependencies`, the line that holds it.
@@ -1415,7 +1491,8 @@ def read_settings(path: Path) -> Settings:
     """Read and check a program's `prog.py.toml`.
 
     Every key and value is checked, so a typo stops the run rather than
-    being quietly ignored (`T.abfd`).
+    being quietly ignored (`T.abfd`).  So does a key set twice, and a
+    `release` list without a `version` to name it (Wayne, 2026-10-23).
 
     Arguments:
     * `path` (`Path`):
@@ -1427,14 +1504,24 @@ def read_settings(path: Path) -> Settings:
     Raises:
     * `ValueError`:
       With the message for the developer, such as ``prog.py.toml` line
-      3, `relase = "1.0.0"`: unknown setting `relase` (did you mean
-      `release`?)`.
+      3, `verison = "1.0.0"`: unknown setting `verison` (did you mean
+      `version`?)`.
     """
-    # TOML is UTF-8, and `tomllib`'s own messages give the line.
+    # TOML is UTF-8, and `tomllib`'s own messages give the line, except
+    # for a key set twice, which gets both of its lines.
     try:
         text: str = path.read_text(encoding="utf-8")
+    except UnicodeDecodeError as error:
+        raise ValueError(f"{path.name}: {error}") from None
+    try:
         table: dict[str, Any] = tomllib.loads(text)
-    except (UnicodeDecodeError, tomllib.TOMLDecodeError) as error:
+    except tomllib.TOMLDecodeError as error:
+        twice: tuple[str, int, int] | None = setting_twice(text)
+        if twice is not None:
+            raise ValueError(
+                f"`{path.name}` lines {twice[1]} and {twice[2]}: "
+                f"`{twice[0]}` is set twice; keep only one of them"
+            ) from None
         raise ValueError(f"{path.name}: {error}") from None
 
     # Each key, then the form of its value.
@@ -1453,7 +1540,7 @@ def read_settings(path: Path) -> Settings:
                     "(the settings are "
                     + and_list([f"`{one}`" for one in known]) + ")"))
         wrong: str = ""
-        if key == "release":
+        if key == "version":
             if not (isinstance(value, str) and RELEASE.fullmatch(value)):
                 wrong = 'a version in quotes, such as "1.0.0"'
         elif key == "bootstrap":
@@ -1461,16 +1548,21 @@ def read_settings(path: Path) -> Settings:
                                     for one in BOOTSTRAPS.values()]
             if value != "update" and value not in published:
                 wrong = '"update" or a published bootstrap, ' + and_list(
-                    [f'"{one}"' for one in published], "or")
-        elif key == "cull-days":
-            if (isinstance(value, bool) or not isinstance(value, int)
-                    or value < 1):
-                wrong = "a whole number of days, 1 or more"
+                    [f'"{one}"' for one in published if DATED.fullmatch(one)],
+                    "or")
+        elif key == "purge-unused-after":
+            if value not in PURGE_AFTER:
+                wrong = "one of " + and_list(
+                    [f'"{one}"' for one in PURGE_AFTER], "or")
+        elif key == "update-frequency":
+            if value not in UPDATE_FREQUENCY:
+                wrong = "one of " + and_list(
+                    [f'"{one}"' for one in UPDATE_FREQUENCY], "or")
         elif key == "verbosity":
             if value not in VERBOSITY:
                 wrong = "one of " + and_list(
                     [f'"{one}"' for one in VERBOSITY], "or")
-        elif key == "exports":
+        elif key == "release":
             if (isinstance(value, list)
                     and all(one in EXPORT_FORMS for one in value)
                     and len(set(value)) == len(value)):
@@ -1486,14 +1578,18 @@ def read_settings(path: Path) -> Settings:
                 value = tuple(value)
             else:
                 wrong = 'a list of requirements in quotes, such as "numpy>=2"'
-        elif key == "requires-python":
-            if not (isinstance(value, str) and python_floor(value)):
-                wrong = 'a Python version range in quotes, such as ">=3.11"'
-        elif not isinstance(value, bool):
-            wrong = "`true` or `false`"
+        elif key == "requires-python" and not (
+                isinstance(value, str) and python_floor(value)):
+            wrong = 'a Python version range in quotes, such as ">=3.11"'
         if wrong:
             raise ValueError(f"{where}: `{key}` must be {wrong}")
         values[known[key]] = value
+
+    # A release is named by its version, so one cannot be built without.
+    if values.get("release") and not values.get("version"):
+        raise ValueError(
+            f"{setting_place(path.name, text, 'release')}: a release needs "
+            f'a `version`, such as `version = "1.0.0"`')
     return Settings(**values)
 
 
@@ -1604,7 +1700,7 @@ def from_wheel() -> bool:
     Returns:
     * (`bool`): True if this one came from a wheel of `__version__`.
     """
-    # Inside the wheel `nopip8` imports from, beside the package
+    # Inside the wheel `2026-10-23` imports from, beside the package
     # directory, or beside a lone module.
     here: Path = Path(__file__).resolve().parent
     archive: zipfile.ZipFile
@@ -3689,7 +3785,7 @@ def find_uv() -> str | None:
     return found if version is not None and version >= UV_FLOOR else None
 
 
-def refresh(path: Path, text: str) -> None:
+def refresh(path: Path, text: str, executable: bool = False) -> None:
     """Write a file only when its contents would change.
 
     Making an object used to write a file every time, which is a side
@@ -3703,6 +3799,9 @@ def refresh(path: Path, text: str) -> None:
       The file to write.
     * `text` (`str`):
       What it should hold.
+    * `executable` (`bool`):
+      Whether it is a script that may be run as a command, such as
+      `~/.ezpkg/remove.py` (Wayne, 2026-10-23: it would not run).
     """
     # An unreadable file is treated as absent, and so is rewritten.
     present: str = ""
@@ -3712,6 +3811,14 @@ def refresh(path: Path, text: str) -> None:
         present = ""
     if present != text:
         path.write_text(text, encoding="utf-8")
+    # Checked on every run, so a cache written before the scripts were
+    # executable is mended too.  Whoever may read it may run it.
+    # Windows keeps no execute bits, and needs none.
+    if executable and os.name != "nt":
+        mode: int = path.stat().st_mode
+        wanted: int = mode | (mode & 0o444) >> 2
+        if wanted != mode:
+            path.chmod(wanted)
 
 
 def dependency_fingerprint(text: str, entries: Sequence[str],
@@ -4118,7 +4225,7 @@ class EZPkg:
         * `ezpkg.whl` is `EZPkg` itself, which the bootstrap fetched
           and imports straight from the wheel.  (`ezpkg/` and
           `ezpkg-<version>.dist-info/` are `EZPkg` as bootstraps before
-          `nopip8` installed it.)
+          `2026-10-23` installed it.)
         * `remove.py` removes this whole directory.
         * `list.py` says what is here and for which programs, and
           changes nothing.
@@ -4147,7 +4254,7 @@ class EZPkg:
         * `pip` (`subprocess.CompletedProcess[str] | None`):
           What `nopip7`'s `pip install ezpkg` printed, captured, on the
           run that installed `ezpkg` (a first run), else `None`
-          (`T.abfd`).  `nopip8` passes nothing: its first run is known
+          (`T.abfd`).  `2026-10-23` passes nothing: its first run is known
           by its `ezpkg.whl` in a cache with nothing installed yet.
         * `later` (`object`):
           Keywords a newer bootstrap passes, ignored, so that it can
@@ -4176,7 +4283,7 @@ class EZPkg:
         self.adding: list[str] | None = None  # The note's additions.
         self.restarted: bool = False  # Is this run a `restart`'s?
         self.root = Path.home() / ".ezpkg" if root is None else root
-        # A first run: `nopip7` says so with `pip`'s output; `nopip8`
+        # A first run: `nopip7` says so with `pip`'s output; `2026-10-23`
         # leaves only its `ezpkg.whl`, before anything was installed.
         self.first_run: bool = pip is not None or (
             (self.root / "ezpkg.whl").is_file()
@@ -4202,9 +4309,9 @@ class EZPkg:
         self.readme = self.root / "README.md"
         refresh(self.readme, f"# {title}\n{body}\n")
         self.quick_start = self.root / "quick_start.py"
-        refresh(self.quick_start, QUICK_START)
-        refresh(self.root / "remove.py", REMOVE_SCRIPT)
-        refresh(self.root / "list.py", LIST_SCRIPT)
+        refresh(self.quick_start, QUICK_START, executable=True)
+        refresh(self.root / "remove.py", REMOVE_SCRIPT, executable=True)
+        refresh(self.root / "list.py", LIST_SCRIPT, executable=True)
 
         # Repair a single module install, so that the bootstrap that
         # fetched this one recognises it next time.  See `I.cctfd`.
@@ -4327,7 +4434,7 @@ class EZPkg:
     def released(self) -> str:
         """Return the newest version in `prog.py.releases`, if any.
 
-        Written by `release`, so that a `release` setting releases once
+        Written by `release`, so that a `version` setting releases once
         each time it changes (`T.abfd`, Wayne, 2026-10-22).
 
         Returns:
@@ -4512,20 +4619,32 @@ class EZPkg:
         """Return Part 1's `exclude-newer` date, or an empty string.
 
         For a developer whose Part 1 is not edited (`stashing`), Part 1's
-        own date if the developer wrote one, else the stash's; and none
-        at all while `upgrade` is on, so that each run fetches the newest
-        versions and `record_approvals` dates them afresh.
+        own date if the developer wrote one, else the stash's.  The
+        stash's goes once it is older than `update-frequency` allows, so
+        that run fetches the newest versions and `record_approvals` dates
+        them afresh; with `never`, the default, it stays (Wayne,
+        2026-10-23).  A date the developer wrote is theirs, and stays.
 
         Returns:
         * (`str`): The date as written, such as `2026-10-19T12:00:00Z`.
         """
-        # Part 1's, else the stash's, unless upgrading.
+        # Part 1's, else the stash's, unless it is due an update.
         stashed: object = None
         if self.stashing():
-            settings: Settings | None = self.settings()
-            if settings is not None and settings.upgrade:
-                return ""
             stashed = self.stash().get("exclude-newer")
+            settings: Settings | None = self.settings()
+            allowed: float = UPDATE_FREQUENCY[
+                "never" if settings is None else settings.update_frequency]
+            if allowed and isinstance(stashed, str):
+                try:
+                    stamped: datetime.datetime = (
+                        datetime.datetime.fromisoformat(stashed))
+                except ValueError:
+                    stamped = datetime.datetime.min
+                if stamped.tzinfo is None:
+                    stamped = stamped.replace(tzinfo=datetime.UTC)
+                if time.time() - stamped.timestamp() > allowed:
+                    stashed = None
 
         # A block that will not parse is reported elsewhere, by the
         # code that needs it; here it simply has no date.
@@ -4765,7 +4884,7 @@ class EZPkg:
                target: Path | None = None) -> Path:
         """Write what the approvals record in another tool's form.
 
-        Called by `release` for each of `exports`, after the packages
+        Called by `release` for each form `release` lists, after the packages
         have been provided and the imports checked (`check_imports`).
         `zipapp` writes a `.pyz` (`build_zipapp`); `uv` writes a script
         and its lock file (`build_uv`); `email` writes the program to
@@ -5242,7 +5361,7 @@ class EZPkg:
                         f"but no release of it existed before "
                         f"{before[:10]}, the date {program.name}'s versions "
                         f"are frozen at.  To upgrade everything to today's "
-                        f"versions, set `upgrade = true` in "
+                        f"versions, set `update-frequency = \"daily\"` in "
                         f"{program.name}.toml and run {program.name} "
                         f"again.",
                         columns(sys.stderr))) from None
@@ -7179,8 +7298,8 @@ class EZPkg:
         """Remember which cached request a program uses now.
 
         So that `cull` keeps its packages for as long as the program's
-        own `cull-days` says (`stale`), which may be longer than the
-        default.  Only the latest is kept: a program whose
+        own `purge-unused-after` says (`stale`), which may be shorter
+        than the default.  Only the latest is kept: a program whose
         `dependencies` changed lets its old packages go at the default
         age (Wayne, 2026-10-22; S3.3b kept an agreed program's for
         ever).
@@ -7618,8 +7737,9 @@ class EZPkg:
             stale: str = (
                 f"\nIf `dependencies` changed, the versions locked for "
                 f"{program_name()} may be the conflict: to take today's, "
-                f"set `upgrade = true` in `{program_name()}.toml` and run "
-                f"the program again." if constraints else "")
+                f"set `update-frequency = \"daily\"` in "
+                f"`{program_name()}.toml` and run the program again."
+                if constraints else "")
             raise RuntimeError(
                 f"could not fetch {', '.join(requirements)} into "
                 f"{holding}: "
@@ -7828,10 +7948,10 @@ class EZPkg:
     def release_due(self, settings: Settings | None) -> str:
         """Return the version to release now, or empty for none.
 
-        Only a developer's run releases, and only once `exports` names a
-        form and `release` names a version: releases are off until the
+        Only a developer's run releases, and only once `release` names a
+        form and `version` names one: releases are off until the
         developer turns them on (Wayne, 2026-10-21).  Then a release is
-        due whenever `release` differs from the newest entry of
+        due whenever `version` differs from the newest entry of
         `prog.py.releases`, which is how a developer chooses each
         number, even an older one (Wayne, 2026-10-22).
 
@@ -7845,10 +7965,10 @@ class EZPkg:
         # Nothing for an end user, without the program's file, or with
         # releases off.
         program: Path | None = main_path()
-        if (settings is None or program is None or not settings.exports
-                or not settings.release):
+        if (settings is None or program is None or not settings.release
+                or not settings.version):
             return ""
-        return "" if settings.release == self.released() else settings.release
+        return "" if settings.version == self.released() else settings.version
 
     def restart(self, after_release: bool = False) -> None:
         """Run the program again after `ezpkg` has changed its file.
@@ -8039,7 +8159,7 @@ class EZPkg:
         program's `ezpkg` entry gets the range of this `ezpkg` (S5.1,
         S5.1c); the imports are checked; bare entries get ranges
         (S5.1b); the approvals (kept up to date by every developer run)
-        are frozen as they are; each of `exports` is built beside the
+        are frozen as they are; each form `release` lists is built beside the
         program, named by version (`prog-1.0.0.py`, `prog-1.0.0.pyz`,
         `prog-1.0.0-uv.py`; `release_files`), a `zipapp` that cannot
         carry a compiled package being skipped with a line; an entry is
@@ -8082,7 +8202,7 @@ class EZPkg:
             warning: str
             for warning in self.warnings or []:
                 self.say(1, warning)
-            self.say(1, f"{self.setting_at('release')}: "
+            self.say(1, f"{self.setting_at('version')}: "
                      f"`{program.name}` {version} was not released: "
                      f"{error}.  `{program.name}` runs as usual, and its "
                      f"next run tries again.")
@@ -8115,15 +8235,15 @@ class EZPkg:
             asking = self.range_ezpkg(asking)
             self.check_imports(asking)
 
-            # Ranges, then what `exports` lists, beside the program.
+            # Ranges, then what `release` lists, beside the program.
             # Every form takes the pasted bootstrap out or sends it, so a
             # program that uses `ezpkg` some other way builds none.
             asking = self.give_ranges(asking)
-            forms: list[str] = sorted(settings.exports,
+            forms: list[str] = sorted(settings.release,
                                       key=EXPORT_FORMS.index)
             if forms and find_bootstrap(
                     self.program_text(program)[0]) is None:
-                self.warn(f"{self.setting_at('exports')}: "
+                self.warn(f"{self.setting_at('release')}: "
                           f"`{program.name}` has no pasted bootstrap, "
                           f"so its release builds no "
                           f"{and_list(forms, 'or')}.")
@@ -8138,7 +8258,7 @@ class EZPkg:
                     # A zip cannot carry compiled code; the rest can.
                     if form != "zipapp" or "cannot bundle" not in str(error):
                         raise
-                    self.warn(f"{self.setting_at('exports', form)}: no "
+                    self.warn(f"{self.setting_at('release', form)}: no "
                               f"`{target.name}`: {error}.")
 
                 # The lock `uv` wrote beside the script, if `uv` was there.
@@ -8163,7 +8283,7 @@ class EZPkg:
             warning: str
             for warning in self.warnings or []:
                 self.say(1, warning)
-            self.say(1, f"{self.setting_at('release')}: "
+            self.say(1, f"{self.setting_at('version')}: "
                      f"`{program.name}` {version} was not released: "
                      f"{error}.  `{program.name}` runs as usual, and its "
                      f"next run tries again.")
@@ -8179,7 +8299,7 @@ class EZPkg:
                 adding.write(
                     f"# {record.name}: the releases of {program.name}, "
                     f"oldest first, written by ezpkg.\n"
-                    f"# Change `release` in {program.name}.toml and run "
+                    f"# Change `version` in {program.name}.toml and run "
                     f"{program.name} to make the next one.\n")
             adding.write(entry)
         if last and last != version:
@@ -8189,7 +8309,7 @@ class EZPkg:
         if self.stashing():
             self.put_stash(notes={})
         names: list[str] = [f"`{one.name}`" for one in built]
-        self.say(1, f"{self.setting_at('release')}: released "
+        self.say(1, f"{self.setting_at('version')}: released "
                  f"`{program.name}` {version}"
                  + (f": {and_list(names)}" if names else "")
                  + (f", with {len(warnings)} warning(s), listed in "
@@ -8399,7 +8519,7 @@ class EZPkg:
     def own_pip(self) -> None:
         """Fetch a private `pip`, as `nopip7` did, if there is none.
 
-        `nopip8` fetches only `ezpkg`, so this is where a stranger's
+        `2026-10-23` fetches only `ezpkg`, so this is where a stranger's
         `pip` comes from, before anything is asked (`T.abfd`).  And when
         `ezpkg` was already importable (`pip install ezpkg`), no
         bootstrap fetched anything, and the interpreter's own `pip` may
@@ -8482,7 +8602,7 @@ class EZPkg:
             self.scan_imports(asked)
         self.name_the_additions()
 
-        # A new `release` value builds a release, after which the
+        # A new `version` value builds a release, after which the
         # program runs as usual (`release`).
         version: str = self.release_due(settings)
         if version and settings is not None:
@@ -8657,7 +8777,7 @@ class EZPkg:
         once.  The approvals also lock: the versions they record are the
         ones fetched, whatever is newer; see `locked`.
 
-        In the no-argument form, a developer's new `release` value
+        In the no-argument form, a developer's new `version` value
         builds a release and exits instead of returning, so the
         program's own code never runs; see `release`.  Otherwise the
         developer's `dependencies` are kept in step with the imports;
@@ -9242,8 +9362,9 @@ class EZPkg:
         (or moved, or on a drive that is not there) lets its record go
         once it has been unused for its time.  The latest request a
         program uses (`note_request`) is kept as long as that program's
-        own `cull-days` says (`cull_seconds`), if that is longer; every
-        other age is `days` (Wayne, 2026-10-22).
+        own `purge-unused-after` says (`cull_seconds`), shorter or longer
+        than `days`, or the longest of them when several programs use
+        it; every other age is `days` (Wayne, 2026-10-22, 2026-10-23).
 
         Nothing else is aged.  Trees are kept or dropped by whether a
         record still names them, so removing a record is what makes its
@@ -9253,8 +9374,8 @@ class EZPkg:
         Arguments:
         * `days` (`float`):
           Seconds of disuse before a record counts as stale, unless a
-          program's `cull-days` says otherwise.  Named for the unit a
-          person thinks in; `CULL_DAYS` does the arithmetic.
+          program's `purge-unused-after` says otherwise.  Named for the
+          unit a person thinks in; `CULL_DAYS` does the arithmetic.
 
         Returns:
         * (`list[Path]`): The records, sorted, removed by nobody.
@@ -9281,7 +9402,7 @@ class EZPkg:
                 continue
             digest: object
             for digest in kept.get("requests", []) or []:
-                allowed[str(digest)] = max(allowed.get(str(digest), days),
+                allowed[str(digest)] = max(allowed.get(str(digest), 0.0),
                                            seconds)
 
         # Requests and scans, by their own last use.  An unreadable one

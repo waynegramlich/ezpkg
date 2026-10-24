@@ -1122,7 +1122,7 @@ def nopip8() -> None:
         if m is None:  # Python imports it straight from the wheel.
             s = f"import {PACKAGE}"; sys.path.insert(0, str(w))
             m = importlib.import_module(PACKAGE)
-        s = "fetch packages"; m.EZPkg().install(bootstrap="nopip8")
+        s = "fetch packages"; m.EZPkg().install(bootstrap="2026-10-23")
     except Exception as x:
         raise SystemExit(f"{PACKAGE}: {s} failed: {x!r}")  # Do not edit try block!
 

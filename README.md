@@ -36,7 +36,8 @@ hassle of virtual environments.  Then run it as the next section shows.
 
 ```python
 #!/usr/bin/env python3
-# Part 1: The packages this program needs.
+# Part 1: These lines look like `#` comments, but they are Python's inline
+# script metadata (PEP 723) that the EZPkg bootstrap needs.  Never remove them.
 # /// script
 # requires-python = ">=3.11"
 # dependencies = ["ezpkg>=0.0.1.dev0,<0.1", "cowsay"]
@@ -75,7 +76,7 @@ try:  # Do not edit try block!  See https://pypi.org/project/ezpkg/
     if m is None:  # Python imports it straight from the wheel.
         s = "import ezpkg"; sys.path.insert(0, str(w))
         m = importlib.import_module("ezpkg")
-    s = "fetch packages"; m.EZPkg().install(bootstrap="nopip8")
+    s = "fetch packages"; m.EZPkg().install(bootstrap="2026-10-23")
 except Exception as x:
     raise SystemExit(f"ezpkg: {s} failed: {x!r}")  # Do not edit try block!
 # End the EZPkg bootstrap.  Your imports go below it.
@@ -91,10 +92,8 @@ print(f"The cow above was drawn by cowsay {cowsay.__version__}.")
 ## Running a Program That Uses `EZPkg`
 
 The `quick_start.py` program is run as follows:
-* Windows: `py quick_start.py`
+* Windows: `py quick_start.py` or `python quick_start.py`
 * Linux/macOS: `python3 quick_start.py`
-
-On Windows, if `py` is not found, use `python` instead, here and below.
 
 The first time `quick_start.py` runs, it prints the following:
 
@@ -166,14 +165,14 @@ There are basically 4 things that can go wrong:
   `pip` ("`pip` Installs Packages") is the standard tool that fetches
   Python packages, and it can fail for other reasons.
 * **Not Approved**:
-  The author sent a `.py` that has not been through a release, and this
-  computer needs a package the author's computer did not.  The solution is
-  to ask the author for a released version of the program; see
+  The author sent a `.py` that has not been produced as an `EZPkg` release,
+  and this computer needs a package the author's computer did not.  The
+  solution is to ask the author for a released version of the program; see
   [Releasing a Packaged Program](#releasing-a-packaged-program).
 
 For each issue above, one line is printed and the program does not run.
 For further details of what went wrong, read `~/.ezpkg/last_failure.txt`,
-which every failure updates.
+which every failure rewrites.
 
 If you want to remove the `~/.ezpkg` directory and its contents, do the
 following:
@@ -181,7 +180,7 @@ following:
 * Windows (`cmd.exe`): `py %USERPROFILE%\.ezpkg\remove.py`
 * Linux/macOS: `python3 ~/.ezpkg/remove.py`
 
-While it is always safe to remove `~/.ezpkg`, note that if you run
+While it is always safe to remove `~/.ezpkg`,  please note that if you run
 `quick_start.py` again, the `~/.ezpkg` directory will return.
 
 ## Enabling `EZPkg` for a Program
@@ -208,6 +207,9 @@ whoever runs `PROG_NAME.py` is an end user, the same as in the Quick Start.
 
 ### What are packages and where do they come from?
 
+Since the primary purpose of `EZPkg` is to manage Python packages, it is
+prudent to a discuss a little bit more about them.
+
 In short, a package is a chunk of code that can be imported into a Python
 program for subsequent execution.  The most common place to fetch packages
 from is the [Python Package Index](https://pypi.org) (PyPI), which is where
@@ -224,12 +226,15 @@ Finding a set of packages that can interoperate with one another can be quite
 challenging.  Ultimately, `EZPkg` encodes the package configuration in Python
 inline script metadata format at the beginning of each released copy of the
 Python file.  It is unlikely that you will ever need to read any of this
-metadata.  `EZPkg` accomplishes all of this by scanning your Python program
+metadata.  If you look at the `quick_start.py` example, the information between
+the `# /// script` and `///` is a very short example of the meta data.  
+`EZPkg` accomplishes all of this by scanning your Python program
 for all `import` statements and reconciling them into a single, coherent,
 versioned package set.
 
-If you really want to dig in for more information, feel free to visit
-the following references:
+Frankly, `EZPkg` is trying to do all of the hard work of managing the meta
+data and other stuff so that you do not need to.  However, if you are curious,
+the following references provide a great deal of additional information:
 * [Python Package Index](https://pypi.org/):
   The most common place to store freely accessible Python packages.
 * [Inline script metadata](
@@ -243,89 +248,110 @@ the following references:
 
 ### `prog.py.toml` Settings
 
-When `PROG_NAME.py` runs and `PROG_NAME.py.toml` is empty, `EZPkg` fills
-it with the following, which explains every setting:
+When PROG_NAME.py runs and finds an empty PROG_NAME.py.toml file, EZPkg
+fills it with exactly the content shown below (i.e. from
+"# Start of PROG_NAME.py.toml:" to "# End of PROG_NAME.py.toml".)
 
 ```toml
-# PROG_NAME.py.toml: EZPkg settings for PROG_NAME.py, the program
-# beside this file.  More: https://pypi.org/project/ezpkg/
-#
-# This file makes you the program's developer.  If you delete this file,
-# you are no longer treated as a developer.  This file is the only place
-# where your development decisions get recorded (i.e. there are no unexpected
-# text prompts when the program runs).  All information that EZPkg collects
-# is stored in files in the `~/.ezpkg/` directory and not this file.
-#
-# On each run, EZPkg fetches the packages the program's imports need
-# and records the versions that were run.  A release writes both into
-# the copies it makes, so that whoever you send a release to gets
-# exactly those.  The program itself is never edited.  Without this file, the
-# program is an end user's: they are asked once, on its first run,
-# whether to keep its packages.
-#
-# Each setting below is shown at its default, mostly after a `#`.  To
-# change one, remove its `#` and edit its value.  A misspelled setting or
-# a wrong value stops the program, naming the line.  To see this text
-# again, empty this file and run the program.
+# Start of PROG_NAME.py.toml:
 
-# How much EZPkg says: "none", "low" (one-off notices), "medium" (also
-# each change to the packages) or "high" (also what was decided, and
-# why).
-# verbosity = "low"
+# This file is meant to be self-documenting.  It contains the EZPkg settings
+# for PROG_NAME.py (i.e. your program).  More: https://pypi.org/project/ezpkg/
 
-# The versions are frozen at the date of the program's first run, so
-# they never change by themselves.  With `upgrade = true`, every run
-# takes the newest versions; put the `#` back to freeze them at the
-# last run's date.
-# upgrade = false
+# This file is created as an empty file next to PROG_NAME.py, in the same
+# directory.  Depending upon which operating system you are running, one of
+# the following commands creates the empty file:
+# * Windows (PowerShell): `ni PROG_NAME.py.toml`
+# * Windows (`cmd.exe`): `type nul > PROG_NAME.py.toml`
+# * Linux/macOS: `touch PROG_NAME.py.toml`
 
-# How many days the packages the program uses may go unused before
-# EZPkg removes them from ~/.ezpkg (they are fetched again if needed).
-# cull-days = 30
+# The mere existence of PROG_NAME.py.toml classifies you as a developer of
+# PROG_NAME.py.  Conversely, if you remove this file, you are no longer
+# treated as a developer.  Instead, you will be asked on the program's first
+# run whether its packages can be kept in the ~/.ezpkg directory.
 
-# Releases: a release builds the copies you send to others, beside the
-# program, and records each one in PROG_NAME.py.releases.  Releases are
-# off until you remove the `#` from at least one entry of `exports` and
-# from `release` below.  Then each run where `release` differs from the
-# last one released builds that release, in place of the last one's
-# files, and then runs the program as usual.  Each release checks the
-# imports and the bootstrap, and gives each package without a version
-# a range.  Anything worth a second look, such as a package dropped
-# because nothing imports it any more, is listed under `warnings` in the
-# release's entry in PROG_NAME.py.releases, and the release's one line
-# says how many.
-exports = [  # Remove the `#`s of the forms each release builds.
-#   "email",   # PROG_NAME-VERSION.py, to send; for every computer.
-#   "zipapp",  # PROG_NAME-VERSION.pyz, no network; pure Python only.
-#   "uv",      # PROG_NAME-VERSION-uv.py and its lock, for `uv run`.
+# Whenever PROG_NAME.py.toml is empty and PROG_NAME.py is run, its contents
+# are initialized to the text you are currently reading (i.e. from
+# "# Start of PROG_NAME.py.toml:" to "# End of PROG_NAME.py.toml".)  After
+# this file is created, only you (the developer) get to edit it.  If you
+# want it reinitialized, empty the file and run PROG_NAME.py again.
+
+# This file is the only place where your EZPkg rules are configured.  Any
+# additional information collected by EZPkg is stored in various files in
+# the `~/.ezpkg/` directory.  EZPkg only ever fills this file when it is
+# empty, and never modifies it after that.
+
+# All possible settings that can be set are shown as commented-out TOML
+# lines.  To enable an option, just remove the preceding "# ".  For a list,
+# such as "release", remove the "#" from each entry you want.  If you
+# accidentally enable two conflicting options, EZPkg will produce an error
+# message with line numbers for you to fix.
+
+# The following configuration options exist:
+
+# "verbosity" specifies how much EZPkg prints while the program runs.
+# There are 4 levels of verbosity.  The default is "low":
+# verbosity = "high"    # Also what EZPkg decided, and why.
+# verbosity = "medium"  # Also each change to the packages.
+# verbosity = "low"     # Only one-off notices (default).
+# verbosity = "none"    # Nothing, except errors that stop the program.
+
+# "update-frequency" specifies how often your runs move to newer package
+# versions.  A release always carries the versions your last run used, so
+# whoever receives it gets exactly what you tested.
+# update-frequency = "never"    # Leave the current versions alone (default).
+# update-frequency = "monthly"  # Move to the newest versions once a month.
+# update-frequency = "weekly"   # Move to the newest versions once a week.
+# update-frequency = "daily"    # Move to the newest versions once a day.
+
+# "purge-unused-after" specifies how long a package may go unused before
+# EZPkg removes it from ~/.ezpkg (it is fetched again if it is needed).
+# purge-unused-after = "month"  # Unused for a month (default).
+# purge-unused-after = "week"   # Unused for a week.
+# purge-unused-after = "day"    # Unused for a day.
+
+# "version" specifies the release string.  Whenever it differs from the
+# last version released, the next run builds the releases listed in
+# "release", and then runs the program as usual.  Change it whenever you
+# like.  If you really need to, you can even reuse a previous value.
+# version = "1.0.0"  # 1.0.0 is usually the first functional release number.
+
+# "release" lists which releases to generate, each named with the VERSION
+# above.  Remove the "#" from 0, 1, or more of the entries in the list.
+release = [
+#   "email",   # PROG_NAME-VERSION.py; email .py (network needed).
+#   "zipapp",  # PROG_NAME-VERSION.pyz; pure Python (no network needed).
+#   "uv",      # PROG_NAME-VERSION-uv.py and its lock (`uv` needed).
 ]
+# Each release, and anything worth a second look, is recorded in
+# PROG_NAME.py.releases.
 
-# The version of the next release.  Change it whenever you like, even
-# to go back to an older number.
-# release = "1.0.0"
+# "bootstrap" specifies which EZPkg bootstrap the program carries.  Each
+# bootstrap is named by the date it was published ("YYYY-MM-DD").
+# bootstrap = "update"      # A release replaces an older one (default).
+# bootstrap = "2026-10-23"  # Keep exactly this one.
 
-# The bootstrap the program carries: "update" replaces an older one at
-# the next release; a name, such as "nopip8", keeps exactly that one.
-# bootstrap = "update"
+# The next options are rarely needed.  Most people can stop reading now.
+# They are needed for difficult situations that EZPkg simply cannot figure
+# out on its own.
 
-# Rarely needed: EZPkg works these out, and you set them only when it
-# gets one wrong.
+# "requires-python" specifies the oldest Python the program runs on.  EZPkg
+# works this out from the program and its packages (never older than 3.11,
+# which EZPkg itself needs).  Set it only when the program needs a newer
+# Python for its own reasons, such as a library function that is new.
+# requires-python = ">=3.11"  # The default: EZPkg itself needs 3.11.
 
-# The Pythons the program runs on.  Each release works this out from
-# the program's syntax and its packages (never older than 3.11, which
-# EZPkg needs).  Set it if the program needs a newer Python anyway, as
-# when it uses a library function that is new.
-# requires-python = ">=3.11"
-
-# Packages EZPkg cannot work out.  It finds a package for each import,
-# with a range from the version you ran, takes a marker from a guard
-# such as `if sys.platform == "win32":`, and adds a package when the
-# program stops because one is missing.  For anything else, write an
-# entry such as "numpy>=2.1" or "requests[socks]", a Python "dependency
-# specifier", as explained at
+# "dependencies" provides a way to manually specify values to be inserted
+# into the dependencies portion of the Python inline script metadata.  They
+# use the standard Python dependency specifier format.  See:
+#
 # https://packaging.python.org/en/latest/specifications/dependency-specifiers/
-# An entry here wins over the one EZPkg would choose for that package.
-# dependencies = []
+#
+# Put every entry in the one list, which may span several lines.  If an
+# entry conflicts with what EZPkg would choose, your entry wins.
+# dependencies = ["numpy>=2.1", "requests[socks]"]  # For example.
+
+# End of PROG_NAME.py.toml.
 ```
 
 ## Releasing a Packaged Program
@@ -349,11 +375,11 @@ a more durable single file package.  Currently three formats are supported:
   compiled and pure Python packages together.  The recipient must have `uv`
   installed, and `uv` fetches the packages over the network on the first run.
 
-The requirement is that at least one of the values for `exports = [ ... ]`
-is enabled (`email`, `zipapp` or `uv`).  Once `exports = [ ... ]` is set,
-run your program.  As a side effect of running your program the appropriate
-files are generated.  Whenever an import is added or removed, the appropriate
-generated files are (re)generated.
+The requirement is that at least one of the values for `release = [ ... ]`
+is enabled (`email`, `zipapp` or `uv`), and that `version` is set.  Once
+both are set, run your program.  As a side effect of running your program
+the appropriate files are generated.  Whenever `version` changes, the
+appropriate files are (re)generated.
 
 ## The Bootstrap
 
@@ -452,7 +478,7 @@ the `except` at the bottom stops the program with
   * `m.EZPkg()` sets up the `~/.ezpkg` directory, and `.install()`
     reads Part 1, downloads any packages not already there, and puts
     them on `sys.path`, so that the imports in Part 3 succeed.
-  * `bootstrap="nopip8"` names the bootstrap this program carries.
+  * `bootstrap="2026-10-23"` names the bootstrap this program carries.
   * If Part 1's `ezpkg` entry asks for a different version, this `ezpkg`
     fetches that one and starts the program again with it.
 
@@ -473,6 +499,10 @@ Program That Uses `EZPkg`](#running-a-program-that-uses-ezpkg).
   `release`?)``**:
   Fix the spelling in `prog.py.toml`; the program does not run until
   every setting is known.
+* **``prog.py.toml lines 302 and 305: `update-frequency` is set twice;
+  keep only one of them``**:
+  The `#` was removed from two lines of one setting.  Put it back on the
+  one you did not mean.
 * **``prog.py line 7: `import tabulat` needs a package, but PyPI has none
   called `tabulat` ``**:
   Usually a misspelt import.  If the package's name on PyPI differs from

@@ -33,3 +33,18 @@ Earlier entries are in `History.md`.
   write-up; bring it up to date when the `pypi` half works.
 * Commits carry `Assisted-by: Claude Code:claude-opus-5-5` from
   `git_hooks/`; update the model there when it changes.
+
+## 2026-10-23
+
+* The bootstrap changed (`2026-10-23`, its fingerprint in `BOOTSTRAPS`),
+  so the test.pypi.org upload `0.0.1.dev202610222321` is stale: the next
+  rehearsal must upload a fresh build before `release_check` passes.
+* A Quick Start run outside the project fails with `ezpkg: download
+  ezpkg failed: <HTTPError 404>` until `ezpkg` is on pypi.org: the
+  bootstrap asks pypi.org only.  Before then, run it with
+  `PYTHONPATH="$HOME/public_html/projects/ezpkg"`.
+* The cache's `remove.py`, `list.py` and `quick_start.py` are now
+  executable on Linux and macOS (`refresh(..., executable=True)`, which
+  also mends an existing cache).
+* The quick suite is `./ezpkg_test.py` (`FAST`): it must run the latest
+  bootstrap's case.  `EZPKG_TEST=NONE` is only the coverage baseline.

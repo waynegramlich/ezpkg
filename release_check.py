@@ -28,7 +28,7 @@ prompt answers yes by itself.  See `I.owenabd`.
   by a few minutes.
 * `testpypi`:
   Only the `ezpkg` wheel comes from test.pypi.org, downloaded here,
-  checked against its SHA-256 and put where `nopip8` keeps it,
+  checked against its SHA-256 and put where `2026-10-23` keeps it,
   `~/.ezpkg/ezpkg.whl`, since the bootstrap asks pypi.org only; `pip`
   and `cowsay` still come from pypi.org.  Anybody can upload to test.pypi.org, and its `cowsay` is a
   stranger's, so the two indexes are never searched together.
@@ -335,7 +335,7 @@ def main() -> int:
     sys.stdout.flush()
 
     # Passed only if it ran, the cow appeared and the right `ezpkg` did it.
-    # `nopip8` keeps `ezpkg` as `ezpkg.whl`; older bootstraps installed it.
+    # `2026-10-23` keeps `ezpkg` as `ezpkg.whl`; older bootstraps installed it.
     installed: list[str] = sorted(
         path.name for path in (home / ".ezpkg").glob("ezpkg-*.dist-info"))
     kept: Path = home / ".ezpkg" / "ezpkg.whl"

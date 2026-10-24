@@ -11,8 +11,8 @@ needs live here instead.
 * `quick_start.py`: The Quick Start program, and the authority for the
   bootstrap text.
 * `bootstrap.py`: Every bootstrap this project has tried, one function
-  per case (`nopip1` ... `nopip8`); `nopip8` is the one that ships
-  (2026-10-20): it fetches only `ezpkg`'s wheel, keeps it as
+  per case (`nopip1` ... `nopip8`); `nopip8` is the one that ships,
+  published as the bootstrap `2026-10-23` (Wayne, 2026-10-23): it fetches only `ezpkg`'s wheel, keeps it as
   `~/.ezpkg/ezpkg.whl` and imports from it; `EZPkg.own_pip` fetches
   `pip`.  pypi.org has no `ezpkg` yet, so `ux/drive.py` and
   `release_check.py testpypi` put the wheel there themselves.
@@ -89,7 +89,9 @@ match it:
 
 A changed bootstrap is a new one, comments and spaces included
 (`T.reb`: `EZPkg` refuses any bootstrap that is not, line for line once
-trimmed, a published one).  It needs a new `nopipN` name, its
+trimmed, a published one).  It needs a new name, the date it is published
+(`DATED`; `nopip3`-`nopip7` were never released and stay only as test
+fixtures), its
 fingerprint added to the end of `BOOTSTRAPS` in `ezpkg.py`, and the
 previous text kept in `OLD_BOOTSTRAP_TEXTS`.  `bootstrap.py`'s copies
 spell things as variables, so its harness sets
@@ -102,11 +104,14 @@ into its copy when the program has none (`with_script_block`), with a
 `requires-python` worked out from the syntax and the packages
 (`python_range`), or the setting.
 
-`SETTINGS_TEMPLATE` in `ezpkg.py` is the authority for what an empty
-`prog.py.toml` is filled with, and `README.md`'s "`prog.py.toml`
-Settings" shows it verbatim (Claude copies it after every change; a
-test fails otherwise, or on a line over 79 columns).  It names no
-program: `PROG_NAME` is the README's word (Wayne, 2026-10-22).
+`SETTINGS_TEMPLATE` in `ezpkg.py` is what an empty `prog.py.toml` is
+filled with, and `README.md`'s "`prog.py.toml` Settings" shows it
+verbatim, from `# Start of PROG_NAME.py.toml:` to `# End of ...` (a
+test fails otherwise, or on a line over 79 columns).  Since 2026-10-23
+Wayne writes it in the README, for people new to EZPkg, and Claude
+copies the block into `SETTINGS_TEMPLATE`.  It names no program:
+`PROG_NAME` is the README's word (Wayne, 2026-10-22).  Its keys use
+hyphens, as PEP 723 does (Wayne, 2026-10-23).
 
 ## The Two Modes (`T.abfd`, 2026-10-19)
 
@@ -128,22 +133,28 @@ for imports Part 1 lacks, `checksums`, `exclude-newer`, `released`)
 is the program's stash in its `~/.ezpkg/develop/` record
 (`EZPkg.stash`), seeded from Part 1 or the newest `email` build; Part
 1's own entries and a hand-written date are read, never changed;
-`upgrade = true` in `prog.py.toml` takes the newest versions; a
+`update-frequency` (`"never"`, the default, `"monthly"`, `"weekly"`
+or `"daily"`) drops the stash's date once it is older than that, so
+that run takes the newest versions and dates them afresh; a
 release merges the stash into a staged copy (`staged`) that its forms
-are built from.  Releases are off until `exports` in
-`prog.py.toml` names a form and `release` names a version (the
-template leaves `exports = [` open with each form's line commented
-out, and `release` commented out).  Then a developer's run where
-`release` differs from the newest entry of `prog.py.releases` builds
-that release (the forms `exports` names, in `EXPORT_FORMS` order:
+are built from.  Releases are off until `release` in
+`prog.py.toml` names a form and `version` names a version (the
+template leaves `release = [` open with each form's line commented
+out, and `version` commented out; a `release` list without a
+`version` is refused, as is any key set twice, naming both lines).
+Then a developer's run where `version` differs from the newest entry
+of `prog.py.releases` builds that release (the forms `release` names,
+in `EXPORT_FORMS` order:
 `email`, `zipapp`, `uv`) beside `prog.py` as `prog-X.Y.Z.py`,
 `.pyz`, `-uv.py` and its lock (`release_files`), removes the last
 release's files, appends a `[[release]]` entry (version, date, commit,
 `exclude-newer`, `dependencies`; `release_entry`) to
 `prog.py.releases`, and then runs the program (Wayne, 2026-10-22: one
 file for version control, no folder).  A lost stash is seeded from the
-newest entry.  `cull` uses one number, 30 days (`CULL_DAYS`, or a
-program's `cull-days`), and keeps a `develop/` record while its
+newest entry.  `cull` uses one number, 30 days (`CULL_DAYS`), except
+for a program's latest request, which gets that program's own
+`purge-unused-after` (`"month"`, `"week"` or `"day"`; shorter than 30
+days too, Wayne, 2026-10-23), and keeps a `develop/` record while its
 program exists; `~/.ezpkg/list.py` lists what the cache holds.  An entry nothing imports goes once the latest recorded run
 declared it and none of the last 10 loaded it (`unused_lately`,
 `note_loaded`); a comment keeps it.  Without one, `prog.py` is an end user's: one question per
@@ -152,17 +163,23 @@ program, ever, and the program is never edited.  `prog.ezpkg`,
 
 ## Testing and Linting
 
-* Quick tests, during development (about 2 minutes):
-  `EZPKG_TEST=NONE ./ezpkg_test.py`.  A single class or method can be
-  named after it.
-* The full suite (`./ezpkg_test.py`, or `EZPKG_TEST=COMPLETE` for every
-  `bootstrap.py` case) runs only when Wayne asks.  Its default
-  (`FAST_CASES`) is `nopip8` alone (Wayne, 2026-10-22).
+* Quick tests, during development (about 6 minutes): `./ezpkg_test.py`
+  (`EZPKG_TEST=FAST`, the default), which runs everything plus the
+  latest bootstrap's case (`FAST_CASES`, `nopip8` in `bootstrap.py`,
+  published as `2026-10-23`).  The quick suite must run the latest
+  bootstrap (Wayne, 2026-10-23); `EZPKG_TEST=NONE` skips every case
+  and is only the coverage tool's baseline.  A single class or method
+  can be named after it.
+* `EZPKG_TEST=COMPLETE`, every `bootstrap.py` case, runs only when
+  Wayne asks.
 * Coverage: `./ezpkg_coverage.py --children DIR` (about 23 minutes,
   in the background, scratch `HOME`) annotates into `DIR` and lists the
   unrun lines not marked `# pragma: no cover` in `DIR/missing.txt`.
-  Keep pragmas few (Wayne).  `ezpkg.py` was 97% on 2026-10-22, 80
-  lines unrun, mostly Windows-only, timeout and `EDIT_PROGRAM` paths.
+  Keep pragmas few (Wayne).  `ezpkg.py` was 98.3% on 2026-10-23, 67
+  of 3860 lines unrun: Windows-only (6), failures in the middle of a
+  `pip` or `uv` run (~16), a release carrying a stale bootstrap (~8),
+  restart paths in child processes (~10), filesystem errors (5), and
+  rare reconcile, sync and Part 1 editing branches (~18).
 * Tests of the old Part 1 editing are marked `@editing`
   (`EZPKG_EDIT_PROGRAM=on`); `run_as_developer` edits too, so end-user
   tests find approvals in Part 1.

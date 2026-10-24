@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-# Part 1: The packages this program needs.
+# Part 1: These lines look like `#` comments, but they are Python's inline
+# script metadata (PEP 723) that the EZPkg bootstrap needs.  Never remove them.
 # /// script
 # requires-python = ">=3.11"
 # dependencies = ["ezpkg>=0.0.1.dev0,<0.1", "cowsay"]
@@ -38,7 +39,7 @@ try:  # Do not edit try block!  See https://pypi.org/project/ezpkg/
     if m is None:  # Python imports it straight from the wheel.
         s = "import ezpkg"; sys.path.insert(0, str(w))
         m = importlib.import_module("ezpkg")
-    s = "fetch packages"; m.EZPkg().install(bootstrap="nopip8")
+    s = "fetch packages"; m.EZPkg().install(bootstrap="2026-10-23")
 except Exception as x:
     raise SystemExit(f"ezpkg: {s} failed: {x!r}")  # Do not edit try block!
 # End the EZPkg bootstrap.  Your imports go below it.
