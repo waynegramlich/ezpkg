@@ -172,8 +172,8 @@ def main() -> int:
     command: list[str]
     run_home: pathlib.Path | None
     for name, command, run_home in steps:
-        log: pathlib.Path = directory / f"{name.replace(' ', '_')}.log"
-        log = log.with_name(log.name.replace("/", "_"))
+        log: pathlib.Path = directory / (
+            name.replace(" ", "_").replace("/", "_") + ".log")
         if name == "email friend" and not results[-1][1]:
             print(f"==> {name}: skipped, since the build failed")
             results.append((name, False, 0.0, log))

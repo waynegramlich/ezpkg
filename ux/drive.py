@@ -357,9 +357,10 @@ STEPS: list[Step] = [
          before=settings('dependencies = ["no-such-package-xyzzy"]\n'),
          mode="developer"),
     Step("2.10 Upgrade",
-         "The bad name gone, and upgrade = true: today's versions.",
+         'The bad name gone, and update-frequency = "daily": it runs, and '
+         "moves to today's versions once its date is a day old.",
          None, present=[WORKS], absent=["Traceback"],
-         before=settings("upgrade = true\n"),
+         before=settings('update-frequency = "daily"\n'),
          declared=[*BASE, "tabulate", "humanize"], mode="developer"),
     Step("2.11 A Windows-only import",
          'import win32api under if sys.platform == "win32": its package '
@@ -381,13 +382,13 @@ STEPS: list[Step] = [
          declared=[*BASE, "tabulate", "humanize", "pywin32", "pysocks"],
          mode="developer"),
     Step("2.14 Release",
-         'release = "1.0.0", exports = ["email", "zipapp", "uv"]: built, '
+         'version = "1.0.0", release = ["email", "zipapp", "uv"]: built, '
          "warnings counted, then the program runs.",
          None, present=["released `prog.py` 1.0.0",
                         "warning(s), listed in `prog.py.releases`", WORKS],
          absent=["Traceback"],
-         before=settings('release = "1.0.0"\n'
-                         'exports = ["email", "zipapp", "uv"]\n'),
+         before=settings('version = "1.0.0"\n'
+                         'release = ["email", "zipapp", "uv"]\n'),
          files=["prog-1.0.0.py", "prog-1.0.0.pyz", "prog-1.0.0-uv.py",
                 "prog.py.releases"], mode="developer"),
     Step("2.15 The email release",
@@ -646,7 +647,7 @@ def toml_line(work: Path) -> str:
     changed must show).
 
     Returns:
-    * (`str`): Such as `prog.py.toml: upgrade = true`, or empty for an
+    * (`str`): Such as `prog.py.toml: version = "1.0.0"`, or empty for an
       end user's program.
     """
     # Every setting, as `ezpkg.Settings` names it, with its default.

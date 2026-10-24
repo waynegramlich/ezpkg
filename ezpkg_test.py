@@ -1359,30 +1359,6 @@ def holds(venv: ezpkg.EZPkg, package: str) -> bool:
                for tree in venv.paths()[2].iterdir())
 
 
-def editing(test: Callable[..., None]) -> Callable[..., None]:
-    """Run a test with `ezpkg.EDIT_PROGRAM` on, here and in its children.
-
-    For the tests of the code that edits a developer's Part 1, which
-    stays until Wayne decides whether `prog.py` is ever edited
-    (2026-10-22).
-
-    Arguments:
-    * `test` (`Callable[..., None]`):
-      The test method.
-
-    Returns:
-    * (`Callable[..., None]`): It, with the switch on.
-    """
-    # The constant for this process, the variable for its children.
-    @functools.wraps(test)
-    def switched(*arguments: Any, **keywords: Any) -> None:
-        with (unittest.mock.patch.dict(os.environ,
-                                       {"EZPKG_EDIT_PROGRAM": "on"}),
-              unittest.mock.patch.object(ezpkg, "EDIT_PROGRAM", True)):
-            test(*arguments, **keywords)
-    return switched
-
-
 class _KeptStringIO(io.StringIO):
     """A `StringIO` that survives being closed.
 
@@ -2551,6 +2527,21 @@ class InstallTest(unittest.TestCase):
             venv.install("nosuchwidget")
         self.assertIn("could not fetch", str(caught.exception))
 
+    def test_a_wheel_without_its_module_is_refused(self) -> None:
+        """A guessed package that lacks the module it was guessed for is
+        refused before it is unpacked, as a squatter's would be."""
+        # `widget` asked for as the provider of a module it does not have.
+        cache: Path = self.root / "in-process-wrong"
+        self.addCleanup(self.forget, str(cache), "widget")
+        venv: ezpkg.EZPkg = ezpkg.EZPkg(cache)
+        with (unittest.mock.patch.dict(
+                  os.environ, {"PIP_INDEX_URL": self.index_url}),
+              self.assertRaisesRegex(
+                  RuntimeError, r"widget-1\.2\.3-.*\.whl does not provide "
+                  r"`gadget`")):
+            venv.provide(["widget"], (), {"widget": "gadget"})
+        self.assertFalse(holds(venv, "widget"))
+
     def test_install_fetches_and_imports(self) -> None:
         """A missing package is fetched and handed back imported."""
         # The package does not exist anywhere but the local index.
@@ -3271,9 +3262,14 @@ class InstallTest(unittest.TestCase):
     def program(self, name: str, requirement: str) -> Path:
         """Write a little program that installs one requirement.
 
-        Approvals live in the program's Part 1, so it has an empty
-        `script` block for them, and they can only be exercised by a
-        real program in a directory of its own (`T.abfd`, S2.4).
+        The requirement is Part 1's one entry, below which is the real
+        pasted bootstrap, so that a developer's run can release it as
+        an `email` copy (`run_as_developer`, S4.2).  `run_program` runs
+        it with this directory as `HOME`, so its cache is `.ezpkg`
+        here (`cache_of`), and with this tree on `PYTHONPATH`, where
+        the bootstrap finds `ezpkg` already importable.  Approvals live
+        in Part 1, and can only be exercised by a real program in a
+        directory of its own (`T.abfd`, S2.4).
 
         Arguments:
         * `name` (`str`):
@@ -3284,21 +3280,42 @@ class InstallTest(unittest.TestCase):
         Returns:
         * (`Path`): The program written.
         """
-        # Its own directory, its own cache, its own approvals file.
+        # Its own directory, its own cache, its own approvals.
         where: Path = self.root / name
-        where.mkdir(parents=True, exist_ok=True)
+        (where / ".ezpkg").mkdir(parents=True, exist_ok=True)
         program: Path = where / "prog.py"
+        module: str = re.split(r"[=<>!~ ]", requirement)[0]
         program.write_text(
-            "# /// script\n"
-            "# dependencies = []\n"
-            "# ///\n"
-            "import sys\n"
-            f"sys.path.insert(0, {str(Path(__file__).resolve().parent)!r})\n"
-            "import ezpkg\n"
-            "from pathlib import Path\n"
-            f"v = ezpkg.EZPkg(Path({str(where / 'cache')!r}))\n"
-            f"print(v.install({requirement!r}).__version__)\n")
+            f"# /// script\n# dependencies = [{requirement!r}]\n# ///\n"
+            "import importlib\nimport pathlib\nimport sys\n"
+            + bootstrap.pasted(SHIPPING)
+            + f"import {module}\nprint({module}.__version__)\n")
         return program
+
+    def cache_of(self, program: Path) -> Path:
+        """Return the cache a `program` uses, in its own `HOME`.
+
+        Arguments:
+        * `program` (`Path`):
+          What `program` returned.
+
+        Returns:
+        * (`Path`): Its `.ezpkg`.
+        """
+        # `run_program` makes the program's directory its `HOME`.
+        return program.parent / ".ezpkg"
+
+    def empty_cache(self, program: Path) -> None:
+        """Empty a `program`'s cache, as a new computer's would be.
+
+        Arguments:
+        * `program` (`Path`):
+          What `program` returned.
+        """
+        # The directory stays, since it marks the program's `HOME`.
+        cache: Path = self.cache_of(program)
+        shutil.rmtree(cache)
+        cache.mkdir()
 
     def approvals_of(self, program: Path) -> dict[str, str] | None:
         """Return the approvals a program's Part 1 records, pin to id.
@@ -3324,6 +3341,61 @@ class InstallTest(unittest.TestCase):
         program.write_text(re.sub(r"id:[0-9a-f]{16}", "id:" + "0" * 16,
                                   program.read_text()))
 
+    def program_environment(self, program: Path,
+                            extra: dict[str, str]) -> dict[str, str]:
+        """Return the environment to run a test's program in.
+
+        Arguments:
+        * `program` (`Path`):
+          The program.
+        * `extra` (`dict[str, str]`):
+          More environment, which wins.
+
+        Returns:
+        * (`dict[str, str]`): The index is local; everything else is
+          inherited, except that a `program` has its own `HOME`, and
+          finds this tree's `ezpkg` (see `program`).
+        """
+        # Only a `program` has a `.ezpkg` beside it.  The tree goes in
+        # front of `PYTHONPATH`, which may hold the coverage hook.
+        paths: str = os.pathsep.join(
+            [str(Path(__file__).resolve().parent)]
+            + [one for one in [os.environ.get("PYTHONPATH", "")] if one])
+        own: dict[str, str] = (
+            {"HOME": str(program.parent), "USERPROFILE": str(program.parent),
+             "PYTHONPATH": paths}
+            if self.cache_of(program).is_dir() else {})
+        environment: dict[str, str] = {
+            **os.environ, "PIP_INDEX_URL": self.index_url, **own, **extra}
+        environment.pop("VIRTUAL_ENV", None)
+        return environment
+
+    def ask_for(self, program: Path, requirement: str) -> None:
+        """Make a `program`'s one Part 1 entry `requirement`, unapproved.
+
+        As its developer would, by hand, after a release: the entry and
+        the program's import change, and the `checksums` do not.
+
+        Arguments:
+        * `program` (`Path`):
+          What `program` returned, perhaps since replaced by its copy.
+        * `requirement` (`str`):
+          The new entry.
+        """
+        # The entry other than `ezpkg`'s, wherever the copy put it.
+        module: str = re.split(r"[=<>!~ ]", requirement)[0]
+        text: str = program.read_text()
+        line: str = next(one for one in text.splitlines()
+                         if one.startswith("# dependencies = "))
+        entries: list[str] = [
+            one if one == "ezpkg" else requirement
+            for one in json.loads(line.removeprefix("# dependencies = ")
+                                  .replace("'", '"'))]
+        text = text.replace(line, f"# dependencies = {json.dumps(entries)}")
+        text = re.sub(r"(?m)^import (\w+)\nprint\(\1\.",
+                      f"import {module}\nprint({module}.", text)
+        program.write_text(text)
+
     def run_program(self, program: Path,
                     **extra: str) -> subprocess.CompletedProcess[str]:
         """Run one of those programs against the local index.
@@ -3337,23 +3409,20 @@ class InstallTest(unittest.TestCase):
         Returns:
         * (`subprocess.CompletedProcess[str]`): The finished child.
         """
-        # The index is local; everything else is inherited.
-        environment: dict[str, str] = {
-            **os.environ, "PIP_INDEX_URL": self.index_url, **extra}
-        environment.pop("VIRTUAL_ENV", None)
+        # Each program its own environment.
         return subprocess.run([sys.executable, str(program)],
-                              env=environment, capture_output=True,
+                              env=self.program_environment(program, extra),
+                              capture_output=True,
                               text=True, check=False)
 
     def run_as_developer(self, program: Path,
                          **extra: str) -> subprocess.CompletedProcess[str]:
         """Run a program once as its developer, which writes its approvals.
 
-        With a `prog.py.toml` that leaves `dependencies` alone, removed
-        again afterwards, so later runs are an end user's (`T.abfd`).
-        The first such run also stamps `exclude-newer` into Part 1, which
-        is edited (`EZPKG_EDIT_PROGRAM=on`), as a release's copy would
-        carry them.
+        As an end user gets them (Wayne, S4.2): the developer's run
+        builds an `email` release (`release_as_developer`), whose copy
+        then takes the program's place, Part 1 approvals and all, and
+        the release's own files go, so later runs are an end user's.
 
         Arguments:
         * `program` (`Path`):
@@ -3364,18 +3433,16 @@ class InstallTest(unittest.TestCase):
         Returns:
         * (`subprocess.CompletedProcess[str]`): The finished child.
         """
-        # Only a settings file this made is taken away.  Part 1 is
-        # edited, so that the end user's later runs find the approvals.
-        settings: Path = program.with_name(f"{program.name}.toml")
-        made: bool = not settings.exists()
-        if made:
-            settings.write_text('verbosity = "low"\n')
-        try:
-            return self.run_program(
-                program, **{"EZPKG_EDIT_PROGRAM": "on", **extra})
-        finally:
-            if made:
-                settings.unlink()
+        # The copy replaces the program only when the release worked.
+        if ezpkg.find_uv() is None:
+            self.skipTest("uv is not installed")
+        done: subprocess.CompletedProcess[str] = self.release_as_developer(
+            program, "email", **extra)
+        if done.returncode == 0:
+            program.write_bytes(self.built.read_bytes())
+            self.built.unlink()
+            program.with_name(f"{program.name}.releases").unlink()
+        return done
 
     def release_as_developer(self, program: Path, form: str,
                              **extra: str) -> subprocess.CompletedProcess[str]:
@@ -3422,8 +3489,8 @@ class InstallTest(unittest.TestCase):
         self.assertEqual(done.returncode, 0, done.stderr[-300:])
         self.assertEqual(done.stdout.strip(), "1.2.3")
         self.assertTrue(" ".join(done.stderr.split()).startswith(
-            f"The following 1 package(s) are now retained in "
-            f"`{program.parent / 'cache'}`: 1. widget 1.2.3"), done.stderr)
+            "The following 1 package(s) are now retained in `~/.ezpkg`: "
+            "1. widget 1.2.3"), done.stderr)
         self.assertIsNone(self.approvals_of(program))
 
     def test_the_author_records_approvals(self) -> None:
@@ -3453,7 +3520,7 @@ class InstallTest(unittest.TestCase):
         program: Path = self.program("silent", "widget")
         self.assertEqual(
             self.run_as_developer(program).returncode, 0)
-        shutil.rmtree(program.parent / "cache")
+        self.empty_cache(program)
         done: subprocess.CompletedProcess[str] = self.run_program(program)
         self.assertEqual(done.returncode, 0, done.stderr[-300:])
         self.assertEqual(done.stdout.strip(), "1.2.3")
@@ -3472,15 +3539,19 @@ class InstallTest(unittest.TestCase):
         program: Path = self.program("refused", "widget")
         self.assertEqual(
             self.run_as_developer(program).returncode, 0)
-        program.write_text(program.read_text().replace(
-            "install('widget')", "install('sprocket')"))
+        self.ask_for(program, "sprocket")
         done: subprocess.CompletedProcess[str] = self.run_program(program)
         self.assertNotEqual(done.returncode, 0)
-        self.assertIn("is not in the `checksums`", done.stderr)
-        self.assertIn("sprocket-2.0.0", done.stderr)
+        self.assertIn("needs sprocket 2.0.0 on this computer, which its "
+                      "author did not approve",
+                      " ".join(done.stderr.split()))
+        failure: str = (self.cache_of(program)
+                        / "last_failure.txt").read_text()
+        self.assertIn("is not in the `checksums`", failure)
+        self.assertIn("sprocket-2.0.0", failure)
 
         # And nothing was unpacked, because the refusal comes first.
-        trees: list[Path] = list((program.parent / "cache"
+        trees: list[Path] = list((self.cache_of(program)
                                   / "versions").iterdir())
         self.assertTrue(all("sprocket" not in tree.name for tree in trees),
                         trees)
@@ -3496,42 +3567,11 @@ class InstallTest(unittest.TestCase):
         program: Path = self.program("locking", "sprocket==1.0.0")
         self.assertEqual(
             self.run_as_developer(program).returncode, 0)
-        program.write_text(program.read_text().replace(
-            "install('sprocket==1.0.0')", "install('sprocket')"))
-        shutil.rmtree(program.parent / "cache")
+        self.ask_for(program, "sprocket")
+        self.empty_cache(program)
         done: subprocess.CompletedProcess[str] = self.run_program(program)
         self.assertEqual(done.returncode, 0, done.stderr[-300:])
         self.assertEqual(done.stdout.strip(), "1.0.0")
-
-    def test_deleting_the_date_upgrades_past_the_lock(self) -> None:
-        """No `exclude-newer` date: the developer's run resolves afresh.
-
-        That is how packages are upgraded, and a new date is stamped
-        (`T.abfd`).
-        """
-        # Record 1.0.0, loosen: still locked while the date stands.
-        program: Path = self.declaring_program(
-            "upgrade", 'dependencies = ["sprocket==1.0.0"]',
-            "import sprocket\nprint(sprocket.__version__)")
-        self.assertEqual(self.run_as_developer(program).returncode, 0)
-        dated: str = program.read_text()
-        self.assertIn("# exclude-newer = ", dated)
-        program.write_text(dated.replace('dependencies = ["sprocket==1.0.0"]',
-                                         'dependencies = ["sprocket"]'))
-        shutil.rmtree(program.parent / "cache")
-        done: subprocess.CompletedProcess[str] = self.run_as_developer(
-            program)
-        self.assertEqual(done.stdout.strip(), "1.0.0", done.stderr[-300:])
-
-        # The date deleted: upgraded, recorded and dated again.
-        program.write_text("".join(
-            line for line in program.read_text().splitlines(keepends=True)
-            if "exclude-newer" not in line))
-        done = self.run_as_developer(program)
-        self.assertEqual(done.returncode, 0, done.stderr[-300:])
-        self.assertEqual(done.stdout.strip(), "2.0.0")
-        self.assertIn("sprocket==2.0.0", self.approvals_of(program) or {})
-        self.assertIn("# exclude-newer = ", program.read_text())
 
     def test_a_lock_dependencies_moved_past_names_the_file(self) -> None:
         """A requirement the lock cannot meet says what to regenerate."""
@@ -3539,91 +3579,15 @@ class InstallTest(unittest.TestCase):
         program: Path = self.program("moved", "sprocket==1.0.0")
         self.assertEqual(
             self.run_as_developer(program).returncode, 0)
-        program.write_text(program.read_text().replace(
-            "install('sprocket==1.0.0')", "install('sprocket==2.0.0')"))
+        self.ask_for(program, "sprocket==2.0.0")
         done: subprocess.CompletedProcess[str] = self.run_program(program)
         self.assertNotEqual(done.returncode, 0)
-        self.assertIn("may be the conflict", done.stderr)
+        self.assertIn("`prog.py` needs sprocket 2.0.0", done.stderr)
+        failure: str = " ".join((self.cache_of(program)
+                                 / "last_failure.txt").read_text().split())
+        self.assertIn("may be the conflict", failure)
         self.assertIn('set `update-frequency = "daily"` in `prog.py.toml`',
-                      " ".join(done.stderr.split()))
-
-    @editing
-    def test_the_developer_stamps_the_date_into_the_block(self) -> None:
-        """The first developer run puts the date in Part 1, unasked.
-
-        As `exclude-newer`, beside the approvals, so the `.py` carries
-        both when it travels alone; later runs keep it (`T.abfd`,
-        `T.srdisb`).
-        """
-        # Not asked, even on a terminal.
-        program: Path = self.declaring_program(
-            "stamped", 'dependencies = ["widget"]',
-            "import widget\nprint(widget.__version__)")
-        program.with_name("prog.py.toml").write_text('verbosity = "low"\n')
-        seen: str = self.answer_on_a_terminal(program, b"")
-        self.assertNotIn("[y=>Yes", seen)
-        self.assertIn("1.2.3", seen)
-        metadata: dict[str, Any] | None = ezpkg.script_metadata(
-            program.read_text())
-        assert metadata is not None
-        when: str = metadata["tool"]["uv"]["exclude-newer"]
-        self.assertEqual(list(metadata["tool"]["ezpkg"]["checksums"][0]
-                              .split()[:1]), ["widget==1.2.3"])
-        self.assertEqual(metadata["dependencies"], ["widget"])
-
-        # Another run keeps an older date.
-        older: str = "2026-01-01T00:00:00Z"
-        program.write_text(program.read_text().replace(when, older))
-        shutil.rmtree(program.parent / "cache")
-        done: subprocess.CompletedProcess[str] = self.run_program(program)
-        self.assertEqual(done.returncode, 0, done.stderr[-300:])
-        self.assertIn(f'exclude-newer = "{older}"', program.read_text())
-
-        # An end user's copy runs under its lock, where the date is not
-        # even tried: the lock already says exactly which versions.
-        program.with_name("prog.py.toml").unlink()
-        shutil.rmtree(program.parent / "cache")
-        again: subprocess.CompletedProcess[str] = self.run_program(program)
-        self.assertEqual(again.stdout.strip(), "1.2.3", again.stderr[-300:])
-        self.assertNotIn("exclude-newer", again.stderr)
-
-    @unittest.skipIf(dating_pip() is None,
-                     "no pip here filters by upload date")
-    @editing
-    def test_an_import_newer_than_the_date_stops_the_run(self) -> None:
-        """A package with no release before the date stops the run.
-
-        The end user's copy would fail the same way, so the developer is
-        told how to upgrade (`T.abfd`).
-        """
-        # Every `sprocket` is dated after 2019, and `widget` before.
-        self.dated_sprocket()
-        wheel: Path
-        for wheel in (self.index / "widget").glob("*.whl"):
-            held: os.stat_result = wheel.stat()
-            self.addCleanup(os.utime, wheel,
-                            (held.st_atime, held.st_mtime))
-            stamp: float = datetime.datetime(
-                2010, 1, 1, tzinfo=datetime.UTC).timestamp()
-            os.utime(wheel, (stamp, stamp))
-        program: Path = self.synced_program(
-            "too_new", '["widget"]', "import sprocket")
-        dating: Path | None = dating_pip()
-        assert dating is not None
-        self.give_pip(program, dating)
-        program.write_text(re.sub(r'exclude-newer = "[^"]*"',
-                                  'exclude-newer = "2019-01-01T00:00:00Z"',
-                                  program.read_text()))
-        done: subprocess.CompletedProcess[str] = self.run_program(program)
-        self.assertNotEqual(done.returncode, 0)
-        flat: str = " ".join(done.stderr.split())
-        self.assertRegex(flat, r"prog\.py line \d+ imports `sprocket`, but "
-                         r"no release of it existed before the date "
-                         r"prog\.py's versions are frozen at \(line \d+, "
-                         r"2019-01-01\)\. To upgrade everything to today's "
-                         r"versions, delete line \d+ and run prog\.py "
-                         r"again\.")
-        self.assertEqual(self.declared_now(program), ["widget"])
+                      failure)
 
     @unittest.skipIf(dating_pip() is None,
                      "no pip here filters by upload date")
@@ -3771,7 +3735,7 @@ class InstallTest(unittest.TestCase):
         self.assertEqual(
             self.run_as_developer(program).returncode, 0)
         self.corrupt_approvals(program)
-        shutil.rmtree(program.parent / "cache")
+        self.empty_cache(program)
         done: subprocess.CompletedProcess[str] = self.run_program(program)
         self.assertNotEqual(done.returncode, 0)
         self.assertIn("does not match its approval", done.stderr)
@@ -3834,12 +3798,9 @@ class InstallTest(unittest.TestCase):
             "import os, sys\n"
             "os.login_tty(int(sys.argv[1]))\n"
             "os.execv(sys.executable, [sys.executable, sys.argv[2]])\n")
-        environment: dict[str, str] = {
-            **os.environ, "PIP_INDEX_URL": self.index_url, **extra}
-        environment.pop("VIRTUAL_ENV", None)
         child: subprocess.Popen[bytes] = subprocess.Popen(
             [sys.executable, "-c", launcher, str(slave), str(program)],
-            env=environment, pass_fds=(slave,))
+            env=self.program_environment(program, extra), pass_fds=(slave,))
         os.close(slave)
         os.write(master, reply)
         child.wait(timeout=300)
@@ -3882,7 +3843,7 @@ class InstallTest(unittest.TestCase):
         self.assertEqual(seen.count(PROMPT), 1, seen)
         self.assertNotIn("Please answer", seen)
         self.assertIn("now retained", seen)
-        cache: Path = program.parent / "cache"
+        cache: Path = self.cache_of(program)
         shutil.rmtree(cache / "versions")
         shutil.rmtree(cache / "requests")
         seen = self.answer_on_a_terminal(program, b"")
@@ -3914,7 +3875,7 @@ class InstallTest(unittest.TestCase):
         seen = self.answer_on_a_terminal(other, b"n\n")
         self.assertEqual(seen.count(PROMPT), 1, seen)
         self.assertIn("`other.py`", seen)
-        self.assertIn("declined", seen)
+        self.assertIn("Declined, so", seen)
         self.assertNotIn("1.2.3", seen)
         self.assertTrue(list((cache / "versions").glob("widget-*")))
         seen = self.answer_on_a_terminal(other, b"y\n")
@@ -3936,8 +3897,8 @@ class InstallTest(unittest.TestCase):
             self.run_as_developer(program).returncode,
             0)
         self.corrupt_approvals(program)
-        shutil.rmtree(program.parent / "cache" / "versions")
-        shutil.rmtree(program.parent / "cache" / "requests")
+        shutil.rmtree(self.cache_of(program) / "versions")
+        shutil.rmtree(self.cache_of(program) / "requests")
 
         done: subprocess.CompletedProcess[str] = self.run_program(program)
         self.assertNotEqual(done.returncode, 0)
@@ -3953,13 +3914,13 @@ class InstallTest(unittest.TestCase):
         program: Path = self.program("asked_no", "widget")
         seen: str = self.answer_on_a_terminal(program, b"n\n")
         self.assertIn(PROMPT, seen)
-        self.assertIn("declined", seen)
-        versions: Path = program.parent / "cache" / "versions"
+        self.assertIn("Declined, so", seen)
+        versions: Path = self.cache_of(program) / "versions"
         self.assertEqual(list(versions.iterdir()), [])
 
         # And the download is discarded, because a refusal means do not
         # install this, not keep it for later.
-        pending: Path = program.parent / "cache" / "pending"
+        pending: Path = self.cache_of(program) / "pending"
         self.assertEqual(list(pending.iterdir()), [])
 
     def test_an_empty_answer_asks_again(self) -> None:
@@ -4082,6 +4043,8 @@ class InstallTest(unittest.TestCase):
             archive.writestr("ezpkg-0.0.2.dist-info/METADATA",
                              "Metadata-Version: 2.1\nName: ezpkg\n"
                              "Version: 0.0.2\nSummary: Easier.\n")
+        # A record that cannot be read is passed over.
+        (fetched / "broken-1.0.dist-info" / "METADATA").mkdir(parents=True)
         first: ezpkg.EZPkg = ezpkg.EZPkg(fetched)
         self.assertTrue(first.newly_filled())
         self.assertEqual(first.details([wheel]), [
@@ -4089,6 +4052,31 @@ class InstallTest(unittest.TestCase):
             "2. ezpkg 0.0.2: Easier.", "3. cowsay 6.1: Moo."])
         (fetched / "versions").mkdir()
         self.assertFalse(ezpkg.EZPkg(fetched).newly_filled())
+
+        # `ezpkg.whl` alone says it too, before `pip` has been fetched.
+        bare: Path = self.root / "bare-cache"
+        bare.mkdir()
+        shutil.copyfile(fetched / "ezpkg.whl", bare / "ezpkg.whl")
+        self.assertTrue(ezpkg.EZPkg(bare).newly_filled())
+
+    def test_only_a_kept_program_notes_its_request(self) -> None:
+        """An end user's program not agreed to has no request to keep."""
+        # An end user's program, asked nothing yet; then agreed to.
+        with tempfile.TemporaryDirectory() as scratch:
+            program: Path = Path(scratch) / "prog.py"
+            program.write_text("print('ran')\n")
+            venv: ezpkg.EZPkg = ezpkg.EZPkg(Path(scratch) / "cache")
+            with unittest.mock.patch.object(ezpkg, "main_path",
+                                            return_value=program):
+                venv.note_request("request")
+                kept: dict[str, Any] = venv.development_record(program)[1]
+                self.assertNotIn("requests", kept)
+                venv.keep(venv.development_record(program)[0], kept,
+                          agreed="yes")
+                venv.note_request("request")
+                self.assertEqual(
+                    venv.development_record(program)[1]["requests"],
+                    [hashlib.sha256(b"request").hexdigest()])
 
     def test_asking_for_detail_is_not_a_typo(self) -> None:
         """`?` does not spend the patience meant for mistakes.
@@ -4102,7 +4090,7 @@ class InstallTest(unittest.TestCase):
             program, b"?\n" * (ezpkg.ATTEMPTS + 2) + b"n\n")
         self.assertEqual(seen.count("Software packages are code from"),
                          ezpkg.ATTEMPTS + 2)
-        self.assertIn("declined", seen)
+        self.assertIn("Declined, so", seen)
         self.assertNotIn("Please answer", seen)
 
     def test_a_summary_cannot_rewrite_the_terminal(self) -> None:
@@ -4177,7 +4165,7 @@ class InstallTest(unittest.TestCase):
         seen: str = self.answer_on_a_terminal(
             program, b"x\n" * (ezpkg.ATTEMPTS + 3))
         self.assertEqual(seen.count(PROMPT), ezpkg.ATTEMPTS)
-        self.assertIn("declined", seen)
+        self.assertIn("Declined, so", seen)
 
     def test_checksums_do_not_replace_the_question(self) -> None:
         """A program carrying its author's `checksums` still asks.
@@ -4191,7 +4179,7 @@ class InstallTest(unittest.TestCase):
         self.assertEqual(
             self.run_as_developer(program).returncode, 0)
         self.assertIsNotNone(self.approvals_of(program))
-        shutil.rmtree(program.parent / "cache")
+        self.empty_cache(program)
         seen: str = self.answer_on_a_terminal(program, b"n\n")
         self.assertIn(PROMPT, seen)
         self.assertNotIn("1.2.3", seen)
@@ -4463,6 +4451,25 @@ class InstallTest(unittest.TestCase):
             with unittest.mock.patch.dict(
                     os.environ, {"EZPKG_ANSWER_SECONDS": "soon"}):
                 self.assertEqual(ezpkg.answer_from(reader, spoken), "n\n")
+        os.close(writing)
+
+    def test_an_unanswered_question_is_no_on_windows(self) -> None:
+        """Windows asks `msvcrt` whether a key is waiting, until the time."""
+        # A stand-in `msvcrt` with no key, then with one.
+        reading: int
+        writing: int
+        reading, writing = os.pipe()
+        spoken: _KeptStringIO = _KeptStringIO()
+        keys: types.SimpleNamespace = types.SimpleNamespace(
+            kbhit=lambda: False)
+        with (open(reading, encoding="utf-8") as reader,
+              unittest.mock.patch.dict(sys.modules, {"msvcrt": keys}),
+              unittest.mock.patch.object(ezpkg.os, "name", "nt")):
+            self.assertEqual(ezpkg.answer_from(reader, spoken, 0.2), "")
+            os.write(writing, b"y\n")
+            keys.kbhit = lambda: True
+            self.assertEqual(ezpkg.answer_from(reader, spoken, 5.0), "y\n")
+        self.assertIn("No answer in 0.2 seconds, so: no.", spoken.getvalue())
         os.close(writing)
 
     def test_verify_without_approvals_checks_nothing(self) -> None:
@@ -5508,12 +5515,12 @@ class InstallTest(unittest.TestCase):
     def test_export_email_approves_what_other_computers_need(self) -> None:
         """An `email` release approves what only other computers fetch.
 
-        `paned` needs `shutter` on Windows alone, so a run here approves
-        `paned` only, and a Windows friend's `shutter` would be refused.
-        The release's copy keeps the bootstrap and adds `shutter`, with
-        the id of its wheel, while the program's own `checksums` stay as
-        its runs left them; and the copy runs as an end user's program
-        (`T.ee`).
+        `paned` needs `shutter` on Windows alone, so a run here fetches
+        `paned` only, and a Windows friend's `shutter` would be refused
+        without its approval.  The release's copy keeps the bootstrap
+        and approves both, each with the id of its wheel, while the
+        program itself is not edited; and the copy runs as an end
+        user's program (`T.ee`).
         """
         # `uv` does the resolving for every computer.
         if ezpkg.find_uv() is None:
@@ -5523,14 +5530,10 @@ class InstallTest(unittest.TestCase):
         program, home = self.bootstrapped_program(
             "emailed", 'dependencies = ["paned"]',
             "import paned\nprint(paned.__version__)")
-        done: subprocess.CompletedProcess[str] = self.run_as_developer(
-            program, HOME=str(home))
-        self.assertEqual(done.returncode, 0, done.stderr[-400:])
-        self.assertEqual(sorted(self.approvals_of(program) or {}),
-                         ["paned==1.0.0"])
+        written: str = program.read_text()
 
         # The copy: bootstrap kept, `shutter` approved, named in the
-        # release line.
+        # release line; the program itself untouched.
         built: subprocess.CompletedProcess[str] = self.release_as_developer(
             program, "email", HOME=str(home))
         self.assertEqual(built.returncode, 0, built.stderr[-400:])
@@ -5538,15 +5541,15 @@ class InstallTest(unittest.TestCase):
                       " ".join(built.stderr.split()))
         text: str = self.built.read_text()
         self.assertIsNotNone(ezpkg.find_bootstrap(text))
-        wheel: Path = next((self.root / "dist").glob("shutter-*.whl"))
+        wheels: dict[str, str] = {
+            name: hashlib.sha256(next((self.root / "dist").glob(
+                f"{name}-*.whl")).read_bytes()).hexdigest()[:ezpkg.ID_DIGITS]
+            for name in ("paned", "shutter")}
         self.assertEqual(
             ezpkg.approvals_in(text),
-            {"paned==1.0.0": (self.approvals_of(program) or {})
-             ["paned==1.0.0"],
-             "shutter==1.0.0": hashlib.sha256(
-                 wheel.read_bytes()).hexdigest()[:ezpkg.ID_DIGITS]})
-        self.assertEqual(sorted(self.approvals_of(program) or {}),
-                         ["paned==1.0.0"])
+            {"paned==1.0.0": wheels["paned"],
+             "shutter==1.0.0": wheels["shutter"]})
+        self.assertEqual(program.read_text(), written)
 
         # A friend here runs it, asked nothing with no terminal.
         friend: subprocess.CompletedProcess[str] = self.run_program(
@@ -5882,7 +5885,6 @@ class InstallTest(unittest.TestCase):
                           if one.parent.name == "scans"], records)
 
     def synced_program(self, name: str, declared: str, tail: str,
-                       comment: str = "",
                        settings: str = 'verbosity = "low"\n'
                        ) -> Path:
         """Write a program, run it once clean, then change its imports.
@@ -5899,29 +5901,23 @@ class InstallTest(unittest.TestCase):
           The `dependencies` line, such as `["widget"]`.
         * `tail` (`str`):
           What to put below `import widget` after the first run.
-        * `comment` (`str`):
-          A comment for the `widget` import, such as a `mypy` one.
         * `settings` (`str`):
           The `prog.py.toml`, as `developer_settings` takes it.
 
         Returns:
         * (`Path`): The program, edited but not run again.
         """
-        # Declares and imports `widget`, so the first run is clean; the
-        # bootstrap's `import ezpkg` carries any comment too.
+        # Declares and imports `widget`, so the first run is clean.
         program: Path = self.declaring_program(
             name, 'dependencies = ["widget"]',
-            f"import widget{comment}\nprint('ran')")
-        program.write_text(program.read_text().replace(
-            "import ezpkg\n", f"import ezpkg{comment}\n"))
+            "import widget\nprint('ran')")
         self.developer_settings(program, settings)
         done: subprocess.CompletedProcess[str] = self.run_program(program)
         self.assertEqual(done.returncode, 0, done.stderr[-400:])
         self.assertNotIn("Traceback", done.stderr)
         program.write_text(program.read_text().replace(
             'dependencies = ["widget"]', f"dependencies = {declared}").replace(
-            f"import widget{comment}\n",
-            f"import widget{comment}\n{tail}\n"))
+            "import widget\n", f"import widget\n{tail}\n"))
         return program
 
     def developer_settings(self, program: Path,
@@ -5964,8 +5960,6 @@ class InstallTest(unittest.TestCase):
             program.read_text())
         assert metadata is not None
         found: list[str] = metadata["dependencies"]
-        if ezpkg.EDIT_PROGRAM:
-            return found
         names: set[str] = {ezpkg.normal_name(ezpkg.requirement_name(one))
                            for one in found}
         return found + [one for one in self.stash_of(program).get(
@@ -6093,39 +6087,6 @@ class InstallTest(unittest.TestCase):
         self.assertIn("sprocket==2.0.0", self.stash_of(program)["checksums"])
         self.assertEqual(program.read_text(), written)
 
-    @editing
-    def test_the_authors_mypy_comment_is_copied(self) -> None:
-        """A new import gets the `type: ignore` the others carry."""
-        # The Quick Start's own comment, word for word.
-        comment: str = "  # type: ignore[import-not-found]  # For mypy."
-        program: Path = self.synced_program(
-            "commented", '["widget"]', "import sprocket", comment)
-        done: subprocess.CompletedProcess[str] = self.run_program(program)
-        self.assertEqual(done.returncode, 0, done.stderr[-400:])
-        self.assertIn(f"\nimport sprocket{comment}\n", program.read_text())
-
-    @editing
-    def test_an_ezpkg_import_gets_the_mypy_comment_alone(self) -> None:
-        """`import ezpkg` gets the comment, but never a dependency.
-
-        `mypy` cannot see `~/.ezpkg`, where the bootstrap puts `ezpkg`,
-        any more than the packages (Wayne's dogfood, 2026-10-15).
-        """
-        # The packages' imports carry it; `import ezpkg` does not.
-        comment: str = "  # type: ignore[import-not-found]  # For mypy."
-        program: Path = self.declaring_program(
-            "ezpkg-comment", 'dependencies = ["widget"]',
-            f"import widget{comment}\nprint('ran')")
-        self.developer_settings(program)
-        done: subprocess.CompletedProcess[str] = self.run_program(program)
-        self.assertEqual((done.returncode, done.stderr), (0, ""))
-        self.assertIn(f"\nimport ezpkg{comment}\n", program.read_text())
-        self.assertEqual(self.declared_now(program), ["widget"])
-
-        # Settled: nothing more to say.
-        done = self.run_program(program)
-        self.assertEqual((done.stdout, done.stderr), ("ran\n", ""))
-
     def test_an_end_user_is_never_asked_about_dependencies(self) -> None:
         """Without a `prog.py.toml`, nothing is said and nothing is edited.
 
@@ -6170,120 +6131,6 @@ class InstallTest(unittest.TestCase):
         self.assertNotIn("Retain", seen)
         self.assertNotIn("[y=>Yes", seen)
 
-    @editing
-    def test_a_release_happens_once_per_value(self) -> None:
-        """A new `version` value releases, once, and the program runs.
-
-        Every release gives bare entries ranges (S5.1b); `prog.py.releases`
-        records it; the next run with the same value just runs
-        (`T.abfd`).  `release` names a form, since without one there are
-        no releases; with no pasted bootstrap, none is built.
-        """
-        # Released: ranged, recorded, and run.
-        program: Path = self.declaring_program(
-            "released", 'dependencies = ["widget", "sprocket>=1"]',
-            "import widget\nimport sprocket\nprint('ran')")
-        self.developer_settings(program,
-                                'version = "1.0.0"\nrelease = ["email"]\n')
-        done: subprocess.CompletedProcess[str] = self.run_program(program)
-        self.assertEqual(done.returncode, 0, done.stderr[-400:])
-        self.assertEqual(done.stdout, "ran\n")
-        self.assertIn("released `prog.py` 1.0.0, with 1 warning(s), listed "
-                      "in `prog.py.releases`.",
-                      " ".join(done.stderr.split()))
-        self.assertEqual(self.declared_now(program),
-                         ["widget>=1.2.3,<2", "sprocket>=1"])
-        entries: list[dict[str, Any]] = ezpkg.read_releases(program)
-        self.assertEqual([one["version"] for one in entries], ["1.0.0"])
-        self.assertEqual(entries[0]["warnings"], [
-            ('`prog.py.toml` line 2, `release = ["email"]`: `prog.py` has '
-             "no pasted bootstrap, so its release builds no email.")])
-        self.assertEqual(entries[0]["dependencies"],
-                         ["widget>=1.2.3,<2", "sprocket>=1"])
-        self.assertFalse(program.with_suffix(".ezpkg").exists())
-
-        # Same value: an ordinary run.
-        done = self.run_program(program)
-        self.assertEqual((done.returncode, done.stdout, done.stderr),
-                         (0, "ran\n", ""))
-
-    @editing
-    def test_a_source_ezpkg_leaves_the_ezpkg_entry_alone(self) -> None:
-        """A release from a source `ezpkg` does not range its entry.
-
-        Its version is on no index, so its range would shut out the
-        `.devN` rehearsals the Quick Start's entry admits (S5.1c).
-        """
-        # The suite runs this project's own `ezpkg.py`, from source.
-        program: Path = self.declaring_program(
-            "sourced",
-            'dependencies = ["ezpkg>=0.0.1.dev0,<0.1", "widget"]',
-            "import widget\nprint('ran')")
-        self.developer_settings(program,
-                                'version = "1.0.0"\nrelease = ["email"]\n')
-        done: subprocess.CompletedProcess[str] = self.run_program(program)
-        self.assertEqual(done.returncode, 0, done.stderr[-400:])
-        self.assertEqual(self.declared_now(program),
-                         ["ezpkg>=0.0.1.dev0,<0.1", "widget>=1.2.3,<2"])
-
-    @editing
-    def test_an_empty_settings_file_is_filled(self) -> None:
-        """An empty `prog.py.toml` is filled with the template, once.
-
-        Every setting commented out at its default, and one line saying
-        so; after that, `ezpkg` never writes it (`T.abfd`).  That run
-        edits nothing in the program, and the file's note says what the
-        next run will (Wayne, 2026-10-21).
-        """
-        # Blank lines count as empty.
-        program: Path = self.declaring_program(
-            "filled", 'dependencies = ["widget"]',
-            "import widget\nprint('ran')")
-        before: str = program.read_text()
-        settings: Path = self.developer_settings(program, "\n\n")
-        done: subprocess.CompletedProcess[str] = self.run_program(program)
-        self.assertEqual(done.returncode, 0, done.stderr[-400:])
-        self.assertEqual(done.stdout, "ran\n")
-        self.assertIn("`prog.py.toml` was empty, so `ezpkg` filled it",
-                      done.stderr)
-        self.assertEqual(program.read_text(), before)
-        filled: str = settings.read_text(encoding="utf-8")
-        self.assertEqual(filled, ezpkg.SETTINGS_TEMPLATE + "\n"
-                         + ezpkg.first_run_note("prog.py", []) + "\n")
-        self.assertIn("(right now nothing needs adding)", filled)
-
-        # Filled, it is every default, and left alone; now the program
-        # records its versions.
-        self.assertEqual(ezpkg.read_settings(settings), ezpkg.Settings())
-        done = self.run_program(program)
-        self.assertEqual((done.stdout, done.stderr), ("ran\n", ""))
-        self.assertIn("checksums", program.read_text())
-        self.assertEqual(settings.read_text(encoding="utf-8"), filled)
-
-    @editing
-    def test_the_filling_run_names_what_the_next_run_adds(self) -> None:
-        """A new import is fetched for the filling run, but not written.
-
-        The note at the end of the file names the entry, and the
-        next run adds it (Wayne, 2026-10-21).
-        """
-        # Nothing declared, `widget` imported.
-        program: Path = self.declaring_program(
-            "named", "dependencies = []",
-            "import widget\nprint('ran')")
-        before: str = program.read_text()
-        settings: Path = self.developer_settings(program, "")
-        done: subprocess.CompletedProcess[str] = self.run_program(program)
-        self.assertEqual(done.returncode, 0, done.stderr[-400:])
-        self.assertEqual(done.stdout, "ran\n")
-        self.assertEqual(program.read_text(), before)
-        self.assertIn('adding "widget', settings.read_text(encoding="utf-8"))
-
-        # The next run writes it.
-        done = self.run_program(program)
-        self.assertEqual(done.returncode, 0, done.stderr[-400:])
-        self.assertIn('"widget', program.read_text())
-
     def test_a_misspelt_setting_stops_the_run(self) -> None:
         """A setting `ezpkg` does not know stops the program at once.
 
@@ -6323,66 +6170,6 @@ class InstallTest(unittest.TestCase):
         self.assertEqual(done.returncode, 0, done.stderr[-400:])
         self.assertEqual(self.declared_now(program),
                          ["widget", "sprocket>=2.0.0,<3"])
-
-    @editing
-    def test_a_removed_import_removes_its_entry(self) -> None:
-        """An entry whose import has gone goes too.
-
-        Its packages stay in the cache for `cull` (`T.abfd`).
-        """
-        # Imported on the first run, then not.
-        program: Path = self.declaring_program(
-            "removed", 'dependencies = ["widget", "sprocket"]',
-            "import widget\nimport sprocket\nprint('ran')")
-        self.developer_settings(program)
-        done: subprocess.CompletedProcess[str] = self.run_program(program)
-        self.assertEqual((done.returncode, done.stderr), (0, ""))
-        program.write_text(program.read_text().replace(
-            "import sprocket\n", ""))
-        done = self.run_program(program)
-        self.assertEqual((done.returncode, done.stdout, done.stderr),
-                         (0, "ran\n", ""))
-        self.assertEqual(self.declared_now(program), ["widget"])
-
-        # Put back, it comes back.
-        program.write_text(program.read_text().replace(
-            "import widget\n", "import widget\nimport sprocket\n"))
-        done = self.run_program(program)
-        self.assertEqual(done.returncode, 0, done.stderr[-400:])
-        self.assertEqual(self.declared_now(program),
-                         ["widget", "sprocket>=2.0.0,<3"])
-
-    @editing
-    def test_an_entry_nothing_loads_goes_after_a_run(self) -> None:
-        """An entry nothing imports goes once a recorded run shows it unused.
-
-        As the Quick Start's `cowsay` does, pasted in with the bootstrap:
-        kept until a run that declared it has been recorded, then removed,
-        since that run never loaded it.  A comment keeps an entry for good
-        (Wayne, 2026-10-20; `T.abfd`).
-        """
-        # Declared on this run for the first time: kept, with no mark.
-        program: Path = self.synced_program(
-            "unloaded", '["widget", "sprocket"]', "")
-        done: subprocess.CompletedProcess[str] = self.run_program(program)
-        self.assertEqual((done.returncode, done.stderr), (0, ""))
-        self.assertEqual(self.declared_now(program), ["widget", "sprocket"])
-        self.assertNotIn("#   \"sprocket\",  #", program.read_text())
-
-        # That run declared it and never loaded it: gone, silently.
-        done = self.run_program(program)
-        self.assertEqual((done.returncode, done.stdout, done.stderr),
-                         (0, "ran\n", ""))
-        self.assertEqual(self.declared_now(program), ["widget"])
-
-        # Added back with a comment, it stays, run after run.
-        program.write_text(program.read_text().replace(
-            'dependencies = ["widget"]',
-            'dependencies = [\n#   "widget",\n#   "sprocket",  # for the build\n# ]'))
-        for _ in range(2):
-            done = self.run_program(program)
-            self.assertEqual((done.returncode, done.stderr), (0, ""))
-        self.assertEqual(self.declared_now(program), ["widget", "sprocket"])
 
     def test_an_entry_a_run_loads_stays(self) -> None:
         """An entry nothing imports stays while recent runs load it.
@@ -6427,16 +6214,6 @@ class InstallTest(unittest.TestCase):
         self.assertIn("`prog.py` did not run: ERROR: ", done.stderr)
         self.assertNotIn("shows all", done.stderr)
 
-    @editing
-    def test_dependencies_follow_the_order_of_the_imports(self) -> None:
-        """Out of order is a discrepancy, and is put in order."""
-        # Nothing to add or remove, only the order.
-        program: Path = self.synced_program(
-            "ordered", '["sprocket", "widget"]', "import sprocket")
-        done: subprocess.CompletedProcess[str] = self.run_program(program)
-        self.assertEqual((done.returncode, done.stderr), (0, ""))
-        self.assertEqual(self.declared_now(program), ["widget", "sprocket"])
-
     def test_an_optional_import_counts_as_used(self) -> None:
         """A declared package imported only under `try` is not unused."""
         # Nothing changes, since the two agree.
@@ -6459,25 +6236,6 @@ class InstallTest(unittest.TestCase):
         self.assertEqual(self.declared_now(program), ["widget", "sprocket"])
         self.assertNotIn("not imported", program.read_text())
 
-    @editing
-    def test_report_prints_a_line_per_change(self) -> None:
-        """`verbosity = "medium"` names each change to `dependencies`."""
-        # Two additions and a misspelt one.
-        program: Path = self.synced_program(
-            "reported", '["widget", "sprocket"]',
-            "import needy\nimport bogus_package",
-            settings='verbosity = "medium"\n')
-        done: subprocess.CompletedProcess[str] = self.run_program(program)
-        flat: str = " ".join(done.stderr.split())
-        self.assertIn("needs a package, but PyPI has none called "
-                      "`bogus_package`", flat)
-        self.assertRegex(flat, r'Added "needy>=1\.0\.0,<2" to '
-                         r"`prog\.py`'s `dependencies` \(line \d+\)\.")
-        self.assertNotIn("ezpkg: ", done.stderr)
-        self.assertIn("No module named 'bogus_package'", done.stderr)
-        self.assertEqual(self.declared_now(program),
-                         ["widget", "sprocket", "needy>=1.0.0,<2"])
-
     def test_verbosity_none_still_says_why_it_stops(self) -> None:
         """`verbosity = "none"`: a misspelt import is still explained.
 
@@ -6494,90 +6252,6 @@ class InstallTest(unittest.TestCase):
             "`prog.py` line 12: `import bogus_package` needs a package"),
             done.stderr)
         self.assertIn("No module named 'bogus_package'", done.stderr)
-
-    @editing
-    def test_verbosity_high_says_what_was_decided(self) -> None:
-        """`verbosity = "high"` names the lock, the date and the fetch."""
-        # An addition, so something is fetched and recorded.
-        program: Path = self.synced_program(
-            "chatty", '["widget"]', "import sprocket",
-            settings='verbosity = "high"\n')
-        done: subprocess.CompletedProcess[str] = self.run_program(program)
-        self.assertEqual(done.returncode, 0, done.stderr[-400:])
-        self.assertRegex(done.stderr, r"ezpkg: lock: (\d+ pin\(s\)|none)")
-        self.assertIn("ezpkg: date: ", done.stderr)
-        self.assertIn("ezpkg: fetching ", done.stderr)
-        self.assertIn("ezpkg: approvals written into Part 1", done.stderr)
-        self.assertRegex(done.stderr, r'Added "sprocket>=2\.0\.0,<3"')
-        # The end user's list is never a developer's (`ux` step 2.7).
-        self.assertNotIn("The following", done.stderr)
-
-        # Nothing to do: the remembered request is said.
-        done = self.run_program(program)
-        self.assertIn("ezpkg: request remembered, nothing fetched",
-                      done.stderr)
-
-    @editing
-    def test_a_name_the_index_lacks_is_not_added(self) -> None:
-        """A misspelt import is named in one line, then Python's error.
-
-        The index is asked first, so nothing is fetched for a package
-        that does not exist (Wayne's dogfood, 2026-10-15).
-        """
-        # One line, and the program unchanged.
-        program: Path = self.synced_program(
-            "misspelt", '["widget"]', "import bogus_package")
-        before: str = program.read_text()
-        done: subprocess.CompletedProcess[str] = self.run_program(program)
-        flat: str = " ".join(done.stderr.split())
-        self.assertIn("`prog.py` line 20: `import bogus_package` needs a "
-                      "package, but PyPI has none called `bogus_package`. "
-                      "Please check the spelling", flat)
-        self.assertIn("No module named 'bogus_package'", flat)
-        self.assertEqual(program.read_text(), before)
-
-    @editing
-    def test_a_wrong_guess_is_not_added(self) -> None:
-        """A package that is not what its name says is never added.
-
-        `decoy` exists but holds `elsewhere`, as a squatted name might.
-        It is fetched and looked at first, so nothing is unpacked and
-        the program is not edited.
-        """
-        # One line, and nothing unpacked.
-        program: Path = self.synced_program(
-            "decoyed", '["widget"]', "import decoy")
-        before: str = program.read_text()
-        done: subprocess.CompletedProcess[str] = self.run_program(program)
-        flat: str = " ".join(done.stderr.split())
-        self.assertIn("`prog.py` line 20: `import decoy` needs a package, "
-                      "but the "
-                      "index's "
-                      '"decoy" does not provide `decoy`. Please check the '
-                      "spelling",
-                      flat)
-        self.assertEqual(program.read_text(), before)
-        self.assertFalse(list((program.parent / "cache" / "versions")
-                              .glob("decoy-*")))
-
-    @editing
-    def test_a_source_only_package_is_not_added(self) -> None:
-        """A name the index has only as source code is never added.
-
-        `pip` here installs wheels only, so it could never be added
-        (Wayne's dogfood of `import bogus`, 2026-10-17).
-        """
-        # One line.
-        program: Path = self.synced_program(
-            "sourced", '["widget"]', "import sourceonly")
-        done: subprocess.CompletedProcess[str] = self.run_program(program)
-        flat: str = " ".join(done.stderr.split())
-        self.assertIn("`prog.py` line 20: `import sourceonly` needs a "
-                      "package, but "
-                      "the index's "
-                      '"sourceonly" has no wheel, only source code, so it '
-                      "cannot be installed. Please check the spelling",
-                      flat)
 
     def test_an_addition_does_not_fetch_this_ezpkg(self) -> None:
         """The `ezpkg` entry this `ezpkg` meets is not fetched again.
@@ -6617,7 +6291,7 @@ class InstallTest(unittest.TestCase):
         self.assertEqual(ezpkg.imports_above_bootstrap("import os\n"), [])
 
     def test_statements_above_the_bootstrap_are_found(self) -> None:
-        """Code above the bootstrap runs twice when `restart` runs it again.
+        """Code above the bootstrap runs twice when `switch` runs it again.
 
         The docstring, imports, definitions and assignments pass; a
         `print` does not (Wayne, 2026-10-18).
@@ -6642,24 +6316,6 @@ class InstallTest(unittest.TestCase):
         self.assertEqual(ezpkg.statements_above_bootstrap(
             "print(1)\nif True:\n"
             + textwrap.indent(bootstrap.pasted(SHIPPING), "    ")), [1])
-
-    @editing
-    def test_an_edit_starts_the_program_again(self) -> None:
-        """After `ezpkg` edits the program, it runs the edited file.
-
-        Python compiled the file as it was, so without a fresh start a
-        traceback names lines of the new file by the old numbers
-        (Wayne, `ux08`, 2026-10-18).  The program's own code runs once.
-        """
-        # A multi-line `dependencies`, which the addition lengthens.
-        program: Path = self.synced_program(
-            "restart", '[\n#     "widget",\n# ]',
-            "import sprocket\nprint('before')\nimport bogus_package")
-        done: subprocess.CompletedProcess[str] = self.run_program(program)
-        self.assertEqual(done.stdout.count("before"), 1)
-        self.assertIn("    import bogus_package\n", done.stderr)
-        self.assertIn("No module named 'bogus_package'", done.stderr)
-        self.assertIn('"sprocket>=2.0.0,<3"', program.read_text())
 
     def test_export_refuses_an_import_above_the_bootstrap(self) -> None:
         """An export refuses a program whose imports precede the paste.
@@ -6843,6 +6499,199 @@ class InstallTest(unittest.TestCase):
         self.assertEqual(done.returncode, 0, done.stderr[-400:])
         self.assertEqual(done.stdout.split(), ["[]", "None"])
 
+    @unittest.skipIf(dating_pip() is None,
+                     "no pip here filters by upload date")
+    def test_an_import_newer_than_the_date_stops_the_run(self) -> None:
+        """A package with no release before the date stops the run.
+
+        The end user's copy would fail the same way, so the developer is
+        told how to upgrade (`T.abfd`).
+        """
+        # Every `sprocket` is dated after 2019, and `widget` before.
+        self.dated_sprocket()
+        wheel: Path
+        for wheel in (self.index / "widget").glob("*.whl"):
+            held: os.stat_result = wheel.stat()
+            self.addCleanup(os.utime, wheel,
+                            (held.st_atime, held.st_mtime))
+            stamp: float = datetime.datetime(
+                2010, 1, 1, tzinfo=datetime.UTC).timestamp()
+            os.utime(wheel, (stamp, stamp))
+        program: Path = self.synced_program(
+            "too_new", '["widget"]', "import sprocket")
+        dating: Path | None = dating_pip()
+        assert dating is not None
+        self.give_pip(program, dating)
+        # The date as the developer wrote it into Part 1.
+        program.write_text(program.read_text().replace(
+            '# dependencies = ["widget"]\n',
+            '# dependencies = ["widget"]\n# [tool.uv]\n'
+            '# exclude-newer = "2019-01-01T00:00:00Z"\n'))
+        done: subprocess.CompletedProcess[str] = self.run_program(program)
+        self.assertNotEqual(done.returncode, 0)
+        flat: str = " ".join(done.stderr.split())
+        self.assertRegex(flat, r"prog\.py line \d+ imports `sprocket`, but "
+                         r"no release of it existed before the date "
+                         r"prog\.py's versions are frozen at \(line \d+, "
+                         r"2019-01-01\)\. To upgrade everything to today's "
+                         r"versions, delete line \d+ and run prog\.py "
+                         r"again\.")
+        self.assertEqual(self.declared_now(program), ["widget"])
+
+    def test_verbosity_high_says_what_was_decided(self) -> None:
+        """`verbosity = "high"` names the lock, the date and the fetch."""
+        # An addition, so something is fetched and recorded.
+        program: Path = self.synced_program(
+            "chatty", '["widget"]', "import sprocket",
+            settings='verbosity = "high"\n')
+        done: subprocess.CompletedProcess[str] = self.run_program(program)
+        self.assertEqual(done.returncode, 0, done.stderr[-400:])
+        self.assertRegex(done.stderr, r"ezpkg: lock: (\d+ pin\(s\)|none)")
+        self.assertIn("ezpkg: date: ", done.stderr)
+        self.assertIn("ezpkg: fetching ", done.stderr)
+        self.assertIn("ezpkg: approvals kept in the stash", done.stderr)
+        self.assertIn("Added sprocket>=2.0.0,<3 for `prog.py`.", done.stderr)
+        # The end user's list is never a developer's (`ux` step 2.7).
+        self.assertNotIn("The following", done.stderr)
+
+        # Nothing to do: the remembered request is said.
+        done = self.run_program(program)
+        self.assertIn("ezpkg: request remembered, nothing fetched",
+                      done.stderr)
+
+    def test_a_name_the_index_lacks_is_not_added(self) -> None:
+        """A misspelt import is named in one line, then Python's error.
+
+        The index is asked first, so nothing is fetched for a package
+        that does not exist (Wayne's dogfood, 2026-10-15).
+        """
+        # One line, and the program unchanged.
+        program: Path = self.synced_program(
+            "misspelt", '["widget"]', "import bogus_package")
+        before: str = program.read_text()
+        done: subprocess.CompletedProcess[str] = self.run_program(program)
+        flat: str = " ".join(done.stderr.split())
+        self.assertIn("`prog.py` line 12: `import bogus_package` needs a "
+                      "package, but PyPI has none called `bogus_package`. "
+                      "Please check the spelling", flat)
+        self.assertIn("No module named 'bogus_package'", flat)
+        self.assertEqual(program.read_text(), before)
+
+    def test_a_wrong_guess_is_not_added(self) -> None:
+        """A package that is not what its name says is never added.
+
+        `decoy` exists but holds `elsewhere`, as a squatted name might.
+        It is fetched and looked at first, so nothing is unpacked and
+        the program is not edited.
+        """
+        # One line, and nothing unpacked.
+        program: Path = self.synced_program(
+            "decoyed", '["widget"]', "import decoy")
+        before: str = program.read_text()
+        done: subprocess.CompletedProcess[str] = self.run_program(program)
+        flat: str = " ".join(done.stderr.split())
+        self.assertIn("`prog.py` line 12: `import decoy` needs a package, "
+                      "but the "
+                      "index's "
+                      '"decoy" does not provide `decoy`. Please check the '
+                      "spelling",
+                      flat)
+        self.assertEqual(program.read_text(), before)
+        self.assertFalse(list((program.parent / "cache" / "versions")
+                              .glob("decoy-*")))
+
+    def test_a_source_only_package_is_not_added(self) -> None:
+        """A name the index has only as source code is never added.
+
+        `pip` here installs wheels only, so it could never be added
+        (Wayne's dogfood of `import bogus`, 2026-10-17).
+        """
+        # One line.
+        program: Path = self.synced_program(
+            "sourced", '["widget"]', "import sourceonly")
+        done: subprocess.CompletedProcess[str] = self.run_program(program)
+        flat: str = " ".join(done.stderr.split())
+        self.assertIn("`prog.py` line 12: `import sourceonly` needs a "
+                      "package, but "
+                      "the index's "
+                      '"sourceonly" has no wheel, only source code, so it '
+                      "cannot be installed. Please check the spelling",
+                      flat)
+
+
+    def test_a_release_without_a_bootstrap_builds_no_copy(self) -> None:
+        """A program that calls `ezpkg` itself has no pasted bootstrap.
+
+        So its release builds none of the forms that keep one, and the
+        warning goes into its `prog.py.releases` entry, counted in the
+        one "released" line (Wayne, 2026-10-22).
+        """
+        # A stand-in for the bootstrap, and an `email` release asked for.
+        program: Path = self.declaring_program(
+            "unbooted", 'dependencies = ["widget"]',
+            "import widget\nprint(widget.__version__)")
+        self.developer_settings(
+            program, 'version = "1.0.0"\nrelease = ["email"]\n')
+        done: subprocess.CompletedProcess[str] = self.run_program(program)
+        self.assertEqual((done.returncode, done.stdout.strip()),
+                         (0, "1.2.3"), done.stderr)
+        flat: str = " ".join(done.stderr.split())
+        self.assertIn("released `prog.py` 1.0.0, with 1 warning(s), listed "
+                      "in `prog.py.releases`.", flat)
+        self.assertFalse(program.with_name("prog-1.0.0.py").exists())
+        entry: dict[str, Any] = tomllib.loads(program.with_name(
+            "prog.py.releases").read_text())["release"][0]
+        self.assertEqual(entry["warnings"], [(
+            '`prog.py.toml` line 2, `release = ["email"]`: `prog.py` has no '
+            "pasted bootstrap, so its release builds no email.")])
+
+    def test_a_release_copy_seeds_its_developers_stash(self) -> None:
+        """A copy made a developer's program starts from its `checksums`.
+
+        Such as a release's `email` copy taken up by a new developer:
+        the stash is seeded from Part 1, so the approvals it carries are
+        the ones the first run checks against.
+        """
+        # The copy, then a `prog.py.toml` beside it.
+        program: Path = self.program("seeded", "widget")
+        self.assertEqual(self.run_as_developer(program).returncode, 0)
+        carried: dict[str, str] | None = self.approvals_of(program)
+        assert carried is not None
+        self.empty_cache(program)  # The release run's stash goes too.
+        self.developer_settings(program, 'verbosity = "high"\n')
+        done: subprocess.CompletedProcess[str] = self.run_program(program)
+        self.assertEqual(done.returncode, 0, done.stderr[-400:])
+        self.assertIn("ezpkg: approvals unchanged", done.stderr)
+        self.assertEqual(self.stash_of(program, self.cache_of(program))
+                         .get("checksums"), carried)
+
+    def test_an_entry_stays_until_a_run_is_recorded(self) -> None:
+        """An entry whose import went stays while no run says it is unused.
+
+        `unused_lately` judges by the finished runs `note_loaded`
+        records, so with none recorded (the runs ended in `os._exit`,
+        say) nothing is unused: the entry stays, and nothing is said.
+        """
+        # Added by an import, which then goes, with no run on record.
+        program: Path = self.synced_program(
+            "lingering", '["widget"]', "import sprocket")
+        done: subprocess.CompletedProcess[str] = self.run_program(program)
+        self.assertEqual(done.returncode, 0, done.stderr[-400:])
+        self.assertEqual(self.declared_now(program),
+                         ["widget", "sprocket>=2.0.0,<3"])
+        program.write_text(program.read_text().replace(
+            "import sprocket\n", ""))
+        where: str = str(program.resolve())
+        record: Path = (program.parent / "cache" / "develop"
+                        / f"{hashlib.sha256(where.encode()).hexdigest()[:16]}"
+                          ".json")
+        kept: dict[str, Any] = json.loads(record.read_text())
+        kept.pop("runs", None)
+        record.write_text(json.dumps(kept))
+        done = self.run_program(program)
+        self.assertEqual((done.returncode, done.stderr), (0, ""))
+        self.assertEqual(self.declared_now(program),
+                         ["widget", "sprocket>=2.0.0,<3"])
 
 class BootstrapCheckTest(unittest.TestCase):
     """Recognise a pasted bootstrap, and say whether it is current.
@@ -6993,100 +6842,6 @@ class BootstrapCheckTest(unittest.TestCase):
         with unittest.mock.patch.object(ezpkg, "main_source",
                                         return_value=None):
             self.assertEqual(venv.bootstrap_status(), ("absent", ""))
-
-    @editing
-    def test_a_newer_bootstrap_is_told_once_and_replaced_at_release(
-            self) -> None:
-        """A developer hears of a newer bootstrap once; a release replaces it.
-
-        With `bootstrap = "update"`, the default, the release puts in the
-        current one and gives the `ezpkg` entry this `ezpkg`'s range; a
-        named bootstrap is kept, and any other stops the run (Wayne,
-        S5.1).  The `ezpkg` is a copy laid out as a wheel leaves it,
-        since one run from source leaves the entry alone (S5.1c).
-        """
-        # A real program carrying `nopip6`, which must not run it.  Its
-        # `ezpkg` entry is the one the paste implies (`T.eui`).
-        older: str = ezpkg.OLD_BOOTSTRAP_TEXTS["nopip6 of 2026-10-16"]
-        installed: Path = self.root / "installed"
-        installed.mkdir()
-        shutil.copy2(Path(ezpkg.__file__), installed / "ezpkg.py")
-        info: Path = installed / f"ezpkg-{ezpkg.__version__}.dist-info"
-        info.mkdir()
-        (info / "METADATA").write_text(
-            f"Metadata-Version: 2.1\nName: ezpkg\n"
-            f"Version: {ezpkg.__version__}\n")
-        program: Path = self.root / "prog.py"
-        program.write_text(
-            "# /// script\n"
-            '# dependencies = ["ezpkg>=0.0.1.dev0"]\n'
-            "# ///\n"
-            "import sys\n"
-            "if False:\n"
-            f"{textwrap.indent(older, '    ')}\n"
-            f"sys.path.insert(0, {str(installed)!r})\n"
-            "import ezpkg\n"
-            "from pathlib import Path\n"
-            f"cache = Path({str(self.root / 'cache')!r})\n"
-            "ezpkg.EZPkg(cache).install()\n"
-            "print('ran')\n")
-        settings: Path = self.root / "prog.py.toml"
-        settings.write_text('verbosity = "low"\n')
-        environment: dict[str, str] = dict(os.environ)
-        environment.pop("EZPKG_BOOTSTRAP", None)
-
-        def run() -> subprocess.CompletedProcess[str]:
-            """Run the program once."""
-            return subprocess.run([sys.executable, str(program)],
-                                  env=environment, capture_output=True,
-                                  text=True, check=False)
-        first: subprocess.CompletedProcess[str] = run()
-        self.assertEqual((first.returncode, first.stdout), (0, "ran\n"),
-                         first.stderr)
-        self.assertRegex(" ".join(first.stderr.split()),
-                         r"`prog\.py` carries the bootstrap `nopip6` \(lines "
-                         r"6-\d+\), but `ezpkg` now has `2026-10-23`\. The next "
-                         r"release replaces it\.")
-        second: subprocess.CompletedProcess[str] = run()
-        self.assertEqual((second.returncode, second.stderr), (0, ""))
-
-        # Named: kept, and nothing said; another name stops the run.
-        settings.write_text('bootstrap = "nopip6"\n')
-        named: subprocess.CompletedProcess[str] = run()
-        self.assertEqual((named.returncode, named.stdout), (0, "ran\n"),
-                         named.stderr)
-        settings.write_text('bootstrap = "nopip5"\n')
-        wrong: subprocess.CompletedProcess[str] = run()
-        self.assertNotEqual(wrong.returncode, 0)
-        self.assertEqual(wrong.stdout, "")
-        self.assertIn('`prog.py.toml` line 1, `bootstrap = "nopip5"`: '
-                      "`prog.py` carries `nopip6`, not `nopip5`.",
-                      " ".join(wrong.stderr.split()))
-
-        # A release replaces it, indented as it was, and runs.  A release
-        # needs a `release` form, and this one's fails, since nothing
-        # came from a cache for a `.pyz` to carry; but the bootstrap and
-        # the `ezpkg` entry come first, so both are brought up to date.
-        settings.write_text('version = "1.0.0"\n'
-                            'release = ["zipapp"]\n')
-        released: subprocess.CompletedProcess[str] = run()
-        self.assertEqual((released.returncode, released.stdout),
-                         (0, "ran\n"), released.stderr)
-        flat: str = " ".join(released.stderr.split())
-        self.assertRegex(flat, r"Replaced the bootstrap `nopip6` \(lines "
-                         r"6-\d+ of `prog\.py`\) with `2026-10-23`\.")
-        self.assertIn("`prog.py` 1.0.0 was not released: the declared "
-                      "packages did not come from the cache", flat)
-        text: str = program.read_text()
-        self.assertIn("if False:\n    try:", text)
-        self.assertEqual(ezpkg.bootstrap_name(
-            ezpkg.find_bootstrap(text) or ""),
-            list(ezpkg.BOOTSTRAPS.values())[-1])
-        metadata: dict[str, Any] | None = ezpkg.script_metadata(text)
-        assert metadata is not None
-        self.assertEqual(metadata["dependencies"],
-                         [ezpkg.version_range("ezpkg", ezpkg.__version__)])
-        self.assertNotIn("released", metadata.get("tool", {}).get("ezpkg", {}))
 
     def test_an_edit_is_refused_where_it_is(self) -> None:
         """An edited bootstrap is refused, naming the line, indented or not.
@@ -7356,6 +7111,92 @@ class BootstrapCheckTest(unittest.TestCase):
         self.assertEqual((unchecked.returncode, unchecked.stdout),
                          (0, "ran\n"), unchecked.stderr)
         self.assertIn("EZPKG_BOOTSTRAP=unchecked", unchecked.stderr)
+
+    def test_a_newer_bootstrap_is_told_once_and_replaced_at_release(
+            self) -> None:
+        """A developer hears of a newer bootstrap once; a release replaces it.
+
+        With `bootstrap = "update"`, the default, the release puts in the
+        current one and gives the `ezpkg` entry this `ezpkg`'s range; a
+        named bootstrap is kept, and any other stops the run (Wayne,
+        S5.1).  The `ezpkg` is a copy laid out as a wheel leaves it,
+        since one run from source leaves the entry alone (S5.1c).
+        """
+        # A real program carrying `nopip6`, which must not run it.  Its
+        # `ezpkg` entry is the one the paste implies (`T.eui`).
+        older: str = ezpkg.OLD_BOOTSTRAP_TEXTS["nopip6 of 2026-10-16"]
+        installed: Path = self.root / "installed"
+        installed.mkdir()
+        shutil.copy2(Path(ezpkg.__file__), installed / "ezpkg.py")
+        info: Path = installed / f"ezpkg-{ezpkg.__version__}.dist-info"
+        info.mkdir()
+        (info / "METADATA").write_text(
+            f"Metadata-Version: 2.1\nName: ezpkg\n"
+            f"Version: {ezpkg.__version__}\n")
+        program: Path = self.root / "prog.py"
+        program.write_text(
+            "# /// script\n"
+            '# dependencies = ["ezpkg>=0.0.1.dev0"]\n'
+            "# ///\n"
+            "import sys\n"
+            "if False:\n"
+            f"{textwrap.indent(older, '    ')}\n"
+            f"sys.path.insert(0, {str(installed)!r})\n"
+            "import ezpkg\n"
+            "from pathlib import Path\n"
+            f"cache = Path({str(self.root / 'cache')!r})\n"
+            "ezpkg.EZPkg(cache).install()\n"
+            "print('ran')\n")
+        settings: Path = self.root / "prog.py.toml"
+        settings.write_text('verbosity = "low"\n')
+        environment: dict[str, str] = dict(os.environ)
+        environment.pop("EZPKG_BOOTSTRAP", None)
+
+        def run() -> subprocess.CompletedProcess[str]:
+            """Run the program once."""
+            return subprocess.run([sys.executable, str(program)],
+                                  env=environment, capture_output=True,
+                                  text=True, check=False)
+        first: subprocess.CompletedProcess[str] = run()
+        self.assertEqual((first.returncode, first.stdout), (0, "ran\n"),
+                         first.stderr)
+        self.assertRegex(" ".join(first.stderr.split()),
+                         r"`prog\.py` carries the bootstrap `nopip6` \(lines "
+                         r"6-\d+\), but `ezpkg` now has `2026-10-23`\. The next "
+                         r"release replaces it\.")
+        second: subprocess.CompletedProcess[str] = run()
+        self.assertEqual((second.returncode, second.stderr), (0, ""))
+
+        # Named: kept, and nothing said; another name stops the run.
+        settings.write_text('bootstrap = "nopip6"\n')
+        named: subprocess.CompletedProcess[str] = run()
+        self.assertEqual((named.returncode, named.stdout), (0, "ran\n"),
+                         named.stderr)
+        settings.write_text('bootstrap = "nopip5"\n')
+        wrong: subprocess.CompletedProcess[str] = run()
+        self.assertNotEqual(wrong.returncode, 0)
+        self.assertEqual(wrong.stdout, "")
+        self.assertIn('`prog.py.toml` line 1, `bootstrap = "nopip5"`: '
+                      "`prog.py` carries `nopip6`, not `nopip5`.",
+                      " ".join(wrong.stderr.split()))
+
+        # A release's copy carries the new one, and the program runs,
+        # never edited.  A release needs a `release` form, and this
+        # one's fails, since nothing came from a cache for a `.pyz` to
+        # carry; but the bootstrap is replaced first, and says so.
+        settings.write_text('version = "1.0.0"\n'
+                            'release = ["zipapp"]\n')
+        written: str = program.read_text()
+        released: subprocess.CompletedProcess[str] = run()
+        self.assertEqual((released.returncode, released.stdout),
+                         (0, "ran\n"), released.stderr)
+        flat: str = " ".join(released.stderr.split())
+        self.assertRegex(flat, r"This release's copies carry the bootstrap "
+                         r"`2026-10-23` in place of `nopip6` \(lines "
+                         r"\d+-\d+ of `prog\.py`\)\.")
+        self.assertIn("`prog.py` 1.0.0 was not released: the declared "
+                      "packages did not come from the cache", flat)
+        self.assertEqual(program.read_text(), written)
 
 
 class CoverageToolTest(unittest.TestCase):
@@ -8263,6 +8104,8 @@ class MetadataTest(unittest.TestCase):
         self.assertIsNone(ezpkg.with_requires_python("dependencies = [", ">=3.12"))
         self.assertIsNone(ezpkg.with_requires_python(
             'requires-python = [\n  ">=3.11",\n]', ">=3.12"))
+        self.assertIsNone(ezpkg.with_requires_python(
+            'dependencies = []\n[tool.x]\nrequires-python = "a"', ">=3.12"))
 
     def test_settings_dependencies_join_part_1s(self) -> None:
         """`dependencies` in `prog.py.toml` follows Part 1's, which win."""
@@ -8341,6 +8184,20 @@ class MetadataTest(unittest.TestCase):
                         program, raised, raised.__traceback__))
                 self.assertIn("`requests` needed `socks`", told.getvalue())
 
+                # The program's own frame last: the program wanted it.
+                mine: Callable[[], None] = types.FunctionType(
+                    get.__code__, {"__name__": "__main__",
+                                   "ModuleNotFoundError": ModuleNotFoundError})
+                try:
+                    mine()
+                except ModuleNotFoundError as raised:
+                    stashed["dependencies"] = ["cowsay"]
+                    told.truncate(0)
+                    told.seek(0)
+                    self.assertTrue(venv.add_missing(
+                        program, raised, raised.__traceback__))
+                self.assertIn("`prog.py` needed `socks`", told.getvalue())
+
                 # No package to be had: said, and the traceback follows.
                 proved.return_value = "PyPI has none called `socks`"
                 told.truncate(0)
@@ -8360,7 +8217,15 @@ class MetadataTest(unittest.TestCase):
                     program, ModuleNotFoundError("", name="cowsay"), None))
                 self.assertFalse(venv.add_missing(
                     program, ValueError("socks"), None))
-                self.assertEqual(put.call_count, 2)
+                self.assertEqual(put.call_count, 3)
+
+            # A source that no longer parses says nothing either.
+            with (unittest.mock.patch.object(
+                      ezpkg, "main_source", return_value=(program, "def (")),
+                  unittest.mock.patch.object(
+                      ezpkg.EZPkg, "put_stash") as put):
+                self.assertFalse(venv.add_missing(program, error, None))
+            put.assert_not_called()
 
     def test_a_release_lists_its_warnings(self) -> None:
         """Drops and a release's own warnings go in its entry, once.
@@ -8376,7 +8241,7 @@ class MetadataTest(unittest.TestCase):
             found: ezpkg.Discrepancy = ezpkg.Discrepancy(
                 program, ["old>=1", "kept"], [0, 0], [], {}, [
                     (3, "tabulate", "tabulate"), (4, "yaml", "PyYAML")],
-                [0], set(), {"tabulate", "PyYAML"})
+                [0], {"tabulate", "PyYAML"})
             stashed: dict[str, Any] = {"notes": {"dropped:tabulate": "x"}}
             with unittest.mock.patch.object(ezpkg.EZPkg, "stash",
                                             return_value=stashed):
@@ -8387,10 +8252,8 @@ class MetadataTest(unittest.TestCase):
 
             # Listed with the release's own, each once.
             venv.warnings = ["Own.", "Own."]
-            with (unittest.mock.patch.object(
-                      ezpkg.EZPkg, "stashing", return_value=True),
-                  unittest.mock.patch.object(
-                      ezpkg.EZPkg, "stash", return_value={"notes": notes})):
+            with unittest.mock.patch.object(
+                    ezpkg.EZPkg, "stash", return_value={"notes": notes}):
                 self.assertEqual(venv.release_warnings(),
                                  [notes["dropped:old"], "Own."])
 
@@ -8427,7 +8290,7 @@ class MetadataTest(unittest.TestCase):
             program.write_text(text)
             venv: ezpkg.EZPkg = ezpkg.EZPkg(Path(scratch) / "cache")
             with (unittest.mock.patch.object(
-                      ezpkg.EZPkg, "stashing", return_value=False),
+                      ezpkg.EZPkg, "developing", return_value=False),
                   unittest.mock.patch.object(
                       ezpkg.EZPkg, "approved", return_value=None),
                   unittest.mock.patch.object(
@@ -8456,8 +8319,6 @@ class MetadataTest(unittest.TestCase):
             with (unittest.mock.patch.object(
                       ezpkg, "main_path", return_value=program),
                   unittest.mock.patch.object(
-                      ezpkg.EZPkg, "stashing", return_value=True),
-                  unittest.mock.patch.object(
                       ezpkg.EZPkg, "verbosity", return_value=1),
                   unittest.mock.patch.object(
                       ezpkg.EZPkg, "staged", side_effect=failing),
@@ -8469,6 +8330,53 @@ class MetadataTest(unittest.TestCase):
             self.assertIn("A warning. `prog.py.toml`: `prog.py` 1.0.0 was "
                           "not released: no copy.", said)
             self.assertIsNone(venv.warnings)
+
+    def test_a_release_skips_a_zipapp_and_undoes_a_failure(self) -> None:
+        """A zip that cannot carry compiled code is a warning; a failure
+        after a form was built removes what was built."""
+        # A program with the bootstrap, and forms that the export makes,
+        # cannot bundle, or fails.
+        with tempfile.TemporaryDirectory() as scratch:
+            program: Path = Path(scratch) / "prog.py"
+            program.write_text(ezpkg.QUICK_START, encoding="utf-8")
+            venv: ezpkg.EZPkg = ezpkg.EZPkg(Path(scratch) / "cache")
+            venv.warnings = []
+
+            def export(form: str, providing: Sequence[str],
+                       target: Path) -> Path:
+                # The email copy is made; the others are not.
+                if form == "zipapp":
+                    raise RuntimeError("cannot bundle tracer: compiled")
+                if form == "uv":
+                    raise RuntimeError("uv lock failed")
+                target.write_text("copy\n", encoding="utf-8")
+                return target
+
+            told: io.StringIO = io.StringIO()
+            with (unittest.mock.patch.object(
+                      ezpkg, "main_path", return_value=program),
+                  unittest.mock.patch.object(
+                      ezpkg.EZPkg, "verbosity", return_value=1),
+                  unittest.mock.patch.object(
+                      venv, "range_ezpkg", side_effect=lambda one: one),
+                  unittest.mock.patch.object(venv, "check_imports"),
+                  unittest.mock.patch.object(
+                      venv, "give_ranges", side_effect=lambda one: one),
+                  unittest.mock.patch.object(venv, "export",
+                                             side_effect=export),
+                  contextlib.redirect_stderr(told)):
+                self.assertFalse(venv.build_release(
+                    program, ezpkg.Settings(
+                        version="1.0.0", release=("email", "zipapp", "uv"),
+                        bootstrap="2026-10-23"),
+                    [], [], "1.0.0"))
+            said: str = " ".join(told.getvalue().split())
+            self.assertIn("no `prog-1.0.0.pyz`: cannot bundle tracer: "
+                          "compiled.", said)
+            self.assertIn("`prog.py` 1.0.0 was not released: uv lock "
+                          "failed.", said)
+            self.assertFalse((Path(scratch) / "prog-1.0.0.py").exists())
+            self.assertFalse((Path(scratch) / "prog.py.releases").exists())
 
     def test_a_gone_pin_is_recognised_in_a_conflict(self) -> None:
         """A locked version gone shows as a conflict, not a missing one.
@@ -8680,6 +8588,28 @@ class MetadataTest(unittest.TestCase):
                           "not run.  Ask its author for its release", line)
             self.assertNotIn("checksums", line)
 
+    def test_an_end_user_failure_with_approvals_and_no_record(self) -> None:
+        """A locked pin is looked for by its own name; an unwritable
+        record leaves the author's pointer out."""
+        # A gone pin, and `last_failure.txt` that cannot be written.
+        with tempfile.TemporaryDirectory() as scratch:
+            venv: ezpkg.EZPkg = ezpkg.EZPkg(Path(scratch))
+            text: str = (
+                "ERROR: Cannot install cowsay because these package "
+                "versions have conflicting dependencies.\n"
+                "ERROR: ResolutionImpossible")
+            with (unittest.mock.patch.object(
+                      venv, "approved",
+                      return_value={"cowsay==6.0.99": "0" * 12}),
+                  unittest.mock.patch.object(
+                      ezpkg, "index_files",
+                      return_value=["cowsay-6.1-py2.py3-none-any.whl"]),
+                  unittest.mock.patch.object(Path, "write_text",
+                                             side_effect=OSError("full"))):
+                line: str = venv.end_user_failure(RuntimeError(text))
+            self.assertIn("needs cowsay 6.0.99, which PyPI", line)
+            self.assertNotIn("For its author", line)
+
     def test_only_the_real_cache_fetches_its_own_pip(self) -> None:
         """A cache a caller names keeps the interpreter's `pip` (`I.ffspo`)."""
         # Nothing is fetched, and nothing is written.
@@ -8689,6 +8619,30 @@ class MetadataTest(unittest.TestCase):
             venv: ezpkg.EZPkg = ezpkg.EZPkg(Path(scratch) / "named")
             venv.own_pip()
             self.assertFalse((Path(scratch) / "named" / "pip.whl").exists())
+
+    def test_a_private_pip_that_fails_its_check_is_not_kept(self) -> None:
+        """A `pip` whose SHA-256 is wrong is said at `high`, and not kept."""
+        # The real cache's place, under a scratch home, and an index whose
+        # one `pip` arrives altered.
+        with tempfile.TemporaryDirectory() as scratch:
+            listing: bytes = json.dumps({"releases": {"26.0": [{
+                "url": "https://example.invalid/pip-26.0-py3-none-any.whl",
+                "filename": "pip-26.0-py3-none-any.whl", "yanked": False,
+                "requires_python": ">=3.9", "upload_time": "2026-01-01",
+                "digests": {"sha256": "0" * 64}}]}}).encode()
+            told: io.StringIO = io.StringIO()
+            with (unittest.mock.patch.object(Path, "home",
+                                             return_value=Path(scratch)),
+                  unittest.mock.patch.object(
+                      ezpkg, "fetch_url", side_effect=[listing, b"altered"]),
+                  unittest.mock.patch.object(
+                      ezpkg.EZPkg, "verbosity", return_value=3),
+                  contextlib.redirect_stderr(told)):
+                venv: ezpkg.EZPkg = ezpkg.EZPkg(Path(scratch) / ".ezpkg")
+                venv.own_pip()
+            self.assertIn("pip-26.0-py3-none-any.whl fails its SHA-256 check",
+                          " ".join(told.getvalue().split()))
+            self.assertFalse((Path(scratch) / ".ezpkg" / "pip.whl").exists())
 
     @unittest.skipIf(os.name == "nt", "the fake uv is a shell script")
     def test_uv_is_fetched_once_when_none_is_installed(self) -> None:
@@ -8833,8 +8787,6 @@ class MetadataTest(unittest.TestCase):
         with unittest.mock.patch.object(ezpkg, "__version__", "9.9.9"):
             self.assertNotEqual(ezpkg.dependency_fingerprint(
                 text, ["a"], ()), one)
-        self.assertEqual(ezpkg.line_list([9, 5, 6, 5]), "lines 5-6, 9")
-        self.assertEqual(ezpkg.line_list([7]), "line 7")
 
     def test_a_discrepancy_is_arranged(self) -> None:
         """Unexplained entries keep their neighbour.
@@ -8848,53 +8800,13 @@ class MetadataTest(unittest.TestCase):
             Path("prog.py"), ["rich", "widget", "pywin32", "sprocket"],
             [4, 5, 6, 7],
             [("entry", 3, ""), ("add", 0, "PyYAML"), ("entry", 1, "")],
-            {3: 12, 1: 14}, [(13, "yaml", "PyYAML")], [0], {"sprocket"})
+            {3: 12, 1: 14}, [(13, "yaml", "PyYAML")], [0])
         self.assertEqual(found.target(),
                          ["sprocket", "PyYAML", "widget", "pywin32"])
         self.assertEqual(found.arrange((), ()),
                          ["rich", "sprocket", "widget", "pywin32"])
         self.assertEqual(found.imported({"PyYAML"}),
                          ["pyyaml", "sprocket", "widget"])
-
-    def test_with_type_ignores_copies_the_authors_comment(self) -> None:
-        """New imports get the nearest `type: ignore` above, or none.
-
-        A line with a `type: ignore` already, or a backslash, is left
-        alone; one with its own comment gets this one in front of it,
-        since `mypy` reads only a comment that starts with `type:`.
-        """
-        # Two habits; each new import takes the nearest one above.
-        text: str = (
-            "import json\n"
-            "import one  # type: ignore[import-not-found]\n"
-            "import new_a\n"
-            "import two  # type: ignore[import-untyped]  # Note.\n"
-            "import new_b  # Mine.\n"
-            "import new_c  # type: ignore\n"
-            "import new_d, \\\n    json\n")
-        result: str
-        given: list[str]
-        result, given = ezpkg.with_type_ignores(
-            text, {"new_a", "new_b", "new_c", "new_d"},
-            {"one", "two", "json"})
-        self.assertEqual(result, text.replace(
-            "import new_a\n",
-            "import new_a  # type: ignore[import-not-found]\n").replace(
-            "import new_b  # Mine.\n",
-            "import new_b  # type: ignore[import-untyped]  # Note.  "
-            "# Mine.\n"))
-        self.assertEqual(given, ["new_a", "new_b"])
-
-        # The first habit serves an import above every habit.
-        result, given = ezpkg.with_type_ignores(
-            "import new\nimport one  # type: ignore\n", {"new"}, {"one"})
-        self.assertEqual(result, "import new  # type: ignore\n"
-                         "import one  # type: ignore\n")
-
-        # No habit, no comment.
-        self.assertEqual(ezpkg.with_type_ignores(
-            "import one\nimport new\n", {"new"}, {"one"}),
-            ("import one\nimport new\n", []))
 
     def test_wheel_modules_reads_the_top_level_names(self) -> None:
         """A wheel's importable names come from its member names."""
@@ -8911,6 +8823,28 @@ class MetadataTest(unittest.TestCase):
                     archive.writestr(member, "")
             self.assertEqual(ezpkg.wheel_modules(wheel),
                              {"alone", "package", "_speed", "moved"})
+
+    def test_a_program_is_written_back_as_it_was_read(self) -> None:
+        """A release's copy keeps the program's encoding and line endings.
+
+        Which `read_program` notes, and `write_program` restores: a
+        Latin-1 program with `\\r\\n` line endings stays one.
+        """
+        # Read, changed, written, read again.
+        with tempfile.TemporaryDirectory() as scratch:
+            program: Path = Path(scratch) / "prog.py"
+            program.write_bytes(b"# -*- coding: latin-1 -*-\r\n"
+                                b"print('caf\xe9')\r\n")
+            text: str
+            encoding: str
+            crlf: bool
+            text, encoding, crlf = ezpkg.read_program(program)
+            self.assertEqual((encoding, crlf), ("iso-8859-1", True))
+            self.assertNotIn("\r", text)
+            ezpkg.write_program(program, text + "x = 1\n", encoding, crlf)
+            self.assertEqual(program.read_bytes(),
+                             b"# -*- coding: latin-1 -*-\r\n"
+                             b"print('caf\xe9')\r\nx = 1\r\n")
 
     def test_uv_setting_changes_one_key(self) -> None:
         """A key is replaced, added under the header, or a table added."""
@@ -9076,8 +9010,6 @@ class MetadataTest(unittest.TestCase):
         self.assertIsNone(ezpkg.approval_fields(
             "# /// script\n# x = [\n# ///\n"))
         self.assertEqual(ezpkg.for_export(["a==1"], "def ("), ["a==1"])
-        self.assertEqual(ezpkg.with_type_ignores('x = """', {"m"}, set()),
-                         ('x = """', []))
         self.assertEqual(ezpkg.every_import(
             "try:\n import x\nexcept:\n pass\n"), [("x", 2, True)])
         self.assertEqual(ezpkg.every_import(
@@ -9163,6 +9095,32 @@ class MetadataTest(unittest.TestCase):
             ezpkg, "main_path", return_value=program))
         return program, ezpkg.EZPkg(root / "cache")
 
+    def test_install_declared_ends_in_one_line(self) -> None:
+        """A no, and a developer's failed fetch, each end in one line;
+        the fetch's names the `prog.py.toml` entry `pip` failed on."""
+        # A no from the person asked.
+        venv: ezpkg.EZPkg = self.developer_here(
+            settings='dependencies = ["no-such-thing"]\n')[1]
+        with (unittest.mock.patch.object(
+                  venv, "provide_declared",
+                  side_effect=ezpkg.Declined("declined", "Declined, so "
+                                             "prog.py did not run.")),
+              self.assertRaisesRegex(SystemExit,
+                                     r"^Declined, so prog\.py did not run")):
+            venv.install_declared((), "")
+
+        # A failed fetch of the entry the developer named.
+        with (unittest.mock.patch.object(
+                  venv, "provide_declared",
+                  side_effect=RuntimeError(
+                      "could not fetch no-such-thing into x: ERROR: No "
+                      "matching distribution found for no-such-thing")),
+              self.assertRaises(SystemExit) as caught):
+            venv.install_declared((), "")
+        flat: str = " ".join(str(caught.exception).split())
+        self.assertIn('line 1, `dependencies = ["no-such-thing"]`: `prog.py` '
+                      "did not run: ERROR: No matching distribution", flat)
+
     def test_an_update_reads_whatever_date_the_stash_holds(self) -> None:
         """A date-only or broken stash date is due; a recent one is not.
 
@@ -9186,8 +9144,7 @@ class MetadataTest(unittest.TestCase):
     def test_an_empty_settings_file_is_filled_with_the_defaults(self) -> None:
         """An empty `prog.py.toml` gets the template, and says so once.
 
-        Without `EDIT_PROGRAM`, there is no first-run note to point at:
-        every setting is at its default.
+        Every setting is at its default.
         """
         # Filled, said, and every default.
         program: Path
@@ -9304,16 +9261,6 @@ class MetadataTest(unittest.TestCase):
             self.assertEqual(ezpkg.EZPkg(venv.root).settings(),
                              ezpkg.Settings())
         self.assertEqual(said.getvalue(), "")
-
-        # The edit-mode note: nothing to name without the program, and
-        # a file gone since is left alone.
-        venv.filled = (ezpkg.settings_path(program), "x")
-        with unittest.mock.patch.object(ezpkg, "main_path",
-                                        return_value=None):
-            venv.name_the_additions()
-        ezpkg.settings_path(program).unlink()
-        venv.name_the_additions()
-        self.assertFalse(ezpkg.settings_path(program).exists())
 
     def test_a_staged_copy_and_its_ranges_at_their_edges(self) -> None:
         """No block, a block it cannot edit, upgrading, a file gone."""
@@ -9450,7 +9397,8 @@ class MetadataTest(unittest.TestCase):
             venv, "prove", side_effect=lambda package, module, argv: (
                 "" if package == "sprocket" else "PyPI has none called "
                 "`bogus`")))
-        self.enterContext(unittest.mock.patch.object(venv, "too_new"))
+        self.enterContext(unittest.mock.patch.object(
+            venv, "too_new", return_value=False))
         self.enterContext(unittest.mock.patch.object(
             venv, "remember", return_value=None))
         found: ezpkg.Discrepancy | None = venv.discrepancy(
@@ -9490,6 +9438,19 @@ class MetadataTest(unittest.TestCase):
               self.assertRaises(ezpkg.Declined)):
             run()
 
+        # A moved date is worth one more fetch, and only one.
+        with (unittest.mock.patch.object(
+                venv, "provide",
+                side_effect=RuntimeError("could not fetch: ERROR: nope")
+                ) as provide,
+              unittest.mock.patch.object(venv, "too_new",
+                                         side_effect=[True, False]),
+              contextlib.redirect_stderr(io.StringIO()) as said):
+            self.assertEqual(run(), ["widget"])
+        self.assertEqual(provide.call_count, 2)
+        self.assertIn("`dependencies` is left as it is: ERROR: nope",
+                      " ".join(said.getvalue().split()))
+
         # Fetched: stashed and said, the doubt too, even when the
         # program cannot be read back for the fingerprint.
         with (unittest.mock.patch.object(venv, "provide", return_value=[]),
@@ -9502,43 +9463,54 @@ class MetadataTest(unittest.TestCase):
         self.assertIn("PyPI has none called `bogus`", flat)
         self.assertEqual(venv.stash()["dependencies"], ["sprocket"])
 
-    @editing
-    def test_reconcile_when_an_edit_cannot_be_made(self) -> None:
-        """Worked out or written, a failed edit is said, and not made."""
-        # The edit cannot be worked out, then cannot be written.
-        venv: ezpkg.EZPkg
-        run: Callable[[], list[str]]
-        venv, run = self.reconciling()
-        self.enterContext(unittest.mock.patch.object(venv, "provide",
-                                                     return_value=[]))
-        with (unittest.mock.patch.object(venv, "edit_for",
-                                         return_value="prog.py: no edit"),
-              contextlib.redirect_stderr(io.StringIO()) as said):
-            self.assertEqual(run(), ["widget"])
-        self.assertIn("prog.py: no edit", said.getvalue())
-        self.assertIn("`bogus`", said.getvalue())
-        with (unittest.mock.patch.object(ezpkg, "write_program",
-                                         side_effect=OSError("read-only")),
-              contextlib.redirect_stderr(io.StringIO()) as said):
-            self.assertEqual(run(), ["widget"])
-        self.assertIn("`dependencies` is left as it is: read-only",
-                      " ".join(said.getvalue().split()))
+    def test_too_new_passes_other_failures_through(self) -> None:
+        """Only an addition the date alone keeps out moves the date.
 
-        # The run that filled `prog.py.toml` only notes what it would
-        # add; a written edit settles, even unfingerprinted.
-        venv.filled = (Path("prog.py.toml"), "")
-        with contextlib.redirect_stderr(io.StringIO()):
-            self.assertEqual(run(), ["widget", "sprocket"])
-        self.assertEqual(venv.adding, ["sprocket"])
-        venv.filled = None
-        with (unittest.mock.patch.object(ezpkg, "dependency_fingerprint",
-                                         side_effect=SyntaxError("x")),
-              contextlib.redirect_stderr(io.StringIO())):
-            self.assertEqual(run(), ["widget", "sprocket"])
-        self.assertTrue(venv.edited)
+        With no date, an addition `reconcile` did not guess, one the
+        index has none of, and one the date admits, the failure was not
+        the date's: nothing moves, and what was fetched to see is gone.
+        """
+        # One addition of each kind.
+        program: Path
+        venv: ezpkg.EZPkg
+        program, venv = self.developer_here()
+        found: ezpkg.Discrepancy = cast(
+            ezpkg.Discrepancy, types.SimpleNamespace(
+                program=program,
+                additions=[(3, "gizmo", "gizmo"), (4, "bogus", "bogus"),
+                           (5, "sprocket", "sprocket")]))
+        modules: dict[str, str] = {"bogus": "bogus", "sprocket": "sprocket"}
+        holdings: list[Path] = []
+
+        def download(requirements: list[str], *_: object) -> list[Path]:
+            # Nothing called `bogus`; `sprocket` under any date.
+            if requirements == ["bogus"]:
+                raise RuntimeError("could not fetch bogus")
+            holding: Path = Path(tempfile.mkdtemp())
+            holdings.append(holding)
+            wheel: Path = holding / "sprocket-1.0.0-py3-none-any.whl"
+            wheel.write_bytes(b"")
+            return [wheel]
+
+        with (unittest.mock.patch.object(venv, "cutoff", return_value=""),
+              unittest.mock.patch.object(venv, "download",
+                                         side_effect=download) as fetch):
+            self.assertFalse(venv.too_new(found, modules, ()))
+        self.assertEqual(fetch.call_count, 0)
+        with (unittest.mock.patch.object(
+                venv, "cutoff", return_value="2019-01-01T00:00:00Z"),
+              unittest.mock.patch.object(venv, "download",
+                                         side_effect=download) as fetch,
+              unittest.mock.patch.object(venv, "put_stash") as moved):
+            self.assertFalse(venv.too_new(found, modules, ()))
+        self.assertEqual([call.args[0] for call in fetch.call_args_list],
+                         [["bogus"], ["sprocket"], ["sprocket"]])
+        moved.assert_not_called()
+        self.assertEqual(len(holdings), 2)
+        self.assertFalse(any(holding.exists() for holding in holdings))
 
     def test_the_reconciling_helpers_at_their_edges(self) -> None:
-        """`discrepancy`, `too_new`, `prove`, `edit_for` and the rest.
+        """`discrepancy`, `too_new`, `prove` and the rest.
 
         The branches an ordinary run never takes: a program that is not
         Python, an import with no package or under a guard, a package
@@ -9602,16 +9574,6 @@ class MetadataTest(unittest.TestCase):
                 self.assertEqual(ezpkg.EZPkg.prove(venv, "other", "other",
                                                    ()),
                                  '"other" could not be fetched')
-
-        # `edit_for`: a program gone, or a block it cannot edit.
-        with unittest.mock.patch.object(ezpkg, "read_program",
-                                        side_effect=OSError("gone")):
-            self.assertIn("prog.py: cannot read it: gone",
-                          venv.edit_for(found, ["widget"], set(), False))
-        with unittest.mock.patch.object(ezpkg, "with_dependency_list",
-                                        return_value=None):
-            self.assertIn("cannot edit its script block",
-                          venv.edit_for(found, ["widget"], set(), False))
 
         # `sync_dependencies`: no program, not Python, nothing to read.
         with unittest.mock.patch.object(ezpkg, "main_source",
@@ -9793,51 +9755,6 @@ class MetadataTest(unittest.TestCase):
               unittest.mock.patch.object(venv, "say") as said):
             self.assertIsNone(venv.uv())
         self.assertIn("has no uv", said.call_args[0][1])
-
-    def test_edit_part1_keeps_encoding_and_line_endings(self) -> None:
-        """A latin-1 program with CRLF lines is dated and otherwise kept.
-
-        And each way an edit cannot be made says why, or nothing when
-        there is nothing to edit.
-        """
-        # Latin-1, CRLF, and a byte that is not valid UTF-8.
-        where: Path = Path(self.enterContext(tempfile.TemporaryDirectory()))
-        venv: ezpkg.EZPkg = ezpkg.EZPkg(where / "cache")
-        program: Path = where / "prog.py"
-        source: str = ("# -*- coding: latin-1 -*-\r\n# /// script\r\n"
-                       "# dependencies = []\r\n# ///\r\nprint('caf\u00e9')\r\n")
-        program.write_bytes(source.encode("latin-1"))
-        dated: list[tuple[str, str, str | None]] = [
-            ("uv", "exclude-newer", '"2026-10-12T19:05:41Z"')]
-        self.enterContext(unittest.mock.patch.object(
-            ezpkg, "main_path", return_value=program))
-        self.assertEqual(venv.edit_part1(dated), "")
-        raw: bytes = program.read_bytes()
-        self.assertIn(b"caf\xe9", raw)
-        self.assertNotIn(b"\n", raw.replace(b"\r\n", b""))
-        self.assertIn(b'# exclude-newer = "2026-10-12T19:05:41Z"\r\n', raw)
-
-        # The same again changes nothing; a key that cannot be set, or
-        # a file that cannot be written, says why.
-        self.assertEqual(venv.edit_part1(dated), "")
-        self.assertEqual(program.read_bytes(), raw)
-        self.assertIn("could not set `exclude-newer` in `[tool.x.y]`",
-                      venv.edit_part1([("x.y", "exclude-newer", '"z"')]))
-        with unittest.mock.patch.object(ezpkg, "write_program",
-                                        side_effect=OSError("full")):
-            self.assertEqual(
-                venv.edit_part1([("uv", "exclude-newer", '"later"')]),
-                "could not write prog.py (full)")
-
-        # No block, no file, or an unreadable one: nothing said.
-        program.write_text("print('no block')\n")
-        self.assertEqual(venv.edit_part1(dated), "")
-        with unittest.mock.patch.object(ezpkg, "read_program",
-                                        side_effect=OSError("gone")):
-            self.assertEqual(venv.edit_part1(dated), "")
-        with unittest.mock.patch.object(ezpkg, "main_path",
-                                        return_value=None):
-            self.assertEqual(venv.edit_part1(dated), "")
 
     def test_lock_mismatches_checks_the_approved_wheels(self) -> None:
         """A wheel missing from the lock, or listed differently, is named.

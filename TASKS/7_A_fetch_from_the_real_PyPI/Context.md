@@ -60,3 +60,18 @@ Earlier entries are in `History.md`.
 * Next (Wayne, 2026-10-24): after his commit, a couple of coverage runs
   (`./ezpkg_test_all.py DIR`, or `./ezpkg_coverage.py --children DIR`)
   with tests added for missed lines; then the rehearsal and `T.utpat`.
+* Later the same day, while Wayne was out: `ux/drive.py` steps 2.10
+  and 2.14 used the old setting names (`upgrade`, `exports`) and failed;
+  fixed and passing (2.10 now only checks that `update-frequency =
+  "daily"` runs).  Coverage work: 8 new tests and 6 extended in
+  `ezpkg_test.py` (one, `test_reconcile_when_a_fetch_or_an_edit_fails`,
+  had a truthy `too_new` mock that hid the no-retry path); `ezpkg.py`
+  went from 69 unrun lines to 29.  All uncommitted, for Wayne's review.
+* S4 decisions (Wayne, same evening): S4.1 the four unreachable guards
+  marked `# pragma: no cover`; S4.2 the Part 1 editing code deleted
+  (`EDIT_PROGRAM`, `restart`, `first_run_note`, `edit_part1`,
+  `edit_for`, the `mypy` comments, 19 `@editing` tests), with
+  end-user tests now getting approvals from a real `email` copy
+  (`run_as_developer`, S4.2.1); S4.3 left; S4.4 kept (live code).
+  After: 342 tests, `ezpkg.py` 17 unrun lines; `ux/drive.py` 29/29.
+  Uncommitted, for Wayne's review.

@@ -138,10 +138,9 @@ an uncaught `ModuleNotFoundError` adds its package to the stash and
 asks for another run (`add_missing`).  Dropped entries are noted in
 the stash (`noted`; a guessed name is proved, so not noted), and the
 next release lists them, with its own warnings (`warn`), under `warnings` in its
-`prog.py.releases` entry; its one "Released" line counts them.  Since 2026-10-22 the developer's `prog.py` is not
-edited (`EDIT_PROGRAM` off; whether it is never edited is undecided, so
-the editing code and its `@editing` tests stay, switched on by
-`EZPKG_EDIT_PROGRAM=on`, tests only).  What `ezpkg` works out (entries
+`prog.py.releases` entry; its one "Released" line counts them.  The developer's `prog.py` is never
+edited (Wayne, 2026-10-22; the editing code, `EDIT_PROGRAM`, `restart`
+and the `@editing` tests were deleted on 2026-10-24, S4.2).  What `ezpkg` works out (entries
 for imports Part 1 lacks, `checksums`, `exclude-newer`, `released`)
 is the program's stash in its `~/.ezpkg/develop/` record
 (`EZPkg.stash`), seeded from Part 1 or the newest `email` build; Part
@@ -188,14 +187,18 @@ program, ever, and the program is never edited.  `prog.ezpkg`,
 * Coverage: `./ezpkg_coverage.py --children DIR` (about 23 minutes,
   in the background, scratch `HOME`) annotates into `DIR` and lists the
   unrun lines not marked `# pragma: no cover` in `DIR/missing.txt`.
-  Keep pragmas few (Wayne).  `ezpkg.py` was 98.3% on 2026-10-23, 67
-  of 3860 lines unrun: Windows-only (6), failures in the middle of a
-  `pip` or `uv` run (~16), a release carrying a stale bootstrap (~8),
-  restart paths in child processes (~10), filesystem errors (5), and
-  rare reconcile, sync and Part 1 editing branches (~18).
-* Tests of the old Part 1 editing are marked `@editing`
-  (`EZPKG_EDIT_PROGRAM=on`); `run_as_developer` edits too, so end-user
-  tests find approvals in Part 1.
+  Keep pragmas few (Wayne).  On 2026-10-24, after S4.2 removed the
+  Part 1 editing, `ezpkg.py` had 17 lines unrun (342 tests); four
+  unreachable guards are marked, and what is left is another
+  computer's packages and rare release and bootstrap-check branches.
+  Don't edit `ezpkg_test.py`
+  during a coverage run: `test_case_runners_are_marked` reads its
+  source and fails spuriously.
+* End-user tests get approvals in Part 1 the way an end user does:
+  `run_as_developer` builds an `email` release and puts its copy in
+  place of the program (S4.2), so `InstallTest.program` carries the
+  real pasted bootstrap and runs with its directory as `HOME` (cache
+  `.ezpkg` there, `cache_of`) and this tree on `PYTHONPATH`.
 * The date tests need a `pip` 26 or newer in `~/.ezpkg`, and skip
   without one.  This machine has no `~/.ezpkg`, so run the suite with
   `HOME` set to a scratch home whose `.ezpkg/pip.whl` is a current
