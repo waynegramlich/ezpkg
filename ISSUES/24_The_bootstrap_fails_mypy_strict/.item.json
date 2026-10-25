@@ -1,7 +1,7 @@
 {
-  "state": "Open",
+  "state": "Closed",
   "created": "2026-10-25T05:15:28Z",
-  "updated": "2026-10-25T05:15:45Z",
+  "updated": "2026-10-25T05:55:01Z",
   "history": [
     {
       "state": "Pending",
@@ -10,6 +10,10 @@
     {
       "state": "Open",
       "time": "2026-10-25T05:15:45Z"
+    },
+    {
+      "state": "Closed",
+      "time": "2026-10-25T05:55:01Z"
     }
   ],
   "tag": "bfms"

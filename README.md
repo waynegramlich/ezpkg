@@ -531,6 +531,13 @@ Program That Uses `EZPkg`](#running-a-program-that-uses-ezpkg).
 * **``PROG_NAME.py 1.0.1 was not released: ...``**:
   The release stopped for the reason given; `PROG_NAME.py` still runs, and the
   next run tries the release again, so fix the problem and rerun it.
+* **`__pycache__/`, `.mypy_cache/` or `.ruff_cache/` beside `PROG_NAME.py`**:
+  These come from Python, `mypy` and `ruff`, not from `EZPkg`.  Python
+  writes `__pycache__/` when the program imports a module that sits
+  beside it; add `__pycache__/` to your `.gitignore`, or set
+  `PYTHONPYCACHEPREFIX` to keep those files elsewhere.  `mypy` and `ruff`
+  write their caches when you run them there, and each keeps its own out
+  of `git`.
 
 ## Project Information
 

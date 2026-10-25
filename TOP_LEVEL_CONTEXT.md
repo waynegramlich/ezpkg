@@ -235,9 +235,9 @@ program, ever, and the program is never edited.  `prog.ezpkg`,
   tags `v*` releases, starts and approves the release runs (`pypi`
   included, at Wayne's word for that release), and does GitHub's
   settings with `gh api` rather than sending Wayne to the web pages.
-* `ezpkg` is on pypi.org: 0.0.1 (2026-10-25, `T.utpat`) and 0.0.2
-  (the same day, `I.srlfnp`), so the Quick Start works for a new
-  user; `release_check.py pypi|testpypi VERSION` checks what was
+* `ezpkg` is on pypi.org: 0.0.1 (2026-10-25, `T.utpat`), 0.0.2 and
+  0.0.3 (the same day, `I.srlfnp` and `I.bfms`), so the Quick Start
+  works for a new user; `release_check.py pypi|testpypi VERSION` checks what was
   published.  A release follows `T.ffrp`'s procedure: bump
   `__version__`, Wayne commits, Claude pushes, rehearses on
   test.pypi.org, tags `vX.Y.Z`, starts the `pypi` run and approves it
@@ -246,3 +246,30 @@ program, ever, and the program is never edited.  `prog.ezpkg`,
   the previous release for a minute or more after an upload, so
   `release.yml`'s `listed` job and `release_check.py` (`newest_named`)
   wait until it names the new version (S5.1, S5.2).
+
+## Next Steps (2026-10-25, after 0.0.3)
+
+Nothing is open in `TASKS/` or `ISSUES/`.  Claude offered these, in
+this order of recommendation; Wayne has not chosen yet:
+
+1. Settle `R.pcr` (Python Coding Rules), switched on mid-session on
+   2026-10-25, probably by Wayne's other Claude instance.  `--strict`
+   already passes (`I.bfms`), but the rest does not yet hold: 78
+   comment lines exceed 72 columns (68 in `ezpkg.py`, 3 each in
+   `release_check.py` and `ezpkg_coverage.py`, 2 each in
+   `quick_start.py` and `ux/drive.py`; the bootstrap's cannot change
+   without a new bootstrap), and docstrings lack `Arguments:` and
+   `Returns:` sections.  Wayne decides: keep it active and bring the
+   code into line, or make it InActive here.
+2. The release-time warning when a compiled package has no wheel for a
+   computer that `requires-python` admits (left from `T.ee`).
+3. `T.abfd`'s small UX items in its `History.md`: S2.2b, S2.4g, S2.4h,
+   S3.3c, S3.3d, S5.1d.
+4. Bring `ux/` transcripts up to date: the committed ones show old
+   wording (`upgrade = true`, `release = "1.0.0"`, `exports`, 0.0.1).
+   Rerun `ux/drive.py --ux-dir` into the scratchpad and give Wayne the
+   list to read in one batch.
+5. Housekeeping: update `PyPI_Via_GitHub.md` (the approval `comment`,
+   the `listed` wait, the permission check wanting Wayne's "go"),
+   delete old test.pypi.org dev uploads, and read pypi.org's project
+   page as a stranger.
