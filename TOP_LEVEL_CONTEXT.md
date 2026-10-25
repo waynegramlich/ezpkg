@@ -15,9 +15,9 @@ needs live here instead.
   `python3 bootstrap.py 2026-10-23` runs it, for the suite only).  It
   fetches only `ezpkg`'s wheel, keeps it as `~/.ezpkg/ezpkg.whl` and
   imports from it; `EZPkg.own_pip` fetches `pip`.  The older cases
-  were deleted on 2026-10-24 (Wayne).  pypi.org has no `ezpkg` yet, so
-  `ux/drive.py` and `release_check.py testpypi` put the wheel there
-  themselves.
+  were deleted on 2026-10-24 (Wayne).  `ux/drive.py` installs a
+  wheel of the project's `ezpkg.py` (`PIP_FIND_LINKS`) rather than
+  pypi.org's, so it tests the code as it is now.
 * `ezpkg_test.py`: The test suite.  Its module docstring is the
   contributor's guide (Wayne, 2026-10-24): "Fixing a Bug or Adding a
   Feature" (the steps before a pull request), then "How To Test
@@ -49,7 +49,8 @@ needs live here instead.
   to 3.15, plus python.org's macOS Python without certificates and a
   `--console` job per system: `gh workflow run check.yml -f
   target=testpypi -f version=V` (25 jobs, about 3 minutes; Claude
-  starts it).  Started by hand, not yet by `release.yml` (`T.gar`).
+  starts it).  `release.yml` also runs it after every upload, for
+  the version it built (`T.utpat`).
 * `email_check.py build DIR` / `friend DIR OUT` and
   `.github/workflows/email_check.yml`: `email` and `zipapp` releases
   (`T.ee`) built on every runner kind (Linux and Windows x86_64/ARM,
@@ -225,9 +226,10 @@ program, ever, and the program is never edited.  `prog.ezpkg`,
   `History.md` (not loaded at startup), leaving `Context.md` as the
   current state, decisions still in force, open questions and next
   steps.
-* Claude may push to GitHub, and start and approve `testpypi` release
-  runs, but never commits; Wayne commits staged changes.
-* `ezpkg` is on test.pypi.org (`T.uttat`) but not yet on pypi.org
-  (`T.utpat`), so the Quick Start does not yet work for a new user;
-  `ux/drive.py` installs a wheel of the project's `ezpkg.py`, and
-  `release_check.py` checks what was published.
+* Wayne's only git step is `git commit` (2026-10-25): Claude pushes,
+  tags `v*` releases, starts and approves the release runs (`pypi`
+  included, at Wayne's word for that release), and does GitHub's
+  settings with `gh api` rather than sending Wayne to the web pages.
+* `ezpkg` 0.0.1 is on pypi.org (2026-10-25, `T.utpat`), so the Quick
+  Start works for a new user; `release_check.py pypi|testpypi` checks
+  what was published.

@@ -40,10 +40,6 @@ Earlier entries are in `History.md`.
 * The bootstrap changed (`2026-10-23`, its fingerprint in `BOOTSTRAPS`),
   so the test.pypi.org upload `0.0.1.dev202610222321` is stale: the next
   rehearsal must upload a fresh build before `release_check` passes.
-* A Quick Start run outside the project fails with `ezpkg: download
-  ezpkg failed: <HTTPError 404>` until `ezpkg` is on pypi.org: the
-  bootstrap asks pypi.org only.  Before then, run it with
-  `PYTHONPATH="$HOME/public_html/projects/ezpkg"`.
 * The cache's `remove.py`, `list.py` and `quick_start.py` are now
   executable on Linux and macOS (`refresh(..., executable=True)`, which
   also mends an existing cache).
@@ -101,5 +97,14 @@ Earlier entries are in `History.md`.
   deleting `v*` tags except for the repository admin.
 * `release.yml` now ends with a `check` job calling `check.yml`
   (which gained a `workflow_call` trigger) with the version `build`
-  read from the wheel's name.  Uncommitted and so untried: the next
-  testpypi rehearsal is its test.
+  read from the wheel's name.  Committed by Wayne as `95dd84a`;
+  rehearsed: release run 40147083384 27/27 (build, publish and the 25
+  `check` jobs) for `0.0.1.dev202610250032`, `release_check.py
+  testpypi` passed, `email_check.yml` 40147238981 13/13.
+* **Released 2026-10-25: `ezpkg` 0.0.1 on pypi.org.**  Claude tagged
+  `95dd84a` as `v0.0.1` (annotated, pushed; Wayne: "All I own is
+  `git commit`"), started release run 40147698445 (`--ref v0.0.1 -f
+  target=pypi`; Claude Code's permission check refused the first
+  try until Wayne said go) and approved its `pypi` deployment:
+  27/27, `ezpkg-0.0.1-py3-none-any.whl` on pypi.org, and
+  `./release_check.py pypi 0.0.1` passed.  `T.utpat` closed.

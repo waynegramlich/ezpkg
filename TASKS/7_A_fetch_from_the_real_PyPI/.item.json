@@ -1,7 +1,7 @@
 {
-  "state": "Open",
+  "state": "Closed",
   "created": "2026-10-05T00:06:52Z",
-  "updated": "2026-10-13T17:40:56Z",
+  "updated": "2026-10-25T00:47:54Z",
   "history": [
     {
       "state": "Suspended",
@@ -10,6 +10,10 @@
     {
       "state": "Open",
       "time": "2026-10-13T17:40:56Z"
+    },
+    {
+      "state": "Closed",
+      "time": "2026-10-25T00:47:54Z"
     }
   ],
   "tag": "ffrp"

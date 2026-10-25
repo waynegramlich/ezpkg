@@ -1,6 +1,5 @@
-@7_A_fetch_from_the_real_PyPI/Details.md
-@7_A_fetch_from_the_real_PyPI/Context.md
-@7.14_Upload_to_pypi_and_test/Details.md
+@7_A_fetch_from_the_real_PyPI/Summary.md
+@7.14_Upload_to_pypi_and_test/Summary.md
 @7.13_README_sweep_before_the_release/Summary.md
 @7.3_Write_the_release_workflow/Summary.md
 @../ISSUES/22_A_failed_fetch_shows_the_pip_output/Summary.md
@@ -49,6 +48,4 @@
 @6.4_Concurrent_installs/Details.md
 @6.5_Coverage_of_child_processes/Details.md
 @6.6_Security_and_who_approves_what/Details.md
-@6.7_PEP_723_issues/Details.md
-@6.9_.pth_files/Details.md
 @Closed.md

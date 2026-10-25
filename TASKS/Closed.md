@@ -5,6 +5,8 @@
 These items are only listed by tag and title; `ai_contexts TAG
 show` shows the rest.
 
+- `T.p7i` PEP 723 issues
+- `T.pf` `.pth` files
 - `T.cvca` Choose the version control arrangement
 - `T.cbc` Create the bootstrap code
 - `T.mpaps` Master `pip` and package servers
