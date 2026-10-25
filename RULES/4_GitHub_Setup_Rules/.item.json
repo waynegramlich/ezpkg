@@ -14,6 +14,7 @@
   ],
   "tag": "gsr",
   "source": "../aicontexts/rule_sources/GitHub_Setup_Rules.md",
-  "sha256": "df380f16a9699a0033baa3b9253fe7bde2f2eaf2b6a51e249f10c93e48c00719",
-  "refreshed": "2026-10-25T17:40:30Z"
+  "sha256": "bbf900de9feb79bc8a6998b262d8d389e184cd251ba35fd158cd3a08d1ed78b7",
+  "refreshed": "2026-10-25T21:11:17Z",
+  "title": "GitHub Setup Rules"
 }

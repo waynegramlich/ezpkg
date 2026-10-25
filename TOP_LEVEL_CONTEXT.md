@@ -272,11 +272,19 @@ this order of recommendation; Wayne has not chosen yet:
 5. Housekeeping: delete old test.pypi.org dev uploads, and read
    pypi.org's project page as a stranger.
 
-Also 2026-10-25: `R.gsr` (GitHub Setup Rules) and `R.gar` (GitHub
-Actions Rules) were written from this project's tasks, for the next
-project to go to pypi.org (`ai_contexts`, soon renamed `aicontexts`),
-and are Active here and there.  They replace `PyPI_Via_GitHub.md`,
-which Wayne will retire; leave it until he says.  Every rule here
-takes its source from `../aicontexts/rule_sources/` (Wayne,
-2026-10-25), as `aicontexts`' own rules do, and `aic` links to
-`../aicontexts/`.  `../claude_code_rules/` is no longer used.
+Also 2026-10-25: `R.gsr` (GitHub Setup Rules) and `R.gwr` (GitHub
+Workflow Rules, first called GitHub Actions Rules) were written from
+this project's tasks, for the next project to go to pypi.org
+(`aicontexts`, formerly `ai_contexts`; Wayne cleans it up in another
+session), and are Active here and there.  They replace
+`PyPI_Via_GitHub.md`, which Wayne will retire; leave it until he says.
+Every rule here takes its source from `../aicontexts/rule_sources/`
+(Wayne, 2026-10-25), as `aicontexts`' own rules do; a rule's copy is
+now its `Details.md`.  `../claude_code_rules/` is deleted.
+`rule_sources/` also holds `General_AI_Rules.md`, not a rule here.
+The `aic` and `ai_contexts` links (git-ignored) point into
+`../aicontexts/`, whose program is still `ai_contexts.py`; re-point
+them, and `.gitignore`, if it is renamed.  `aicontexts` builds from a
+`pyproject.toml`, so `R.gwr`'s `build` job (written from `ezpkg`'s
+hand-built wheel) may need a `python -m build` note when it goes to
+pypi.org.
