@@ -54,6 +54,7 @@ import sys
 import tempfile
 import time
 import urllib.request
+from typing import Any
 
 HERE: pathlib.Path = pathlib.Path(__file__).resolve().parent
 
@@ -76,9 +77,9 @@ def seed_pip(home: pathlib.Path) -> None:
     # The first wheel the newest release lists.
     with urllib.request.urlopen("https://pypi.org/pypi/pip/json",
                                 timeout=60) as answer:
-        listing: dict = json.load(answer)
-    entry: dict = next(one for one in listing["urls"]
-                       if one["filename"].endswith(".whl"))
+        listing: dict[str, Any] = json.load(answer)
+    entry: dict[str, Any] = next(one for one in listing["urls"]
+                                 if one["filename"].endswith(".whl"))
     with urllib.request.urlopen(entry["url"], timeout=60) as answer:
         wheel: bytes = answer.read()
     if hashlib.sha256(wheel).hexdigest() != entry["digests"]["sha256"]:

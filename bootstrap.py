@@ -3,7 +3,7 @@
 
 The bootstrap is the text a program pastes in to fetch `ezpkg` with
 nothing preinstalled.  Bootstraps are named by the date they were
-published, and the one here, `2026-10-23`, is the only one left.  The
+published, and the one here, `2026-10-25`, is the only one left.  The
 older published texts live on in `ezpkg.py` (`BOOTSTRAPS` and
 `OLD_BOOTSTRAP_TEXTS`) for the tests of a stale copy.
 
@@ -59,10 +59,12 @@ JSON_API: str = os.environ.get("BOOTSTRAP_JSON_API",
                                "https://pypi.org/pypi")
 
 
-def bootstrap_2026_10_23() -> None:
+def bootstrap_2026_10_25() -> None:
     """Fetch `ezpkg`'s wheel, import straight from it, and install.
 
-    The bootstrap `2026-10-23`, the first published.  An `ezpkg` that is
+    The bootstrap `2026-10-25`, which differs from `2026-10-23`, the
+    first published, only in passing `mypy --strict` (its `g` is typed,
+    and `URLError` comes from `urllib.error`).  An `ezpkg` that is
     already importable is used as it is.  Otherwise the newest `ezpkg`
     wheel the JSON API names is fetched (with `curl` when this Python
     has no certificates, `I.btosc`), checked against its SHA-256, kept
@@ -81,12 +83,13 @@ def bootstrap_2026_10_23() -> None:
     import hashlib
     import json
     import subprocess
+    import urllib.error
     import urllib.request as req
     try:  # Do not edit try block!  See https://pypi.org/project/ezpkg/
         s = f"find {PACKAGE}"; t = pathlib.Path.home()/".ezpkg"; w = t/f"{PACKAGE}.whl"
-        def g(u):  # Fetch u, with curl if this Python has no certificates.
-            try: return req.urlopen(u, None, 60).read()
-            except req.URLError as y: z = y  # As on python.org's macOS Python.
+        def g(u: str) -> bytes:  # Fetch u; with curl if no certificates.
+            try: return bytes(req.urlopen(u, None, 60).read())
+            except urllib.error.URLError as y: z = y  # python.org's macOS.
             try: return subprocess.run(["curl", "-fsSL", u],
                                        capture_output=True, check=True).stdout
             except Exception: raise z from None
@@ -103,14 +106,14 @@ def bootstrap_2026_10_23() -> None:
         if m is None:  # Python imports it straight from the wheel.
             s = f"import {PACKAGE}"; sys.path.insert(0, str(w))
             m = importlib.import_module(PACKAGE)
-        s = "fetch packages"; m.EZPkg().install(bootstrap="2026-10-23")
+        s = "fetch packages"; m.EZPkg().install(bootstrap="2026-10-25")
     except Exception as x:
         raise SystemExit(f"{PACKAGE}: {s} failed: {x!r}")  # Do not edit try block!
 
 
 # Each bootstrap's published name, and the function that holds its text.
 MECHANISMS: dict[str, Callable[[], None]] = {
-    "2026-10-23": bootstrap_2026_10_23,
+    "2026-10-25": bootstrap_2026_10_25,
 }
 
 
@@ -126,7 +129,7 @@ def pasted(label: str) -> str:
 
     Arguments:
     * `label` (`str`):
-      The bootstrap's name in `MECHANISMS`, such as `2026-10-23`.
+      The bootstrap's name in `MECHANISMS`, such as `2026-10-25`.
 
     Returns:
     * (`str`): The pasted text, ending in a newline.

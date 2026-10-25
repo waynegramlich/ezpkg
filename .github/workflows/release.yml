@@ -77,9 +77,34 @@ jobs:
                 && 'https://test.pypi.org/legacy/'
                 || 'https://upload.pypi.org/legacy/' }}
 
+  # pypi.org's page of the newest `ezpkg`, which the bootstrap reads,
+  # can name the previous release for a minute or more after an upload
+  # (S5.1), so the check waits until it names this one.  test.pypi.org
+  # needs no wait: `release_check.py` hands its wheel over itself.
+  listed:
+    needs: [build, publish]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - run: |
+          if [ "$TARGET" != pypi ]; then exit 0; fi
+          for attempt in $(seq 1 30); do
+            newest="$(curl -fsSL https://pypi.org/pypi/ezpkg/json \
+                      | python3 -c 'import json, sys; print(json.load(sys.stdin)["info"]["version"])' \
+                      || true)"
+            if [ "$newest" = "$VERSION" ]; then exit 0; fi
+            echo "pypi.org names ezpkg ${newest:-nothing} as newest, not $VERSION; asking again in 10 s"
+            sleep 10
+          done
+          echo "pypi.org never named ezpkg $VERSION as newest"
+          exit 1
+        env:
+          TARGET: ${{ inputs.target }}
+          VERSION: ${{ needs.build.outputs.version }}
+
   # The version just published, as a new user would get it.
   check:
-    needs: [build, publish]
+    needs: [build, publish, listed]
     permissions:
       contents: read
       actions: read

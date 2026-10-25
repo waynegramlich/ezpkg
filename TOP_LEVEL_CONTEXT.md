@@ -10,9 +10,9 @@ needs live here instead.
 * `ezpkg.py`: The `ezpkg` package itself (the `EZPkg` class).
 * `quick_start.py`: The Quick Start program, and the authority for the
   bootstrap text.
-* `bootstrap.py`: The shipping bootstrap, `2026-10-23`, as the
-  function `bootstrap_2026_10_23` (`MECHANISMS` maps the name to it;
-  `python3 bootstrap.py 2026-10-23` runs it, for the suite only).  It
+* `bootstrap.py`: The shipping bootstrap, `2026-10-25`, as the
+  function `bootstrap_2026_10_25` (`MECHANISMS` maps the name to it;
+  `python3 bootstrap.py 2026-10-25` runs it, for the suite only).  It
   fetches only `ezpkg`'s wheel, keeps it as `~/.ezpkg/ezpkg.whl` and
   imports from it; `EZPkg.own_pip` fetches `pip`.  The older cases
   were deleted on 2026-10-24 (Wayne).  `ux/drive.py` installs a
@@ -98,7 +98,7 @@ match it:
   (its imports included), from `quick_start.py`, so it has no copy of
   its own (Wayne, 2026-10-22).  A developer writes no Part 1.
 * `QUICK_START` in `ezpkg.py`.
-* `bootstrap_2026_10_23` in `bootstrap.py` (which spells the package
+* `bootstrap_2026_10_25` in `bootstrap.py` (which spells the package
   name as `PACKAGE` and the index as `JSON_API`; `pasted` renders it).
 
 A changed bootstrap is a new one, comments and spaces included
@@ -181,7 +181,7 @@ program, ever, and the program is never edited.  `prog.ezpkg`,
 * Everything local at once: `./ezpkg_test_all.py DIR` (see above).
 * Quick tests, during development (about 6 minutes): `./ezpkg_test.py`
   (`EZPKG_TEST=FAST`, the default), which runs everything, the
-  bootstrap `2026-10-23` in `bootstrap.py` included.  The quick suite
+  bootstrap `2026-10-25` in `bootstrap.py` included.  The quick suite
   must run the latest bootstrap (Wayne, 2026-10-23); `EZPKG_TEST=NONE`
   skips it and is only the coverage tool's baseline.  A single class
   or method can be named after it.
@@ -206,7 +206,12 @@ program, ever, and the program is never edited.  `prog.ezpkg`,
   `pip` (`pip download pip --no-deps`).
 * `ruff check .` and `mypy .`; both check against the Python 3.11 floor,
   and both must pass (`release.yml` runs `ruff`; the bootstrap's
-  imports need their blank line before `try:`).
+  imports need their blank line before `try:`).  `mypy.ini` sets
+  `strict = True` (2026-10-25), because a stranger who runs `mypy
+  --strict` on a program checks its pasted bootstrap too; `2026-10-25`
+  is the bootstrap rewritten to pass it (`g` typed, `URLError` from
+  `urllib.error`), released in `ezpkg` 0.0.3.  The tests patch the
+  standard modules themselves (`os`, not `ezpkg.os`), as strict needs.
 
 ## Working With Wayne
 
@@ -236,7 +241,8 @@ program, ever, and the program is never edited.  `prog.ezpkg`,
   published.  A release follows `T.ffrp`'s procedure: bump
   `__version__`, Wayne commits, Claude pushes, rehearses on
   test.pypi.org, tags `vX.Y.Z`, starts the `pypi` run and approves it
-  (Claude Code's permission check may want Wayne's "go" first).  For a
-  minute after an upload pypi.org's index can still serve the old
-  version, so early `check` jobs can fail; re-run them
-  (`gh run rerun R --failed`).
+  (Claude Code's permission check may want Wayne's "go" first).
+  pypi.org's `/pypi/ezpkg/json`, which the bootstrap reads, can name
+  the previous release for a minute or more after an upload, so
+  `release.yml`'s `listed` job and `release_check.py` (`newest_named`)
+  wait until it names the new version (S5.1, S5.2).

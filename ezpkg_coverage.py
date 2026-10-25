@@ -16,7 +16,7 @@ is honoured by the suite as usual.
 `--per-case <directory>` answers a different question: what does each
 `bootstrap.py` case add?  The cases are those `EZPKG_TEST` selects,
 which by default is every case `bootstrap.py` defines; today that is
-only the shipping one, `2026-10-23`.  It makes one baseline run of the
+only the shipping one, `2026-10-25`.  It makes one baseline run of the
 whole suite with `EZPKG_TEST=NONE`, so that no case runs, and then one
 run per case of only the tests marked `runs_cases`, with `EZPKG_TEST`
 naming that case.  Children are traced throughout.  Runs go two at a

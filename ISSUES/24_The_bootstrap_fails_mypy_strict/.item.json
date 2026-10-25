@@ -1,0 +1,16 @@
+{
+  "state": "Open",
+  "created": "2026-10-25T05:15:28Z",
+  "updated": "2026-10-25T05:15:45Z",
+  "history": [
+    {
+      "state": "Pending",
+      "time": "2026-10-25T05:15:28Z"
+    },
+    {
+      "state": "Open",
+      "time": "2026-10-25T05:15:45Z"
+    }
+  ],
+  "tag": "bfms"
+}

@@ -25,10 +25,12 @@ prompt answers yes by itself.  See `I.owenabd`.
 * `pypi`:
   Exactly what a stranger gets: the bootstrap fetches `ezpkg` itself,
   the newest that pypi.org's JSON API names, which may lag an upload
-  by a few minutes.
+  by a minute or more.  So the run waits until that page names the
+  version being checked (`newest_named`), and fails at once if it
+  names a newer one, which is all a stranger can get (S5.2).
 * `testpypi`:
   Only the `ezpkg` wheel comes from test.pypi.org, downloaded here,
-  checked against its SHA-256 and put where `2026-10-23` keeps it,
+  checked against its SHA-256 and put where `2026-10-23` and later keep it,
   `~/.ezpkg/ezpkg.whl`, since the bootstrap asks pypi.org only; `pip`
   and `cowsay` still come from pypi.org.  Anybody can upload to test.pypi.org, and its `cowsay` is a
   stranger's, so the two indexes are never searched together.
@@ -235,6 +237,71 @@ def wheel_info(target: str, version: str | None, attempts: int = 4,
     raise LookupError(f"ezpkg {release['info']['version']} has no wheel")
 
 
+def release_key(version: str) -> tuple[int, ...] | None:
+    """Return a plain release's version as numbers, for ordering.
+
+    Arguments:
+    * `version` (`str`):
+      Such as `0.0.2`.
+
+    Returns:
+    * (`tuple[int, ...] | None`): Such as `(0, 0, 2)`, or `None` for
+      anything else, such as a `.dev` version.
+    """
+    # Only dotted numbers; anything else is not ordered here.
+    if not re.fullmatch(r"\d+(\.\d+)*", version):
+        return None
+    return tuple(int(part) for part in version.split("."))
+
+
+def newest_named(target: str, version: str, wait: float = 300.0,
+                 pause: float = 10.0) -> str:
+    """Wait until the index names `version` as its newest `ezpkg`.
+
+    The page is the one the bootstrap reads (`/pypi/ezpkg/json`), and
+    pypi.org's cache can name the previous release for a minute or
+    more after an upload: on 2026-10-25 four of `check.yml`'s jobs got
+    0.0.1 just after 0.0.2 was published (S5.2).
+
+    Arguments:
+    * `target` (`str`):
+      `testpypi` or `pypi`.
+    * `version` (`str`):
+      The version being checked.
+    * `wait` (`float`):
+      Seconds to wait at most.
+    * `pause` (`float`):
+      Seconds between looks.
+
+    Returns:
+    * (`str`): Empty once the page names `version`; otherwise why not.
+    """
+    # Asked until it agrees, gives up, or names something newer.
+    url: str = f"{JSON_APIS[target]}/ezpkg/json"
+    deadline: float = time.monotonic() + wait
+    newest: str = "nothing"
+    while True:
+        try:
+            with urllib.request.urlopen(url, timeout=30) as response:
+                newest = json.load(response)["info"]["version"]
+        except (urllib.error.URLError, ValueError, KeyError):
+            pass
+        if newest == version:
+            return ""
+        ours: tuple[int, ...] | None = release_key(version)
+        theirs: tuple[int, ...] | None = release_key(newest)
+        if ours is not None and theirs is not None and theirs > ours:
+            return (f"{target} already offers ezpkg {newest} as newest, "
+                    f"and the bootstrap fetches only the newest, so "
+                    f"{version} cannot be checked there")
+        if time.monotonic() >= deadline:
+            return (f"{url} still names ezpkg {newest} as newest, not "
+                    f"{version}, after {wait:.0f} s")
+        print(f"release_check: {target} still names ezpkg {newest} as "
+              f"newest; asking again in {pause:.0f} s", file=sys.stderr)
+        time.sleep(pause)
+
+
 def main() -> int:
     """Run the Quick Start against the named index.
 
@@ -270,6 +337,13 @@ def main() -> int:
         return 1
     version: str = info["version"]
     print(f"release_check: ezpkg {version} from {target}", file=sys.stderr)
+    # The bootstrap takes pypi.org's newest, so that must be this one.
+    if target == "pypi":
+        lagging: str = newest_named(target, version)
+        if lagging:
+            print(f"release_check: cannot check {target}: {lagging}",
+                  file=sys.stderr)
+            return 1
 
     here: Path = Path(__file__).resolve().parent
     scratch: Path = Path(tempfile.mkdtemp(prefix="release_check-"))
@@ -279,9 +353,10 @@ def main() -> int:
     run.mkdir()
     shutil.copy2(here / "quick_start.py", run)
 
-    # A clean environment.  The constraint pins `ezpkg` to the version
-    # being checked, which matters once pypi.org has a release newer
-    # than a test.pypi.org rehearsal.
+    # A clean environment.  The constraint pins `pip`'s `ezpkg` to the
+    # version being checked, which matters once pypi.org has a release
+    # newer than a test.pypi.org rehearsal; the bootstrap's own fetch
+    # does not use `pip`, which is what `newest_named` is for.
     environment: dict[str, str] = {
         key: value for key, value in os.environ.items()
         if not key.startswith(("PIP_", "EZPKG_"))
@@ -335,7 +410,7 @@ def main() -> int:
     sys.stdout.flush()
 
     # Passed only if it ran, the cow appeared and the right `ezpkg` did it.
-    # `2026-10-23` keeps `ezpkg` as `ezpkg.whl`; older bootstraps installed it.
+    # From `2026-10-23` on, it is kept as `ezpkg.whl`; before, installed.
     installed: list[str] = sorted(
         path.name for path in (home / ".ezpkg").glob("ezpkg-*.dist-info"))
     kept: Path = home / ".ezpkg" / "ezpkg.whl"

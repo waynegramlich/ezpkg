@@ -105,7 +105,7 @@ the tests nothing more (5.1 of `T.rps`).  Nor do the helpers need
 dependencies as the thing it tests.
 
 `EZPKG_TEST` chooses which `bootstrap.py` cases run: `FAST`, the
-default, runs the shipping bootstrap (`2026-10-23`); `NONE` runs none,
+default, runs the shipping bootstrap (`2026-10-25`); `NONE` runs none,
 and is only the coverage tool's baseline; a case's name runs that one.
 `EZPKG_PYPI=1` adds `PyPITest`, which fetches a few pinned packages
 from the real pypi.org; it is opt in because it can fail for reasons
@@ -296,7 +296,7 @@ PROMPT: str = "[y=>Yes|n=>No|?=>Explain]:"
 # straight from it, so it needs no `pip` on the machine; `EZPkg.own_pip`
 # fetches one later.  It fetches with `curl` when this Python has no
 # certificates.  See `T.ewar`, `I.btosc` and `T.abfd`.
-SHIPPING: str = "2026-10-23"
+SHIPPING: str = "2026-10-25"
 
 
 # How long the `slow` fault waits.  Long enough that several processes
@@ -1862,7 +1862,7 @@ class EZPkgTest(unittest.TestCase):
 
         # Just fetched, so the next run does not look for a newer one.
         self.assertTrue((home / ".ezpkg" / "last_pip").is_file())
-        with unittest.mock.patch.object(ezpkg.subprocess, "run") as ran:
+        with unittest.mock.patch.object(subprocess, "run") as ran:
             self.assertIsNone(venv.refresh_pip())
         ran.assert_not_called()
 
@@ -2074,7 +2074,7 @@ class EZPkgTest(unittest.TestCase):
         # `-OO` strips docstrings, so `inspect.getdoc` returns None.
         root: Path = self.root / "no-docstring"
         cache: ezpkg.EZPkg
-        with unittest.mock.patch.object(ezpkg.inspect, "getdoc",
+        with unittest.mock.patch.object(inspect, "getdoc",
                                         return_value=None):
             cache = ezpkg.EZPkg(root)
         self.assertEqual(cache.readme.read_text().splitlines()[0],
@@ -3084,7 +3084,7 @@ class InstallTest(unittest.TestCase):
 
         with (unittest.mock.patch.dict(
                   os.environ, {"PIP_INDEX_URL": self.index_url}),
-              unittest.mock.patch.object(ezpkg.subprocess, "run",
+              unittest.mock.patch.object(subprocess, "run",
                                          counted)):
             first: ModuleType = venv.install("sprocket<2")
             del sys.modules["sprocket"]
@@ -4271,7 +4271,7 @@ class InstallTest(unittest.TestCase):
         gadget: ModuleType
         with (unittest.mock.patch.dict(
                   os.environ, {"PIP_INDEX_URL": self.index_url}),
-              unittest.mock.patch.object(ezpkg.subprocess, "run",
+              unittest.mock.patch.object(subprocess, "run",
                                          counted)):
             widget, gadget = venv.install(
                 ["widget", ("gadgetlib", "python-gadget")])
@@ -4405,8 +4405,8 @@ class InstallTest(unittest.TestCase):
                              ("posix", [("/dev/tty", "w"),
                                         ("/dev/tty", "r")])):
             with (self.subTest(name=name),
-                  unittest.mock.patch.object(ezpkg.os, "name", name),
-                  unittest.mock.patch.object(ezpkg.Path, "open",
+                  unittest.mock.patch.object(os, "name", name),
+                  unittest.mock.patch.object(Path, "open",
                                              autospec=True,
                                              side_effect=pretend)):
                 opened.clear()
@@ -4414,8 +4414,8 @@ class InstallTest(unittest.TestCase):
                 self.assertEqual(opened, wanted)
 
         # No console, as for a `.pyw`, is nobody to ask.
-        with (unittest.mock.patch.object(ezpkg.os, "name", "nt"),
-              unittest.mock.patch.object(ezpkg.Path, "open",
+        with (unittest.mock.patch.object(os, "name", "nt"),
+              unittest.mock.patch.object(Path, "open",
                                          side_effect=OSError("no console"))):
             self.assertIsNone(venv.terminal())
 
@@ -4428,13 +4428,13 @@ class InstallTest(unittest.TestCase):
             with (self.subTest(value=value),
                   unittest.mock.patch.dict(os.environ, {"CI": value}),
                   unittest.mock.patch.object(
-                      ezpkg.Path, "open", side_effect=AssertionError)):
+                      Path, "open", side_effect=AssertionError)):
                 self.assertIsNone(venv.terminal())
         for value in ("", "0", "false"):
             with (self.subTest(value=value),
                   unittest.mock.patch.dict(os.environ, {"CI": value}),
                   unittest.mock.patch.object(
-                      ezpkg.Path, "open", return_value=_KeptStringIO())):
+                      Path, "open", return_value=_KeptStringIO())):
                 self.assertIsNotNone(venv.terminal())
 
     def test_an_unanswered_question_is_no(self) -> None:
@@ -4475,7 +4475,7 @@ class InstallTest(unittest.TestCase):
             kbhit=lambda: False)
         with (open(reading, encoding="utf-8") as reader,
               unittest.mock.patch.dict(sys.modules, {"msvcrt": keys}),
-              unittest.mock.patch.object(ezpkg.os, "name", "nt")):
+              unittest.mock.patch.object(os, "name", "nt")):
             self.assertEqual(ezpkg.answer_from(reader, spoken, 0.2), "")
             os.write(writing, b"y\n")
             keys.kbhit = lambda: True
@@ -4996,7 +4996,7 @@ class InstallTest(unittest.TestCase):
         self.assertEqual(self.install(target, "widget"), "widget 1.2.3")
         venv: ezpkg.EZPkg = ezpkg.EZPkg(target)
         with unittest.mock.patch.object(
-                ezpkg.Path, "touch",
+                Path, "touch",
                 side_effect=OSError("read only file system")):
             remembered = venv.remember("widget")
         assert remembered is not None
@@ -6874,14 +6874,14 @@ class BootstrapCheckTest(unittest.TestCase):
                              + textwrap.indent(edited, indent))
                 first: int = 3 if indent else 2
                 refusal: str | None = ezpkg.bootstrap_refusal(
-                    Path("prog.py"), text, "2026-10-23")
+                    Path("prog.py"), text, "2026-10-25")
                 assert refusal is not None
                 self.assertIn("ezpkg: prog.py: its bootstrap (lines "
                               f"{first}-", refusal)
                 self.assertIn(
                     f'  line {first + offset}:    s = "download ezpkgx"; d = '
                     'g("https://pypi.org/pypi/ezpkg/json")\n'
-                    '  2026-10-23: s = "download ezpkg"; d = '
+                    '  2026-10-25: s = "download ezpkg"; d = '
                     'g("https://pypi.org/pypi/ezpkg/json")\n'
                     "                                 |\n", refusal)
                 self.assertTrue(refusal.endswith("then run it again."))
@@ -6896,8 +6896,8 @@ class BootstrapCheckTest(unittest.TestCase):
         # Published code, wherever it is indented.
         block: str = self.shipping()
         fine: list[tuple[str, str]] = [
-            (block, "2026-10-23"),
-            ("if True:\n" + textwrap.indent(block, "    "), "2026-10-23"),
+            (block, "2026-10-25"),
+            ("if True:\n" + textwrap.indent(block, "    "), "2026-10-25"),
             (ezpkg.OLD_BOOTSTRAP_TEXTS["nopip5 of 2026-10-12"], "nopip5"),
         ]
         text: str
@@ -6919,7 +6919,7 @@ class BootstrapCheckTest(unittest.TestCase):
         for text in edits:
             with self.subTest(edit=text):
                 self.assertIsNotNone(ezpkg.bootstrap_refusal(
-                    Path("prog.py"), text, "2026-10-23"))
+                    Path("prog.py"), text, "2026-10-25"))
 
     def test_added_and_missing_lines_say_where(self) -> None:
         """A line only one side has is named, and long lists are cut."""
@@ -6931,13 +6931,13 @@ class BootstrapCheckTest(unittest.TestCase):
         added: str = "".join([lines[0], '    print("hi")\n', *lines[1:]])
         dropped: str = "".join([*lines[:gone], *lines[gone + 1:]])
         more: str | None = ezpkg.bootstrap_refusal(Path("prog.py"), added,
-                                                   "2026-10-23")
+                                                   "2026-10-25")
         fewer: str | None = ezpkg.bootstrap_refusal(Path("prog.py"),
-                                                    dropped, "2026-10-23")
+                                                    dropped, "2026-10-25")
         assert more is not None and fewer is not None
         self.assertIn('  line 2:     print("hi")\n'
-                      "              (not in 2026-10-23)\n", more)
-        self.assertIn(f"  2026-10-23: {lines[gone].strip()}\n", fewer)
+                      "              (not in 2026-10-25)\n", more)
+        self.assertIn(f"  2026-10-25: {lines[gone].strip()}\n", fewer)
         self.assertIn(f"(missing after line {gone})\n", fewer)
 
         # Seven changed lines show six, then a count.  Trailing space
@@ -6945,7 +6945,7 @@ class BootstrapCheckTest(unittest.TestCase):
         many: str = "".join(f"{line.rstrip()}  # Seven.\n" if 0 < index < 8
                             else line for index, line in enumerate(lines))
         cut: str | None = ezpkg.bootstrap_refusal(Path("prog.py"), many,
-                                                  "2026-10-23")
+                                                  "2026-10-25")
         assert cut is not None
         self.assertEqual(cut.count("|\n"), 6, cut)
         self.assertIn("  ... and 1 more\n", cut)
@@ -6973,7 +6973,7 @@ class BootstrapCheckTest(unittest.TestCase):
 
         # A caller naming a bootstrap the program does not have.
         missing: str | None = ezpkg.bootstrap_refusal(
-            Path("prog.py"), "print('hello')\n", "2026-10-23")
+            Path("prog.py"), "print('hello')\n", "2026-10-25")
         assert missing is not None
         self.assertIn("no ezpkg bootstrap was found", missing)
 
@@ -7032,9 +7032,9 @@ class BootstrapCheckTest(unittest.TestCase):
             if key not in ("EZPKG_SWITCHED", "EZPKG_PYTHONPATH")}
         clean["PYTHONPATH"] = "/somewhere"
         with (unittest.mock.patch.dict(os.environ, clean, clear=True),
-              unittest.mock.patch.object(ezpkg.os, "name", "posix"),
+              unittest.mock.patch.object(os, "name", "posix"),
               unittest.mock.patch.object(
-                  ezpkg.os, "execve", side_effect=SystemExit("exec"))
+                  os, "execve", side_effect=SystemExit("exec"))
               as execve):
             venv.switch([cowsay, mine])
             execve.assert_not_called()
@@ -7062,8 +7062,8 @@ class BootstrapCheckTest(unittest.TestCase):
         done: subprocess.CompletedProcess[str] = (
             subprocess.CompletedProcess([], 3))
         with (unittest.mock.patch.dict(os.environ, clean, clear=True),
-              unittest.mock.patch.object(ezpkg.os, "name", "nt"),
-              unittest.mock.patch.object(ezpkg.subprocess, "run",
+              unittest.mock.patch.object(os, "name", "nt"),
+              unittest.mock.patch.object(subprocess, "run",
                                          return_value=done)):
             with self.assertRaises(SystemExit) as passed:
                 venv.switch([other])
@@ -7173,7 +7173,7 @@ class BootstrapCheckTest(unittest.TestCase):
                          first.stderr)
         self.assertRegex(" ".join(first.stderr.split()),
                          r"`prog\.py` carries the bootstrap `nopip6` \(lines "
-                         r"6-\d+\), but `ezpkg` now has `2026-10-23`\. The next "
+                         r"6-\d+\), but `ezpkg` now has `2026-10-25`\. The next "
                          r"release replaces it\.")
         second: subprocess.CompletedProcess[str] = run()
         self.assertEqual((second.returncode, second.stderr), (0, ""))
@@ -7203,7 +7203,7 @@ class BootstrapCheckTest(unittest.TestCase):
                          (0, "ran\n"), released.stderr)
         flat: str = " ".join(released.stderr.split())
         self.assertRegex(flat, r"This release's copies carry the bootstrap "
-                         r"`2026-10-23` in place of `nopip6` \(lines "
+                         r"`2026-10-25` in place of `nopip6` \(lines "
                          r"\d+-\d+ of `prog\.py`\)\.")
         self.assertIn("`prog.py` 1.0.0 was not released: the declared "
                       "packages did not come from the cache", flat)
@@ -7427,7 +7427,7 @@ class CoverageToolTest(unittest.TestCase):
         finished: subprocess.CompletedProcess[bytes] = (
             subprocess.CompletedProcess([], 0))
         with unittest.mock.patch.object(
-                ezpkg_coverage.subprocess, "run",
+                subprocess, "run",
                 return_value=finished) as run:
             name, status, seconds = ezpkg_coverage.measure_one(
                 SHIPPING, SHIPPING, True, self.root)
@@ -7443,7 +7443,7 @@ class CoverageToolTest(unittest.TestCase):
 
         # The baseline runs everything, so it asks for no narrowing.
         with unittest.mock.patch.object(
-                ezpkg_coverage.subprocess, "run",
+                subprocess, "run",
                 return_value=finished) as run:
             ezpkg_coverage.measure_one(ezpkg_coverage.BASELINE,
                                           "NONE", False, self.root)
@@ -7518,7 +7518,7 @@ class CoverageToolTest(unittest.TestCase):
         with (unittest.mock.patch.object(
                   sys, "argv", ["x", "--per-case", str(directory)]),
               unittest.mock.patch.object(
-                  ezpkg_coverage.subprocess, "run",
+                  subprocess, "run",
                   return_value=subprocess.CompletedProcess([], 0)) as ran):
             self.assertEqual(ezpkg_coverage.main(), 0)
         copy: Path = directory / ezpkg_coverage.SNAPSHOT
@@ -7534,7 +7534,7 @@ class CoverageToolTest(unittest.TestCase):
         with (unittest.mock.patch.object(
                   sys, "argv", ["x", "--compare", str(directory)]),
               unittest.mock.patch.object(
-                  ezpkg_coverage.subprocess, "run",
+                  subprocess, "run",
                   return_value=subprocess.CompletedProcess([], 0)) as ran):
             self.assertEqual(ezpkg_coverage.main(), 0)
         self.assertEqual(ran.call_args.args[0][1],
@@ -7740,7 +7740,7 @@ class MetadataTest(unittest.TestCase):
         requirement: str
         expected: bool
         with unittest.mock.patch.object(
-                ezpkg.importlib.metadata, "version",
+                importlib.metadata, "version",
                 return_value="2.32.3"):
             for requirement, expected in cases.items():
                 with self.subTest(requirement=requirement):
@@ -7756,7 +7756,7 @@ class MetadataTest(unittest.TestCase):
         # Shapes outside the plain-release subset, then odd versions.
         requirement: str
         with unittest.mock.patch.object(
-                ezpkg.importlib.metadata, "version",
+                importlib.metadata, "version",
                 return_value="2.32.3"):
             for requirement in ("requests[socks]", "requests==2.32.*",
                                 "requests===2.32.3", "requests~=2",
@@ -7769,7 +7769,7 @@ class MetadataTest(unittest.TestCase):
         for version in ("2.33.0rc1", "2.32.3.post1", "2.32.3+local"):
             with (self.subTest(version=version),
                   unittest.mock.patch.object(
-                      ezpkg.importlib.metadata, "version",
+                      importlib.metadata, "version",
                       return_value=version)):
                 self.assertFalse(ezpkg.satisfied("requests>=2"))
         self.assertFalse(ezpkg.satisfied("no-such-distribution-here"))
@@ -8379,7 +8379,7 @@ class MetadataTest(unittest.TestCase):
                 self.assertFalse(venv.build_release(
                     program, ezpkg.Settings(
                         version="1.0.0", release=("email", "zipapp", "uv"),
-                        bootstrap="2026-10-23"),
+                        bootstrap="2026-10-25"),
                     [], [], "1.0.0"))
             said: str = " ".join(told.getvalue().split())
             self.assertIn("no `prog-1.0.0.pyz`: cannot bundle tracer: "
@@ -8459,7 +8459,7 @@ class MetadataTest(unittest.TestCase):
                   "keep only one of them")),
                 ('bootstrap = "nopip9"\n',
                  ('`prog.py.toml` line 1, `bootstrap = "nopip9"`: `bootstrap` must be "update" or a '
-                  'published bootstrap, "2026-10-23"')),
+                  'published bootstrap, "2026-10-23" or "2026-10-25"')),
                 ('\nupdate_frequency = "daily"\n',
                  ('`prog.py.toml` line 2, `update_frequency = "daily"`: '
                   "unknown setting `update_frequency` (did you mean "
@@ -8934,10 +8934,10 @@ class MetadataTest(unittest.TestCase):
                     raise OSError("gone")
                 return subprocess.CompletedProcess(command, 0, "abc123\n", "")
 
-            with unittest.mock.patch.object(ezpkg.subprocess, "run",
+            with unittest.mock.patch.object(subprocess, "run",
                                             side_effect=no_status):
                 self.assertEqual(ezpkg.commit_of(program), named)
-            with unittest.mock.patch.object(ezpkg.subprocess, "run",
+            with unittest.mock.patch.object(subprocess, "run",
                                             side_effect=no_git):
                 self.assertEqual(ezpkg.commit_of(program), "hg abc123")
 
@@ -9020,7 +9020,7 @@ class MetadataTest(unittest.TestCase):
         # Paths, settings lines, approvals and imports.
         root: Path = Path(self.enterContext(tempfile.TemporaryDirectory()))
         inside: Path = Path.home() / "x"
-        with unittest.mock.patch.object(ezpkg.os, "name", "nt"):
+        with unittest.mock.patch.object(os, "name", "nt"):
             self.assertEqual(ezpkg.shown(inside), str(inside))
         self.assertEqual(ezpkg.setting_line("x = 1\n", "y"), 0)
         self.assertIsNone(ezpkg.approval_fields(
@@ -9033,7 +9033,7 @@ class MetadataTest(unittest.TestCase):
         self.assertIsNone(ezpkg.uv_version(str(root / "no-uv")))
 
         # A `uv` found only in `~/.local/bin`.
-        with (unittest.mock.patch.object(ezpkg.shutil, "which",
+        with (unittest.mock.patch.object(shutil, "which",
                                          side_effect=[None, "/x/uv"]),
               unittest.mock.patch.object(ezpkg, "uv_version",
                                          return_value=(9, 0))):
@@ -9054,7 +9054,7 @@ class MetadataTest(unittest.TestCase):
             "https://pypi.org/simple/x/", 500, "down", cast(Any, {}), None)
         with (unittest.mock.patch.dict(os.environ, {"PIP_INDEX_URL": "",
                                                     "PIP_EXTRA_INDEX_URL": ""}),
-              unittest.mock.patch.object(ezpkg.urllib.request, "urlopen",
+              unittest.mock.patch.object(urllib.request, "urlopen",
                                          side_effect=refused) as opened):
             self.assertEqual(ezpkg.json_api("pip"),
                              "https://pypi.org/pypi/pip/json")
@@ -9079,7 +9079,7 @@ class MetadataTest(unittest.TestCase):
         body: Path = root / "body.txt"
         body.write_bytes(b"moo")
         failed: urllib.error.URLError = urllib.error.URLError("no certs")
-        with unittest.mock.patch.object(ezpkg.urllib.request, "urlopen",
+        with unittest.mock.patch.object(urllib.request, "urlopen",
                                         side_effect=failed):
             self.assertEqual(ezpkg.fetch_url(body.as_uri()), b"moo")
             with self.assertRaises(urllib.error.URLError):
@@ -9182,7 +9182,7 @@ class MetadataTest(unittest.TestCase):
         """
         # Each state with no name, and the words for it.
         venv: ezpkg.EZPkg = self.developer_here()[1]
-        settings: ezpkg.Settings = ezpkg.Settings(bootstrap="2026-10-23")
+        settings: ezpkg.Settings = ezpkg.Settings(bootstrap="2026-10-25")
         state: str
         said: str
         for state, said in [("edited", r"an\s+edited\s+one"),
@@ -9191,7 +9191,7 @@ class MetadataTest(unittest.TestCase):
                   unittest.mock.patch.object(
                       venv, "bootstrap_status", return_value=(state, "")),
                   self.assertRaisesRegex(
-                      SystemExit, rf"carries\s+{said},\s+not\s+`2026-10-23`")):
+                      SystemExit, rf"carries\s+{said},\s+not\s+`2026-10-25`")):
                 venv.named_bootstrap(settings)
 
     def test_no_program_means_no_release_and_no_check(self) -> None:
@@ -9205,7 +9205,7 @@ class MetadataTest(unittest.TestCase):
             self.assertFalse(venv.release(
                 ezpkg.Settings(version="1.0.0", release=("email",)),
                 [], [], "1.0.0"))
-            venv.refuse_an_edited_bootstrap("2026-10-23")
+            venv.refuse_an_edited_bootstrap("2026-10-25")
 
     def test_settings_that_are_not_utf8_are_refused(self) -> None:
         """TOML is UTF-8, so other bytes stop the run, naming the file."""
@@ -9238,7 +9238,7 @@ class MetadataTest(unittest.TestCase):
         self.assertEqual(venv.seed_from_releases(program), {})
 
         # A record that cannot be written is let go.
-        with unittest.mock.patch.object(ezpkg.tempfile, "mkstemp",
+        with unittest.mock.patch.object(tempfile, "mkstemp",
                                         side_effect=OSError("full")):
             venv.put_stash(dependencies=["x"])
         self.assertEqual(venv.stash()["dependencies"], ["x"])
@@ -9370,7 +9370,7 @@ class MetadataTest(unittest.TestCase):
 
         # A record that cannot be written: said, and said again.
         shutil.rmtree(root / "cache" / "scans")
-        with (unittest.mock.patch.object(ezpkg.tempfile, "mkstemp",
+        with (unittest.mock.patch.object(tempfile, "mkstemp",
                                          side_effect=OSError("full")),
               contextlib.redirect_stderr(io.StringIO())):
             self.assertEqual(len(venv.scan_imports([])), 4)

@@ -52,13 +52,14 @@ import json
 import pathlib
 import subprocess
 import sys
+import urllib.error
 import urllib.request as req
 
 try:  # Do not edit try block!  See https://pypi.org/project/ezpkg/
     s = "find ezpkg"; t = pathlib.Path.home()/".ezpkg"; w = t/"ezpkg.whl"
-    def g(u):  # Fetch u, with curl if this Python has no certificates.
-        try: return req.urlopen(u, None, 60).read()
-        except req.URLError as y: z = y  # As on python.org's macOS Python.
+    def g(u: str) -> bytes:  # Fetch u; with curl if no certificates.
+        try: return bytes(req.urlopen(u, None, 60).read())
+        except urllib.error.URLError as y: z = y  # python.org's macOS.
         try: return subprocess.run(["curl", "-fsSL", u],
                                    capture_output=True, check=True).stdout
         except Exception: raise z from None
@@ -75,7 +76,7 @@ try:  # Do not edit try block!  See https://pypi.org/project/ezpkg/
     if m is None:  # Python imports it straight from the wheel.
         s = "import ezpkg"; sys.path.insert(0, str(w))
         m = importlib.import_module("ezpkg")
-    s = "fetch packages"; m.EZPkg().install(bootstrap="2026-10-23")
+    s = "fetch packages"; m.EZPkg().install(bootstrap="2026-10-25")
 except Exception as x:
     raise SystemExit(f"ezpkg: {s} failed: {x!r}")  # Do not edit try block!
 # End the EZPkg bootstrap.  Your imports go below it.
@@ -329,7 +330,7 @@ release = [
 # "bootstrap" specifies which EZPkg bootstrap the program carries.  Each
 # bootstrap is named by the date it was published ("YYYY-MM-DD").
 # bootstrap = "update"      # A release replaces an older one (default).
-# bootstrap = "2026-10-23"  # Keep exactly this one.
+# bootstrap = "2026-10-25"  # Keep exactly this one.
 
 # The next options are rarely needed.  Most people can stop reading now.
 # They are needed for difficult situations that EZPkg simply cannot figure
