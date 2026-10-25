@@ -88,3 +88,18 @@ Earlier entries are in `History.md`.
   `T.utpat`: Wayne's `pypi` environment, `v*` ruleset and pending
   publisher; Claude's `release.yml` calling `check.yml`; the tag; the
   approved `pypi` run; `./release_check.py pypi`.
+* Rehearsal of `c124b71` (S4.5 committed): release run 40145136428
+  uploaded `0.0.1.dev202610250003`; `release_check.py testpypi`
+  passed; `check.yml` 40145216400 25/25; `email_check.yml`
+  40145218708 13/13.
+* `T.utpat` setup, 2026-10-25 UTC: Wayne added the pypi.org pending
+  publisher (`ezpkg`, `waynegramlich/ezpkg`, `release.yml`, `pypi`).
+  Claude, by `gh api` (Wayne: do as much as possible through `gh`):
+  the `pypi` environment now has Wayne as required reviewer and a
+  `v*` **tag** rule (it had a `v*` branch rule and no reviewer); the
+  tag ruleset `release tags` (id 25802525) forbids creating, moving or
+  deleting `v*` tags except for the repository admin.
+* `release.yml` now ends with a `check` job calling `check.yml`
+  (which gained a `workflow_call` trigger) with the version `build`
+  read from the wheel's name.  Uncommitted and so untried: the next
+  testpypi rehearsal is its test.

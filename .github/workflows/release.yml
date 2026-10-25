@@ -5,7 +5,10 @@
 # `testpypi` uploads a disposable `dev` version of whatever commit is
 # chosen; `pypi` uploads `ezpkg.__version__`, and only from its `v` tag.
 # Each target has a GitHub environment of the same name, whose required
-# reviewer (Wayne) approves the upload.  See `T.wrw` and `T.ffrp`.
+# reviewer (Wayne) approves the upload; `pypi`'s admits only `v*` tags.
+# After the upload, `check.yml` runs the Quick Start as a new user on
+# every system against the version just published (`T.utpat`).  See
+# `T.wrw` and `T.ffrp`.
 
 name: release
 # The title `release_check.py` looks for.
@@ -29,6 +32,8 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.built.outputs.version }}
     steps:
       - uses: actions/checkout@v5
         with:
@@ -43,6 +48,12 @@ jobs:
       - run: mypy .
       - run: python release.py "${{ inputs.target }}" dist
       - run: twine check --strict dist/*
+      # The version is the wheel's, `ezpkg-VERSION-py3-none-any.whl`.
+      - id: built
+        run: |
+          wheel="$(basename dist/ezpkg-*.whl)"
+          version="${wheel#ezpkg-}"
+          echo "version=${version%%-*}" >> "$GITHUB_OUTPUT"
       - uses: actions/upload-artifact@v4
         with:
           name: dist
@@ -65,3 +76,14 @@ jobs:
             ${{ inputs.target == 'testpypi'
                 && 'https://test.pypi.org/legacy/'
                 || 'https://upload.pypi.org/legacy/' }}
+
+  # The version just published, as a new user would get it.
+  check:
+    needs: [build, publish]
+    permissions:
+      contents: read
+      actions: read
+    uses: ./.github/workflows/check.yml
+    with:
+      target: ${{ inputs.target }}
+      version: ${{ needs.build.outputs.version }}
