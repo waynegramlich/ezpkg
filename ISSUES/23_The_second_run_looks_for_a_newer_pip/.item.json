@@ -1,7 +1,7 @@
 {
-  "state": "Open",
+  "state": "Closed",
   "created": "2026-10-25T01:05:00Z",
-  "updated": "2026-10-25T01:05:11Z",
+  "updated": "2026-10-25T01:41:23Z",
   "history": [
     {
       "state": "Pending",
@@ -10,6 +10,10 @@
     {
       "state": "Open",
       "time": "2026-10-25T01:05:11Z"
+    },
+    {
+      "state": "Closed",
+      "time": "2026-10-25T01:41:23Z"
     }
   ],
   "tag": "srlfnp"

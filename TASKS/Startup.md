@@ -1,5 +1,4 @@
-@../ISSUES/23_The_second_run_looks_for_a_newer_pip/Details.md
-@../ISSUES/23_The_second_run_looks_for_a_newer_pip/Context.md
+@../ISSUES/23_The_second_run_looks_for_a_newer_pip/Summary.md
 @7_A_fetch_from_the_real_PyPI/Summary.md
 @7.14_Upload_to_pypi_and_test/Summary.md
 @7.13_README_sweep_before_the_release/Summary.md
@@ -49,5 +48,4 @@
 @6.2_Several_packages_in_one_call/Details.md
 @6.4_Concurrent_installs/Details.md
 @6.5_Coverage_of_child_processes/Details.md
-@6.6_Security_and_who_approves_what/Details.md
 @Closed.md

@@ -5,6 +5,7 @@
 These items are only listed by tag and title; `ai_contexts TAG
 show` shows the rest.
 
+- `T.sawaw` Security, and who approves what
 - `T.p7i` PEP 723 issues
 - `T.pf` `.pth` files
 - `T.cvca` Choose the version control arrangement
