@@ -1,2 +1,4 @@
 @2_Python_Coding_Rules/Python_Coding_Rules.md
 @3_Version_Control_Rules/Version_Control_Rules.md
+@4_GitHub_Setup_Rules/GitHub_Setup_Rules.md
+@5_GitHub_Actions_Rules/GitHub_Actions_Rules.md

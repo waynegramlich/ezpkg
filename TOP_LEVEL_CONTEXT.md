@@ -269,7 +269,14 @@ this order of recommendation; Wayne has not chosen yet:
    wording (`upgrade = true`, `release = "1.0.0"`, `exports`, 0.0.1).
    Rerun `ux/drive.py --ux-dir` into the scratchpad and give Wayne the
    list to read in one batch.
-5. Housekeeping: update `PyPI_Via_GitHub.md` (the approval `comment`,
-   the `listed` wait, the permission check wanting Wayne's "go"),
-   delete old test.pypi.org dev uploads, and read pypi.org's project
-   page as a stranger.
+5. Housekeeping: delete old test.pypi.org dev uploads, and read
+   pypi.org's project page as a stranger.
+
+Also 2026-10-25: `R.gsr` (GitHub Setup Rules) and `R.gar` (GitHub
+Actions Rules) were written from this project's tasks, for the next
+project to go to pypi.org (`ai_contexts`, soon renamed `aicontexts`),
+and are Active here and there.  They replace `PyPI_Via_GitHub.md`,
+which Wayne will retire; leave it until he says.  Every rule here
+takes its source from `../aicontexts/rule_sources/` (Wayne,
+2026-10-25), as `aicontexts`' own rules do, and `aic` links to
+`../aicontexts/`.  `../claude_code_rules/` is no longer used.

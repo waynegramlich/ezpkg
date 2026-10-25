@@ -1,7 +1,7 @@
 {
   "state": "Active",
   "created": "2026-10-10T15:03:01Z",
-  "updated": "2026-10-10T15:03:36Z",
+  "updated": "2026-10-25T17:40:30Z",
   "history": [
     {
       "state": "InActive",
@@ -13,7 +13,7 @@
     }
   ],
   "tag": "vcr",
-  "source": "../claude_code_rules/Version_Control_Rules.md",
+  "source": "../aicontexts/rule_sources/Version_Control_Rules.md",
   "sha256": "250b96c781d5ef9a9453d8c75dd43c252eff8d13510e8e83216373f2a618c6ca",
-  "refreshed": "2026-10-13T17:19:24Z"
+  "refreshed": "2026-10-25T17:40:30Z"
 }
