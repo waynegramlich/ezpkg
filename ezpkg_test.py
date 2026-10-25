@@ -3582,7 +3582,9 @@ class InstallTest(unittest.TestCase):
         self.ask_for(program, "sprocket==2.0.0")
         done: subprocess.CompletedProcess[str] = self.run_program(program)
         self.assertNotEqual(done.returncode, 0)
-        self.assertIn("`prog.py` needs sprocket 2.0.0", done.stderr)
+        self.assertIn("`prog.py` asks for sprocket 2.0.0, but its author "
+                      "approved another version, so `prog.py` did not run.",
+                      " ".join(done.stderr.split()))
         failure: str = " ".join((self.cache_of(program)
                                  / "last_failure.txt").read_text().split())
         self.assertIn("may be the conflict", failure)
@@ -8399,6 +8401,11 @@ class MetadataTest(unittest.TestCase):
                 return_value=["cowsay-6.0.99-cp312-win_amd64.whl"]):
             self.assertEqual(ezpkg.unavailable(text, {"cowsay": "6.0.99"}),
                              ("cowsay 6.0.99", "no wheel"))
+
+        # An entry edited to another version than its pin (S4.5).
+        edited: str = text.replace("install cowsay", "install cowsay==6.1")
+        self.assertEqual(ezpkg.unavailable(edited, {"cowsay": "6.0.99"}),
+                         ("cowsay 6.1", "conflict"))
 
     def test_a_message_names_the_line_that_caused_it(self) -> None:
         """A key's line, an entry's line, its comment dropped."""

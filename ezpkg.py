@@ -2775,8 +2775,10 @@ def unavailable(text: str, pinned: Mapping[str, str]) -> tuple[str, str]:
 
     Returns:
     * (`tuple[str, str]`): The package (with its version, if pinned)
-      and `"gone"` or `"no wheel"`; or two empty strings when it is
-      neither, or cannot be told.
+      and `"gone"` or `"no wheel"`, or `"conflict"` when its entry asks
+      for another version than its approval pins (a copy edited after
+      its release, S4.5); or two empty strings when it is none of
+      these, or cannot be told.
     """
     # `pip`'s own line names the requirement and what it found.  With
     # the approvals as a lock, a pinned version that is gone is instead
@@ -2804,8 +2806,11 @@ def unavailable(text: str, pinned: Mapping[str, str]) -> tuple[str, str]:
     else:
         return "", ""
     name: str = requirement_name(requirement)
-    version: str = (requirement.partition("==")[2]
-                    or pinned.get(normal_name(name), ""))
+    asked: str = requirement.partition("==")[2]
+    locked: str = pinned.get(normal_name(name), "")
+    if clashing is not None and asked and locked and asked != locked:
+        return f"{name} {asked}", "conflict"
+    version: str = asked or locked
     files: list[str] | None = index_files(name)
     if files is None:
         return "", ""
@@ -7981,7 +7986,9 @@ class EZPkg:
         problem on the end user's plate).  The cases are `I.ffspo`'s:
         no network; a pinned version the index no longer has; nothing
         that runs on this machine; a package the author did not approve
-        (`Unapproved`); and anything else, with `pip`'s
+        (`Unapproved`), or a version other than the one approved
+        (`unavailable`'s `"conflict"`, S4.5); and anything else, with
+        `pip`'s
         `ERROR:` reason, never its warnings.
 
         Arguments:
@@ -8026,6 +8033,10 @@ class EZPkg:
                     f"(https://pypi.org) no longer offers, so {name} did "
                     f"not run.  Request an updated version of {name} and "
                     f"try again.{kept}")
+        if why == "conflict":
+            return (f"{name} asks for {package}, but its author approved "
+                    f"another version, so {name} did not run.  Ask its "
+                    f"author for its release, and try again.{kept}")
         if why == "no wheel":
             here: str = (f"Python {sys.version_info[0]}."
                          f"{sys.version_info[1]} on {platform.system()} "

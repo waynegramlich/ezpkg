@@ -12,7 +12,8 @@ Earlier entries are in `History.md`.
   `git push github main`; `gh workflow run release.yml -f
   target=testpypi`; approve via `gh api -X POST
   repos/waynegramlich/ezpkg/actions/runs/R/pending_deployments -F
-  "environment_ids[]=E" -f state=approved` (E from a GET of the same
+  "environment_ids[]=E" -f state=approved -f comment=...` (GitHub
+  refuses it without a `comment` since 2026-10-24; E from a GET of the same
   URL, `.[0].environment.id`); `gh run watch R --exit-status`;
   `./release_check.py testpypi` (its last line names the version);
   `gh workflow run check.yml -f target=testpypi -f version=V`; watch.
@@ -75,3 +76,15 @@ Earlier entries are in `History.md`.
   (`run_as_developer`, S4.2.1); S4.3 left; S4.4 kept (live code).
   After: 342 tests, `ezpkg.py` 17 unrun lines; `ux/drive.py` 29/29.
   Uncommitted, for Wayne's review.
+* Rehearsal of `bee374f` (Wayne's commit after S4.2): release run
+  40142778665 uploaded `0.0.1.dev202610242327`; `release_check.py
+  testpypi` passed; `check.yml` 40143578538 25/25 and
+  `email_check.yml` 40143580763 13/13.  S4.5 (an end user's copy whose entry asks for
+  another version than its approval: its own "conflict" line) is
+  made after that commit; with it the quick suite passed (342 tests,
+  4 skipped), and Wayne commits it.
+* Next: rehearse Wayne's S4.5 commit on test.pypi.org (a fresh dev
+  build; `release_check`, `check.yml`, `email_check.yml`), then
+  `T.utpat`: Wayne's `pypi` environment, `v*` ruleset and pending
+  publisher; Claude's `release.yml` calling `check.yml`; the tag; the
+  approved `pypi` run; `./release_check.py pypi`.
