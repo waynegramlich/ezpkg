@@ -1822,7 +1822,9 @@ class EZPkgTest(unittest.TestCase):
         Python that does not exist yet.  The middle one is right.  When
         `pip` drops a Python, this is what keeps every pasted bootstrap
         on that Python working; see issue `I.bfnprp`.  `EZPkg.own_pip`
-        chooses, from the index `PIP_INDEX_URL` names (`json_api`).
+        chooses, from the index `PIP_INDEX_URL` names (`json_api`), and
+        stamps `last_pip`, so that the second run does not pause to ask
+        for a newer `pip` (Wayne's first pypi.org run, 2026-10-25).
         """
         # Stand-in `pip` wheels, uploaded oldest to newest.
         minor: int = sys.version_info[1]
@@ -1853,9 +1855,16 @@ class EZPkgTest(unittest.TestCase):
         with unittest.mock.patch.dict(os.environ, {
                 "HOME": str(home), "USERPROFILE": str(home),
                 "PIP_INDEX_URL": url}):
-            ezpkg.EZPkg(home / ".ezpkg").own_pip()
+            venv: ezpkg.EZPkg = ezpkg.EZPkg(home / ".ezpkg")
+            venv.own_pip()
         with zipfile.ZipFile(home / ".ezpkg" / "pip.whl") as kept:
             self.assertIn("pip-98.0.dist-info/METADATA", kept.namelist())
+
+        # Just fetched, so the next run does not look for a newer one.
+        self.assertTrue((home / ".ezpkg" / "last_pip").is_file())
+        with unittest.mock.patch.object(ezpkg.subprocess, "run") as ran:
+            self.assertIsNone(venv.refresh_pip())
+        ran.assert_not_called()
 
     def cached_module(self, name: str) -> tuple[Path, Path]:
         """Plant a copy of this module where a case would install it.

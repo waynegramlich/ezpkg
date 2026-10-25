@@ -353,6 +353,12 @@ def main() -> int:
         problems.append(f"no {PROMPT!r} on the terminal")
     if installed != [f"ezpkg-{version}.dist-info"]:
         problems.append(f"installed {installed}, not ezpkg {version}")
+    # A `pip` fetched this run is the newest, so it is stamped as such,
+    # or the second run pauses to look for a newer one (2026-10-25).
+    cache: Path = home / ".ezpkg"
+    if (cache / "pip.whl").is_file() and not (cache / "last_pip").is_file():
+        problems.append("a fresh pip.whl but no last_pip, so the second "
+                        "run would look for a newer pip")
     if problems:
         print(f"release_check: FAILED ({'; '.join(problems)}); "
               f"left {scratch}", file=sys.stderr)

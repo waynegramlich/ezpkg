@@ -74,7 +74,7 @@ from typing import IO, Any, overload
 # The one place the version is written down.  `bootstrap.py` prints it
 # after importing, and `release_wheel` in the test suite writes the
 # wheel's version over it in the copy that it packages.
-__version__: str = "0.0.1"
+__version__: str = "0.0.2"
 
 # How many times `EZPkg.consent` will put the same question, when the
 # answer is neither yes nor no.  Bounded, so that a terminal feeding
@@ -8086,6 +8086,9 @@ class EZPkg:
             part: Path = self.root / "pip.part"
             part.write_bytes(body)
             part.replace(self.root / "pip.whl")  # Atomic, as the bootstrap's.
+            # Just fetched, so `refresh_pip` need not look again until
+            # its interval is up (the second run paused for it, 2026-10-25).
+            (self.root / "last_pip").write_text("", encoding="utf-8")
             self.say(3, f"ezpkg: fetched a private pip, {newest['filename']}")
         except (OSError, ValueError, KeyError, TypeError) as error:
             self.say(3, f"ezpkg: no private pip ({error!r}); using "
