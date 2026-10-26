@@ -38,3 +38,10 @@ over-long comment lines in the rest of `R.pcr` are not part of this.
   target=pypi`) was refused by Claude Code's permission check, so it
   waits for Wayne's typed go.  Then: approve, watch, `./release_check.py
   pypi 0.0.4`, `Summary.md`, close.
+
+## 2026-10-25, published
+
+* After Wayne added the allow rules to `.claude/settings.local.json`,
+  release run 40251281792 (`v0.0.4`, `pypi`) ran, was approved, and
+  passed 28/28; `./release_check.py pypi 0.0.4` passed.
+* `Summary.md` written.  Close at the next commit.
