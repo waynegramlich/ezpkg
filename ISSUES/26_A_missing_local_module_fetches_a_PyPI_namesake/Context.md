@@ -159,3 +159,50 @@ just before the commit; release 0.0.5 by `T.ffrp`'s procedure (pypi
 at Wayne's go).  The committed `ux13`, `ux14`, `ux19` transcripts are
 stale (they now show the question); fresh ones are in the session
 scratchpad `ux.kLYF/`, for Wayne's batch read later.
+
+## 2026-10-26
+
+Wayne: a PyPI name clash needs nothing beyond the development
+question, so the proposed first-sight notice for a module beside the
+program is dropped.  Carrying the program's own modules in a `zipapp`
+(and `local_imports` refusing only `email` and `uv`) moved to
+`T.zcpom~9`, after this issue's 0.0.5 release.
+
+#4 built (Wayne: "fix this now"): `MODULE_CHOICES` (`cups`: `pycups`
+or `cups`; `github`: `PyGithub` or `github`; `xdg`: `pyxdg` or `xdg`)
+and `module_packages`.  `prove_each` proves every candidate;
+`choose` takes the proved list and offers each by number, with the
+brackets naming them (`[1=>pyxdg|2=>xdg|3=>Own]:`; one package keeps
+`[1=>PyPI|2=>Own]:`), and a "Not offered:" line for each refused one
+(PyPI's `pycups` is source only, so `import cups` offers only the
+stranger's `cups`, with that line).  It returns the package chosen,
+`OWN`, or empty; `Discrepancy.replace` puts a choice in the guess's
+place.  `reconcile` and `add_missing` both use it.  Tests are
+in-process (`test_several_packages_are_offered_by_name`,
+`test_reconcile_adds_the_package_chosen`), since Ubuntu's Python has
+its own `xdg` and `cups`, so a child never asks.
+
+Shadowing (Wayne, 2026-10-26: "test and fix this"): a package brings a
+module (`needy` brings `widget`) and the developer then writes a
+`widget.py`.  Probe: the cache comes first on `sys.path`, so `import
+widget` got PyPI's and `widget.py` was silently never used.  Fix:
+`EZPkg.refuse_shadowing`, after `scan_imports` in a developer's run,
+stops when an import of the program's own module (`local_module`:
+beside it or in `local`) is also found in a cached tree on `sys.path`,
+naming each with its line and PyPI's name and version, and asking for
+another name.  Tests `test_a_local_module_shadowed_by_a_package_stops`
+and `test_a_local_listed_module_shadowed_by_a_package_stops`.  Not
+covered: imports inside the program's own modules (`T.zcpom~9`'s
+recursive scan should run the same check).
+
+Question reworded (Wayne, 2026-10-26): "`prog.py` line 43 imports
+`cowsay`.  Where should it come from?", options "1. PyPI's ...", last
+"N. A local `cowsay.py`, a file that has not been created yet", and
+brackets ending `N=>Create Locally`.  That answer creates the empty
+file (no second question), and `unchosen` says "Created an empty
+`cowsay.py` beside `prog.py`; fill it in", with the `local` way for a
+module on an added path.  "Not offered:" became, for a source-only
+package only (`UNCOMPILED`, `prove_each`'s third list): "(PyPI's pycups
+also provides `cups`, but it must be compiled before it can be used,
+and EZPkg does not compile packages.)"; other refused candidates are
+left out silently.  `ux/drive.py`'s `WHICH` follows the new wording.

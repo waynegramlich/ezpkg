@@ -80,7 +80,7 @@ QUESTION: re.Pattern[str] = re.compile(
 DOWNLOAD: str = "and run `prog.py`?"
 # The developer's question about a guess from a module's name alone
 # (`I.mlmfpn`).
-WHICH: str = "Which is it?"
+WHICH: str = "Where should it come from?"
 CONTROL_C: str = "\x03"
 CONTROL_D: str = "\x04"
 # An answer that is never typed, for a question nobody is there to answer.

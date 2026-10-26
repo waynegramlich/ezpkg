@@ -1,5 +1,5 @@
-@../ISSUES/26_A_missing_local_module_fetches_a_PyPI_namesake/Details.md
-@../ISSUES/26_A_missing_local_module_fetches_a_PyPI_namesake/Context.md
+@9_A_zipapp_carries_the_programs_own_modules/Details.md
+@../ISSUES/26_A_missing_local_module_fetches_a_PyPI_namesake/Summary.md
 @../ISSUES/25_Bootstrap_comments_exceed_72_columns/Summary.md
 @../ISSUES/24_The_bootstrap_fails_mypy_strict/Summary.md
 @../ISSUES/23_The_second_run_looks_for_a_newer_pip/Summary.md
@@ -49,5 +49,4 @@
 @6.14_The_shipping_bootstrap/Details.md
 @6.15_No_preinstalled_pip/Details.md
 @6.1_Error_on_a_failed_fetch/Details.md
-@6.2_Several_packages_in_one_call/Details.md
 @Closed.md

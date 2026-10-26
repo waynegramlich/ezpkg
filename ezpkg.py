@@ -43,6 +43,7 @@ import difflib
 import hashlib
 import html
 import importlib
+import importlib.machinery
 import importlib.metadata
 import importlib.util
 import inspect
@@ -74,7 +75,7 @@ from typing import IO, Any, overload
 # The one place the version is written down.  `bootstrap.py` prints it
 # after importing, and `release_wheel` in the test suite writes the
 # wheel's version over it in the copy that it packages.
-__version__: str = "0.0.4"
+__version__: str = "0.0.5"
 
 # How many times `EZPkg.consent` will put the same question, when the
 # answer is neither yes nor no.  Bounded, so that a terminal feeding
@@ -3052,6 +3053,43 @@ MODULE_PACKAGES: dict[str, str] = {
     "yaml": "PyYAML",
 }
 
+# Imports that more than one real package on PyPI provides, the one
+# most people mean first.  Each is the developer's to choose
+# (`EZPkg.choose`), from every one that `prove` passes, since a name
+# alone cannot say which is meant: PyPI's `xdg` is not `pyxdg`'s `xdg`
+# (`I.mlmfpn`, Wayne, 2026-10-26).
+MODULE_CHOICES: dict[str, tuple[str, ...]] = {
+    "cups": ("pycups", "cups"),
+    "github": ("PyGithub", "github"),
+    "xdg": ("pyxdg", "xdg"),
+}
+
+
+# What `EZPkg.choose` returns for a local module, which no package name
+# can be.
+OWN: str = "<own>"
+
+
+# Why `EZPkg.prove` refuses a package that has to be compiled, which
+# `EZPkg.choose` explains in plainer words.
+UNCOMPILED: str = "has no wheel, only source code, so it cannot be installed"
+
+
+def module_packages(module: str) -> list[str]:
+    """Return the packages that may provide an uninstalled module.
+
+    Arguments:
+    * `module` (`str`):
+      A top-level module.
+
+    Returns:
+    * (`list[str]`): `MODULE_CHOICES`' packages, else `MODULE_PACKAGES`'
+      one, else the module's own name; the first is the guess.
+    """
+    # The choices, the well-known name, or the module itself.
+    return list(MODULE_CHOICES.get(module)
+                or (MODULE_PACKAGES.get(module, module),))
+
 
 def providing(module: str, providers: Mapping[str, list[str]]) -> list[str]:
     """Return the installed distributions that provide a top-level module.
@@ -3060,7 +3098,7 @@ def providing(module: str, providers: Mapping[str, list[str]]) -> list[str]:
     `top_level.txt`, and Debian and Ubuntu strip both from the packages
     they install, so here it cannot see that `python3-rich` provides
     `rich` (found by `drive`, 2026-10-17).  Then a distribution named
-    as the module, or as `MODULE_PACKAGES` names it, whose metadata
+    as the module, or as `module_packages` names it, whose metadata
     lists no files at all, is taken to be the one.  One that does list
     its files, and not this module, is not.
 
@@ -3080,7 +3118,7 @@ def providing(module: str, providers: Mapping[str, list[str]]) -> list[str]:
 
     # Otherwise a silent distribution of the expected name.
     name: str
-    for name in dict.fromkeys([MODULE_PACKAGES.get(module, module), module]):
+    for name in dict.fromkeys([*module_packages(module), module]):
         try:
             distribution: importlib.metadata.Distribution = (
                 importlib.metadata.distribution(name))
@@ -4007,6 +4045,30 @@ class Discrepancy:
                       | {normal_name(requirement_name(package))
                          for package in added})
 
+    def replace(self, package: str, chosen: str) -> str:
+        """Put the package the developer chose in place of a guess.
+
+        Arguments:
+        * `package` (`str`):
+          A guessed addition, perhaps with a marker.
+        * `chosen` (`str`):
+          The package chosen instead (`EZPkg.choose`).
+
+        Returns:
+        * (`str`): The new addition, with the guess's marker.
+        """
+        # The same marker, in the same places.
+        marker: str = package.partition(";")[2].strip()
+        new: str = chosen + (f"; {marker}" if marker else "")
+        if new != package:
+            self.order = [(kind, index, new if name == package else name)
+                          for kind, index, name in self.order]
+            self.additions = [
+                (line, module, new if name == package else name)
+                for line, module, name in self.additions]
+            self.guessed.add(new)
+        return new
+
     def target(self) -> list[str]:
         """Return the `dependencies` with every change made.
 
@@ -4835,8 +4897,7 @@ class EZPkg:
             return f"PyPI has none called `{package}`"
         if files is not None and not any(
                 one.endswith(".whl") for one in files):
-            return (f'the index\'s "{package}" has no wheel, only '
-                    f'source code, so it cannot be installed')
+            return f'the index\'s "{package}" {UNCOMPILED}'
 
         # Then the wheel itself, with whatever it needs.
         arrived: list[Path] = []
@@ -4863,6 +4924,36 @@ class EZPkg:
             holding: Path
             for holding in {one.parent for one in arrived}:
                 shutil.rmtree(holding, ignore_errors=True)
+
+    def prove_each(self, module: str, argv: Sequence[str] = ()
+                   ) -> tuple[list[str], list[str], list[str]]:
+        """Prove each package `module_packages` names for a module.
+
+        Arguments:
+        * `module` (`str`):
+          The top-level module the program imports.
+        * `argv` (`Sequence[str]`):
+          Extra arguments for `pip`, as `install` takes them.
+
+        Returns:
+        * (`tuple[list[str], list[str], list[str]]`): The packages that
+          provide it, in order; why each of the others does not
+          (`prove`); and those of the others that have to be compiled.
+        """
+        # Every one, so the developer is offered all that would do.
+        proved: list[str] = []
+        refused: list[str] = []
+        compiled: list[str] = []
+        package: str
+        for package in module_packages(module):
+            problem: str = self.prove(package, module, argv)
+            if not problem:
+                proved.append(package)
+                continue
+            refused.append(problem)
+            if problem.endswith(UNCOMPILED):
+                compiled.append(package)
+        return proved, refused, compiled
 
     def reconcile(self, found: Discrepancy, asking: list[str],
                   argv: Sequence[str], record: Path, kept: dict[str, Any],
@@ -4912,32 +5003,35 @@ class EZPkg:
         package: str
         for line, module, package in found.additions:
             # A package for another platform cannot be fetched here.
-            problem: str = (
-                self.prove(requirement_name(package), module, argv)
-                if package in found.guessed and holds_here(package)
-                else "")
-            if problem:
+            # Otherwise each of a guess's packages must provide it.
+            guessing: bool = package in found.guessed and holds_here(package)
+            proved: list[str]
+            refused: list[str]
+            compiled: list[str]
+            proved, refused, compiled = (
+                self.prove_each(module, argv) if guessing else ([], [], []))
+            if guessing and not proved:
                 doubts.append(
                     f"`{program.name}` line {line}: `import {module}` "
-                    f"needs a package, but {problem}.  Please check the "
-                    f"spelling, or name the right package in "
+                    f"needs a package, but {'; '.join(refused)}.  Please "
+                    f"check the spelling, or name the right package in "
                     + f"`dependencies` in `{program.name}.toml`.")
                 self.reported.add(module)
                 continue
 
-            # A guess from the module's name alone is the developer's
-            # to choose (`I.mlmfpn`).
-            if (package in found.guessed and holds_here(package)
-                    and module not in MODULE_PACKAGES):
+            # A guess from the module's name alone, or from several
+            # packages, is the developer's to choose (`I.mlmfpn`).
+            if guessing and module not in MODULE_PACKAGES:
                 wanting: str = (f"`{program.name}` line {line} imports "
                                 f"`{module}`")
-                guessed: str = requirement_name(package)
-                choice: str = self.choose(program, wanting, module, guessed)
-                if choice != "fetch":
+                choice: str = self.choose(program, wanting, module, proved,
+                                          compiled)
+                if choice in ("", OWN):
                     doubts.append(self.unchosen(program, wanting, module,
-                                                guessed, choice))
+                                                proved, choice))
                     self.reported.add(module)
                     continue
+                package = found.replace(package, choice)
             modules[package] = module
 
         # An entry nothing imports goes once recent runs show it unused.
@@ -5281,10 +5375,12 @@ class EZPkg:
         provides it, if there is one.  Otherwise it needs a package,
         unless it is optional (`every_import`), the standard library or
         local (`exempt`), or covered by the approvals; that package is
-        named from the installed metadata, else `MODULE_PACKAGES`, else
-        the module's own name.  An entry no import places is unused if
-        its package is installed here, so that its modules are known,
-        and it has no comment, which keeps it.  See `T.kdaiis`.
+        named from the installed metadata, else guessed by
+        `module_packages` (the first of `MODULE_CHOICES`, else
+        `MODULE_PACKAGES`, else the module's own name).  An entry no
+        import places is unused if its package is installed here, so
+        that its modules are known, and it has no comment, which keeps
+        it.  See `T.kdaiis`.
 
         Arguments:
         * `program` (`Path`):
@@ -5360,9 +5456,14 @@ class EZPkg:
                     spec = None
                 if spec is not None:
                     continue
-                guess: str = MODULE_PACKAGES.get(module, module)
-                if normal_name(guess) in names:
-                    index = names.index(normal_name(guess))
+                # Any of its packages declared already places it.
+                candidates: list[str] = module_packages(module)
+                guess: str = candidates[0]
+                declared: str | None = next(
+                    (normal_name(one) for one in candidates
+                     if normal_name(one) in names), None)
+                if declared is not None:
+                    index = names.index(declared)
                 else:
                     packages = [guess]
                     normal = {normal_name(guess)}
@@ -6018,6 +6119,79 @@ class EZPkg:
         if settings is not None and module in settings.local:
             return "listed in " + self.setting_at("local", module)
         return ""
+
+    def refuse_shadowing(self) -> None:
+        """Stop a developer's run whose own module shares a package's name.
+
+        A package can bring a module the developer never asked for, such
+        as `bar`'s `foo`, and the developer may then write a `foo.py` of
+        their own.  Python loads only one `foo` in a run, and the cache
+        comes first on `sys.path` (`provide`), so the program's `import
+        foo` gets PyPI's and `foo.py` is silently never used; a module
+        in `local` the program puts first itself is the other way
+        round, and the package gets the program's.  Either way something
+        gets the wrong `foo`, and only a new name mends it (Wayne,
+        2026-10-26, `I.mlmfpn`).
+
+        Raises:
+        * `SystemExit`:
+          Naming every such import, when there is one.
+        """
+        # The program's imports of its own modules.
+        source: tuple[Path, str] | None = main_source()
+        if source is None:
+            return
+        program: Path = source[0]
+        try:
+            imports: list[tuple[str, int, bool]] = every_import(source[1])
+        except SyntaxError:
+            return
+
+        # Each one a cached package on `sys.path` also provides.
+        trees: list[str] = [
+            entry for entry in sys.path
+            if Path(entry).parent == self.root / "versions"]
+        clashes: list[str] = []
+        seen: set[str] = set()
+        module: str
+        line: int
+        for module, line, _ in imports:
+            where: str = self.local_module(program, module)
+            if not where or module in seen:
+                continue
+            seen.add(module)
+            spec: importlib.machinery.ModuleSpec | None = (
+                importlib.machinery.PathFinder.find_spec(module, trees))
+            if spec is None:
+                continue
+            # A namespace package has no `origin`, only its locations.
+            places: list[str] = list(spec.submodule_search_locations or [])
+            if not spec.origin and not places:
+                continue
+            tree: Path = Path(spec.origin or places[0])
+            while (tree.parent != self.root / "versions"
+                   and tree != tree.parent):
+                tree = tree.parent
+            info: Path | None = next(tree.glob("*.dist-info"), None)
+            title: str = (" ".join(info.name[:-len(".dist-info")]
+                                   .split("-", 1))
+                          if info is not None else tree.name)
+            which: str = ("PyPI's, so the program's own is never used"
+                          if "beside" in where else
+                          "whichever comes first, so the program or the "
+                          "package gets the wrong one")
+            if "beside" not in where:
+                where += ","
+            clashes.append(
+                f"`{program.name}` line {line} imports `{module}`, which "
+                f"is both {where} and a module of PyPI's {title}, which "
+                f"came with `{program.name}`'s packages.  Python loads "
+                f"only one `{module}` in a run, {which}.")
+        if clashes:
+            raise SystemExit(wrapped(
+                "  ".join(clashes) + "  Please give the program's own "
+                + ("module" if len(clashes) == 1 else "modules")
+                + " another name.", columns(sys.stderr)))
 
     @staticmethod
     def module_origin(module: str) -> str:
@@ -6940,22 +7114,25 @@ class EZPkg:
         return False
 
     def choose(self, program: Path, wanting: str, module: str,
-               package: str) -> str:
-        """Ask a developer what a module guessed only by its name is.
+               packages: Sequence[str], compiled: Sequence[str] = ()) -> str:
+        """Ask a developer where a guessed module should come from.
 
         A module that is not beside the program, not installed, and not
         in `MODULE_PACKAGES` is guessed to be the package of its name,
-        and `prove` shows that package provides it.  That is no proof it
-        is the one meant: it may be the program's own module, missing
-        from a scratch copy, and a stranger's package of the same name
-        would run unasked (`I.mlmfpn`, the reporter's `scplot`).  So the
-        developer, who is at the terminal, chooses from every option,
-        numbered (Wayne, 2026-10-25), which is a developer's only
-        question.  As for `consent`, there is no default, a typo asks
-        again, and no answer, or no terminal (or a set `CI`), is nobody
-        to choose: nothing is fetched.  A `1` is remembered in the
-        stash's `chosen`, so the same module is never asked about again,
-        even after its import has gone and come back.
+        or one of `MODULE_CHOICES`' packages, and `prove` shows each one
+        offered provides it.  That is no proof it is the one meant: it
+        may be the program's own module, missing from a scratch copy,
+        and a stranger's package of the same name would run unasked
+        (`I.mlmfpn`, the reporter's `scplot`).  So the developer, who is
+        at the terminal, chooses from every option, numbered (Wayne,
+        2026-10-25), which is a developer's only question.  The last
+        option creates an empty `MODULE.py` beside the program, for the
+        developer to fill in (Wayne, 2026-10-26).  As for `consent`,
+        there is no default, a typo asks again, and no answer, or no
+        terminal (or a set `CI`), is nobody to choose: nothing is
+        fetched.  A package chosen is remembered in the stash's
+        `chosen`, so the same module is never asked about again, even
+        after its import has gone and come back.
 
         Arguments:
         * `program` (`Path`):
@@ -6965,40 +7142,62 @@ class EZPkg:
           ``prog.py` line 12 imports `scplot``.
         * `module` (`str`):
           The module.
-        * `package` (`str`):
-          The guessed package, which `prove` accepted.
+        * `packages` (`Sequence[str]`):
+          The packages offered, which `prove` accepted, the guess first.
+        * `compiled` (`Sequence[str]`):
+          Packages that provide it too, but have to be compiled, which
+          `EZPkg` never does, so they are said and not offered.
 
         Returns:
-        * (`str`): `fetch` for the package, `own` for the program's own
-          module, or empty when nobody chose.
+        * (`str`): The package chosen, `OWN` for a local file (created,
+          if it could be), or empty when nobody chose.
         """
         # Chosen before, or nobody to choose.
         held: object = self.stash().get("chosen")
         chosen: dict[str, str] = held if isinstance(held, dict) else {}
-        if chosen.get(module) == normal_name(package):
-            return "fetch"
+        package: str
+        for package in packages:
+            if chosen.get(module) == normal_name(package):
+                return package
         opened: tuple[IO[str], IO[str]] | None = self.terminal()
         if opened is None:
             return ""
 
-        # The options, numbered, each said in full.
-        title: str
-        summary: str
-        title, summary = self.proved.get(normal_name(package),
-                                         (package, ""))
+        # The options, numbered, each said in full, then what cannot be
+        # offered.  One package is PyPI's; several are named.
         width: int
         writer: IO[str]
         reader: IO[str]
         writer, reader = opened
         width = columns(writer)
-        options: list[str] = [
-            cut(f"1. PyPI's {title}" + (f": {summary}" if summary else ""),
-                width),
-            f"2. A module of `{program.name}`'s own"]
+        options: list[str] = []
+        for package in packages:
+            title: str
+            summary: str
+            title, summary = self.proved.get(normal_name(package),
+                                             (package, ""))
+            options.append(cut(
+                f"{len(options) + 1}. PyPI's {title}"
+                + (f": {summary}" if summary else ""), width))
+        local: str = str(len(packages) + 1)
+        options.append(f"{local}. A local `{module}.py`, a file that has "
+                       f"not been created yet")
+        uncompiled: str = "".join(
+            wrapped(f"(PyPI's {name} also provides `{module}`, but it must "
+                    f"be compiled before it can be used, and EZPkg does "
+                    f"not compile packages.)", width) + "\n"
+            for name in compiled)
+        keys: list[str] = (["PyPI"] if len(packages) == 1
+                           else [requirement_name(one) for one in packages])
+        brackets: str = "|".join(
+            [f"{number}=>{key}" for number, key in enumerate(keys, 1)]
+            + [f"{local}=>Create Locally"])
         question: str = (
-            wrapped(f"{wanting}, which is neither beside "
-                    f"`{program.name}` nor installed.  Which is it?", width)
-            + "\n" + "\n".join(options) + "\n[1=>PyPI|2=>Own]: ")
+            wrapped(f"{wanting}.  Where should it come from?", width)
+            + "\n" + "\n".join(options) + "\n" + uncompiled
+            + f"[{brackets}]: ")
+        numbers: list[str] = [str(number)
+                              for number in range(1, len(packages) + 2)]
         answer: str
         typos: int = 0
         with writer, reader:
@@ -7012,48 +7211,70 @@ class EZPkg:
                     print(f"{question}{answer.strip()}", file=sys.stderr)
 
                 # A terminal that has gone away is nobody; an empty line
-                # asks again; anything else but 1 or 2 is a typo.
+                # asks again; anything else but a number offered is a
+                # typo.
                 if not answer:
                     writer.write("\n")
                     return ""
                 answer = answer.strip()
                 if not answer:
                     continue
-                if answer == "1":
+                if answer == local:
+                    # The answer is the consent; `unchosen` says whether
+                    # the file could be made.
+                    try:
+                        (program.parent / f"{module}.py").write_text(
+                            "", encoding="utf-8")
+                    except OSError:
+                        pass
+                    importlib.invalidate_caches()
+                    return OWN
+                if answer in numbers:
+                    package = packages[int(answer) - 1]
                     self.put_stash(chosen={**chosen,
                                            module: normal_name(package)})
-                    return "fetch"
-                if answer == "2":
-                    return "own"
+                    return package
                 typos += 1
-                writer.write("Please answer 1 or 2.\n")
+                writer.write(f"Please answer {', '.join(numbers[:-1])} "
+                             f"or {numbers[-1]}.\n")
         return ""
 
     def unchosen(self, program: Path, wanting: str, module: str,
-                 package: str, choice: str) -> str:
+                 packages: Sequence[str], choice: str) -> str:
         """Say why a guessed package was not fetched, after `choose`.
 
         Arguments:
-        * `program`, `wanting`, `module`, `package` (`str`):
+        * `program`, `wanting`, `module`, `packages`:
           As `choose` takes them.
         * `choice` (`str`):
-          What `choose` returned, `own` or empty.
+          What `choose` returned, `OWN` or empty.
 
         Returns:
         * (`str`): One message, saying how to choose by hand.
         """
-        # The program's own, or nobody chose.
+        # A local file, made or not, or nobody chose.
         own: str = (f"put `{module}.py` beside `{program.name}`, or list "
                     f"`{module}` in `local` in `{program.name}.toml`")
-        if choice == "own":
-            return (f"{wanting}, `{program.name}`'s own module, so nothing "
+        if choice == OWN and (program.parent / f"{module}.py").is_file():
+            return (f"Created an empty `{module}.py` beside "
+                    f"`{program.name}`; fill it in.  (If `{module}` lives "
+                    f"in a directory `{program.name}` adds to `sys.path` "
+                    f"itself, delete `{module}.py` and list `{module}` in "
+                    f"`local` in `{program.name}.toml` instead.)")
+        if choice == OWN:
+            return (f"{wanting}, a local module, but `{module}.py` could "
+                    f"not be created beside `{program.name}`, so nothing "
                     f"was fetched: {own}.")
-        title: str = self.proved.get(normal_name(package), (package, ""))[0]
+        titles: list[str] = [
+            self.proved.get(normal_name(package), (package, ""))[0]
+            for package in packages]
+        names: list[str] = [f'"{package}"' for package in packages]
         return (f"{wanting}, which is neither beside `{program.name}` nor "
                 f"installed, so nothing was fetched without asking.  If it "
-                f'means PyPI\'s {title}, add "{package}" to `dependencies` '
-                f"in `{program.name}.toml`; if it is `{program.name}`'s "
-                f"own, {own}.")
+                f"means PyPI's {' or '.join(titles)}, add "
+                f"{' or '.join(names)} to `dependencies` in "
+                f"`{program.name}.toml`; if it is `{program.name}`'s own, "
+                f"{own}.")
 
     def gate(self, wheels: Sequence[Path], asking: Sequence[str] = (),
              new: Sequence[Path] | None = None) -> None:
@@ -8411,6 +8632,7 @@ class EZPkg:
         if settings is not None:
             asked = self.sync_dependencies(asked, argv)
             self.scan_imports(asked)
+            self.refuse_shadowing()
 
         # A new `version` value builds a release, after which the
         # program runs as usual (`release`).
@@ -8459,8 +8681,8 @@ class EZPkg:
 
         A module the program loads without importing it in its source,
         such as `requests`'s `socks` for a SOCKS proxy, or a plugin, is
-        found the way an import's package is (`MODULE_PACKAGES`, else
-        the module's own name, then `prove`), added to the stash's
+        found the way an import's package is (`module_packages`, then
+        `prove_each`, then `choose`), added to the stash's
         `dependencies`, and said in one line; the developer runs the
         program again.  It is not restarted, since it may already have
         done something (Wayne, 2026-10-22).  A module the source imports
@@ -8493,14 +8715,18 @@ class EZPkg:
                                   for entry in self.declared()}
         except (SyntaxError, ValueError, TypeError):
             return False
-        package: str = MODULE_PACKAGES.get(top, top)
-        if normal_name(package) in declared:
+        if declared & {normal_name(one) for one in module_packages(top)}:
             return False
-        problem: str = self.prove(package, top)
-        if problem:
+        proved: list[str]
+        refused: list[str]
+        compiled: list[str]
+        proved, refused, compiled = self.prove_each(top)
+        if not proved:
             self.say(0, f"`{program.name}` stopped for want of `{top}`, "
-                     f"and no package for it was added: {problem}.")
+                     f"and no package for it was added: "
+                     f"{'; '.join(refused)}.")
             return False
+        package: str = proved[0]
 
         # Who wanted it: the last frame outside the import machinery.
         wanting: str = program.name
@@ -8513,14 +8739,14 @@ class EZPkg:
                 wanting = program.name
             trace = trace.tb_next
 
-        # A guess from the module's name alone is the developer's to
-        # choose (`I.mlmfpn`).
+        # A guess from the module's name alone, or from several
+        # packages, is the developer's to choose (`I.mlmfpn`).
         if top not in MODULE_PACKAGES:
             needing: str = f"`{wanting}` needed `{top}`"
-            choice: str = self.choose(program, needing, top, package)
-            if choice != "fetch":
-                self.say(0, self.unchosen(program, needing, top, package,
-                                          choice))
+            package = self.choose(program, needing, top, proved, compiled)
+            if package in ("", OWN):
+                self.say(0, self.unchosen(program, needing, top, proved,
+                                          package))
                 return False
         held: object = self.stash().get("dependencies")
         self.put_stash(dependencies=[

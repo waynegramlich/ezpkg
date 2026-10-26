@@ -5,6 +5,7 @@
 These items are only listed by tag and title; `ai_contexts TAG
 show` shows the rest.
 
+- `T.spioc` Several packages in one call
 - `T.ci` Concurrent installs
 - `T.ccp` Coverage of child processes
 - `T.sawaw` Security, and who approves what

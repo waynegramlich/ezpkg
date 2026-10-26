@@ -6687,33 +6687,37 @@ class InstallTest(unittest.TestCase):
         """The developer chooses among the options, numbered.
 
         `1` is PyPI's package, with its version and summary, which is
-        then added for good; `2` is the program's own module, for which
-        nothing is fetched (Wayne, 2026-10-25, `I.mlmfpn`).
+        then added for good; `2` creates an empty local `sprocket.py`,
+        and nothing is fetched (Wayne, 2026-10-25 and 2026-10-26,
+        `I.mlmfpn`).
         """
-        # `2` first: the program's own, so nothing is fetched.
+        # `2` first: an empty `sprocket.py`, and nothing is fetched.
         program: Path = self.synced_program(
             "chosen", '["widget"]',
             "import sprocket\nprint(sprocket.__version__)")
         seen: str = self.answer_on_a_terminal(program, b"2\n")
         flat: str = " ".join(seen.split())
         self.assertIn(
-            "`prog.py` line 12 imports `sprocket`, which is neither beside "
-            "`prog.py` nor installed. Which is it? 1. PyPI's sprocket "
-            "2.0.0: A versioned throwaway. 2. A module of `prog.py`'s own "
-            "[1=>PyPI|2=>Own]:", flat)
-        self.assertIn("`prog.py` line 12 imports `sprocket`, `prog.py`'s "
-                      "own module, so nothing was fetched: put "
-                      "`sprocket.py` beside `prog.py`, or list `sprocket` "
-                      "in `local` in `prog.py.toml`.", flat)
+            "`prog.py` line 12 imports `sprocket`. Where should it come "
+            "from? 1. PyPI's sprocket 2.0.0: A versioned throwaway. 2. A "
+            "local `sprocket.py`, a file that has not been created yet "
+            "[1=>PyPI|2=>Create Locally]:", flat)
+        self.assertIn("Created an empty `sprocket.py` beside `prog.py`; "
+                      "fill it in.", flat)
+        local: Path = program.parent / "sprocket.py"
+        self.assertEqual(local.read_text(), "")
+        self.assertIn("has no attribute '__version__'", flat)
         self.assertEqual(self.declared_now(program), ["widget"])
 
-        # A typo asks again, and `1` fetches it, added for good.
+        # Without it, a typo asks again, and `1` fetches it, added for
+        # good.
+        local.unlink()
         seen = self.answer_on_a_terminal(program, b"3\n1\n")
         self.assertIn("Please answer 1 or 2.", seen)
         self.assertEqual(seen.split()[-2:], ["2.0.0", "ran"])
         self.assertIn("sprocket", " ".join(self.declared_now(program)))
         seen = self.answer_on_a_terminal(program, b"")
-        self.assertNotIn("Which is it?", seen)
+        self.assertNotIn("Where should it come from?", seen)
         self.assertEqual(seen.split()[-2:], ["2.0.0", "ran"])
 
     def test_a_module_loaded_at_run_time_is_chosen_too(self) -> None:
@@ -6761,6 +6765,66 @@ class InstallTest(unittest.TestCase):
         self.assertEqual(self.declared_now(program), ["widget"])
         self.assertFalse(list((program.parent / "cache" / "versions")
                               .glob("sprocket-*")))
+
+    def test_a_local_module_shadowed_by_a_package_stops(self) -> None:
+        """A module of the program's own that a package also brings.
+
+        `needy` brings `widget`, which the program imports; then the
+        developer writes a `widget.py` of their own.  The cache comes
+        first on `sys.path`, so `import widget` got PyPI's and the file
+        was silently never used (seen 2026-10-26); now the run stops and
+        says to rename it (Wayne, `I.mlmfpn`).  Renamed, it runs.
+        """
+        # `widget.py` beside the program: stopped, before it runs.
+        program: Path = self.synced_program("shadow", '["needy"]',
+                                            "import needy")
+        own: Path = program.parent / "widget.py"
+        own.write_text('print("own widget")\n')
+        done: subprocess.CompletedProcess[str] = self.run_program(program)
+        self.assertNotEqual(done.returncode, 0)
+        self.assertNotIn("ran", done.stdout)
+        self.assertIn(
+            "`prog.py` line 11 imports `widget`, which is both `widget.py` "
+            "beside it and a module of PyPI's widget 1.2.3, which came "
+            "with `prog.py`'s packages. Python loads only one `widget` in "
+            "a run, PyPI's, so the program's own is never used. Please "
+            "give the program's own module another name.",
+            " ".join(done.stderr.split()))
+
+        # Gone, and the program runs as before.
+        own.unlink()
+        done = self.run_program(program)
+        self.assertEqual(done.returncode, 0, done.stderr[-400:])
+        self.assertEqual(done.stdout.split(), ["ran"])
+
+    def test_a_local_listed_module_shadowed_by_a_package_stops(
+            self) -> None:
+        """A module in `local` that a package also brings stops too.
+
+        The program puts its `lib/` first itself, so there the package
+        would get the program's `widget` (`I.mlmfpn`).
+        """
+        # `lib/widget.py`, listed in `local`.
+        program: Path = self.synced_program(
+            "shadowlisted", '["needy"]',
+            "import needy\nimport sys\nimport pathlib\n"
+            "sys.path.insert(0, str(pathlib.Path(__file__).parent"
+            " / 'lib'))")
+        self.developer_settings(program,
+                                'verbosity = "low"\nlocal = ["widget"]\n')
+        (program.parent / "lib").mkdir()
+        (program.parent / "lib" / "widget.py").write_text(
+            'print("own widget")\n')
+        done: subprocess.CompletedProcess[str] = self.run_program(program)
+        self.assertNotEqual(done.returncode, 0)
+        self.assertIn(
+            "`prog.py` line 11 imports `widget`, which is both listed in "
+            "`prog.py.toml` line 2, `local = [\"widget\"]`, and a module of "
+            "PyPI's widget 1.2.3, "
+            "which came with `prog.py`'s packages. Python loads only one "
+            "`widget` in a run, whichever comes first, so the program or "
+            "the package gets the wrong one.",
+            " ".join(done.stderr.split()))
 
     def test_a_local_module_on_an_added_path(self) -> None:
         """A local module the program finds by adding to `sys.path`.
@@ -8412,7 +8476,7 @@ class MetadataTest(unittest.TestCase):
                       ezpkg.EZPkg, "put_stash") as put,
                   contextlib.redirect_stderr(told)):
                 self.assertTrue(venv.add_missing(program, error, None))
-                proved.assert_called_once_with("PySocks", "socks")
+                proved.assert_called_once_with("PySocks", "socks", ())
                 put.assert_called_once_with(
                     dependencies=["cowsay", "PySocks"])
                 self.assertIn("`prog.py` needed `socks`, so `ezpkg` added "
@@ -9676,6 +9740,105 @@ class MetadataTest(unittest.TestCase):
                                   set())
         return venv, run
 
+    def test_several_packages_are_offered_by_name(self) -> None:
+        """An import that several packages provide offers each of them.
+
+        `MODULE_CHOICES` names `pyxdg` and `xdg` for `xdg`, so the
+        developer chooses one by its number, or a local file, and a
+        package that has to be compiled is said, not offered (Wayne,
+        2026-10-26,
+        `I.mlmfpn`).  In this process, since Ubuntu's Python has its own
+        `xdg` and `cups`, so a child would never ask.
+        """
+        # A typo asks again; `2` is the second, kept for good.
+        program: Path
+        venv: ezpkg.EZPkg
+        program, venv = self.developer_here()
+        venv.proved = {"pyxdg": ("pyxdg 0.28", "The freedesktop xdg."),
+                       "xdg": ("xdg 6.0.0", "A stranger's xdg.")}
+        wanting: str = "`prog.py` line 12 imports `xdg`"
+        spoken: _KeptStringIO = _KeptStringIO()
+        self.enterContext(contextlib.redirect_stderr(io.StringIO()))
+        with unittest.mock.patch.object(
+                ezpkg.EZPkg, "terminal",
+                return_value=(spoken, _KeptStringIO("4\n2\n"))):
+            self.assertEqual(venv.choose(
+                program, wanting, "xdg", ["pyxdg", "xdg"], ["pyxdg2"]),
+                "xdg")
+        flat: str = " ".join(spoken.getvalue().split())
+        self.assertIn(
+            "`prog.py` line 12 imports `xdg`. Where should it come from? "
+            "1. PyPI's pyxdg 0.28: The freedesktop xdg. 2. PyPI's xdg "
+            "6.0.0: A stranger's xdg. 3. A local `xdg.py`, a file that "
+            "has not been created yet (PyPI's pyxdg2 also provides `xdg`, "
+            "but it must be compiled before it can be used, and EZPkg "
+            "does not compile packages.) "
+            "[1=>pyxdg|2=>xdg|3=>Create Locally]:", flat)
+        self.assertIn("Please answer 1, 2 or 3.", flat)
+        with unittest.mock.patch.object(ezpkg.EZPkg, "terminal",
+                                        return_value=None):
+            self.assertEqual(venv.choose(program, wanting, "xdg",
+                                         ["pyxdg", "xdg"]), "xdg")
+
+        # `3` creates a local file, and choosing by hand names both.
+        with unittest.mock.patch.object(
+                ezpkg.EZPkg, "terminal",
+                return_value=(_KeptStringIO(), _KeptStringIO("3\n"))):
+            self.assertEqual(venv.choose(program, wanting, "xdgx",
+                                         ["pyxdg", "xdg"]), ezpkg.OWN)
+        self.assertEqual((program.parent / "xdgx.py").read_text(), "")
+        self.assertIn(
+            "If it means PyPI's pyxdg 0.28 or xdg 6.0.0, add \"pyxdg\" or "
+            '"xdg" to `dependencies` in `prog.py.toml`;',
+            venv.unchosen(program, wanting, "xdg", ["pyxdg", "xdg"], ""))
+
+    def test_reconcile_adds_the_package_chosen(self) -> None:
+        """`reconcile` proves every choice and adds the one chosen.
+
+        The guess is `MODULE_CHOICES`' first, `pyxdg`; the developer
+        chose `xdg`, which takes its place (`I.mlmfpn`).
+        """
+        # `xdg` not installed here, both packages provide it.
+        program: Path
+        venv: ezpkg.EZPkg
+        program, venv = self.developer_here()
+        program.write_text(program.read_text() + "import xdg\n")
+        finding: Callable[..., Any] = importlib.util.find_spec
+        self.enterContext(unittest.mock.patch.object(
+            importlib.util, "find_spec", side_effect=lambda name, *rest: (
+                None if name == "xdg" else finding(name, *rest))))
+        self.enterContext(unittest.mock.patch.object(
+            importlib.metadata, "packages_distributions",
+            return_value={"widget": ["widget"]}))
+        self.enterContext(unittest.mock.patch.object(
+            ezpkg, "providing", side_effect=lambda module, _: (
+                [] if module == "xdg" else [module])))
+        proving: unittest.mock.MagicMock = self.enterContext(
+            unittest.mock.patch.object(venv, "prove", return_value=""))
+        choosing: unittest.mock.MagicMock = self.enterContext(
+            unittest.mock.patch.object(venv, "choose", return_value="xdg"))
+        for name in ("provide", "too_new", "remember"):
+            self.enterContext(unittest.mock.patch.object(
+                venv, name, return_value=None if name != "too_new"
+                else False))
+        self.enterContext(unittest.mock.patch.object(
+            importlib.metadata, "version", return_value="6.0.0"))
+        found: ezpkg.Discrepancy | None = venv.discrepancy(
+            program, program.read_text(), ["widget"])
+        assert found is not None
+        self.assertEqual(found.additions[0][1:], ("xdg", "pyxdg"))
+        record: Path
+        kept: dict[str, Any]
+        record, kept = venv.development_record(program)
+        with contextlib.redirect_stderr(io.StringIO()):
+            self.assertEqual(
+                venv.reconcile(found, ["widget"], (), record, kept, "fp",
+                               set()),
+                ["widget", "xdg>=6.0.0,<7"])
+        self.assertEqual([call.args[0] for call in proving.call_args_list],
+                         ["pyxdg", "xdg"])
+        self.assertEqual(choosing.call_args.args[3:], (["pyxdg", "xdg"], []))
+
     def test_reconcile_when_a_fetch_or_an_edit_fails(self) -> None:
         """A failed fetch leaves `dependencies` alone and says why.
 
@@ -9689,7 +9852,7 @@ class MetadataTest(unittest.TestCase):
         run: Callable[[], list[str]]
         venv, run = self.reconciling()
         self.enterContext(unittest.mock.patch.object(
-            venv, "choose", return_value="fetch"))
+            venv, "choose", return_value="sprocket"))
         with (unittest.mock.patch.object(
                 venv, "provide",
                 side_effect=RuntimeError("could not fetch: ERROR: nope")),

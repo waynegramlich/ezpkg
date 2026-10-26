@@ -198,30 +198,13 @@ by your program's name):
    * Linux/macOS: `touch PROG_NAME.py.toml`
 3. Run `PROG_NAME.py`.
 
-The `PROG_NAME.py.toml` makes you the program's developer: `EZPkg` asks you
-nothing and fetches whatever your imports need.  Your `PROG_NAME.py` is never
-edited; a release writes the packages and their versions into the copies
-it makes.  On the first run, `EZPkg` fills the empty `PROG_NAME.py.toml` with
-its settings, each commented out at its default; see
-[`PROG_NAME.py.toml` Settings](#progpytoml-settings).  Without
-`PROG_NAME.py.toml`, whoever runs `PROG_NAME.py` is an end user, the same
-as in the Quick Start.
-
-<!-- Proposed by Claude for I.mlmfpn: replacement for the first sentence
-of the paragraph above ("The `PROG_NAME.py.toml` makes you the program's
-developer: `EZPkg` asks you nothing and fetches whatever your imports
-need."):
-
-The `PROG_NAME.py.toml` makes you the program's developer: `EZPkg` fetches
-whatever your imports need.  It asks you one thing, once per module: when
-an import is not beside `PROG_NAME.py`, not installed, and could only be
-matched to a PyPI package by its name (`import cowsay` is matched to the
-`cowsay` package), it lists the choices, numbered, and you pick one:
-the PyPI package, with its version and summary, or a module of your own.
-A module of your own that `EZPkg` cannot see, such as one in a directory
-your program adds to `sys.path` itself, is listed in `local` in
-`PROG_NAME.py.toml`.
--->
+The existence of `PROG_NAME.py.toml` makes you the program's developer.  As a
+developer, `EZPkg` may occasionally ask you a question whenever you add a new
+`import` statement to your code.  `EZPkg` never edits `PROG_NAME.py.toml`.
+On the first run, `EZPkg` fills the empty `PROG_NAME.py.toml` with its default
+settings (see 
+[`PROG_NAME.py.toml` Settings](#progpytoml-settings) ).  Without
+`PROG_NAME.py.toml`, whoever runs `PROG_NAME.py` is an end user.
 
 ### What are packages and where do they come from?
 
@@ -233,7 +216,7 @@ program for subsequent execution.  The most common place to fetch packages
 from is the [Python Package Index](https://pypi.org) (PyPI), which is where
 the Python community submits freely accessible packages.
 
-A package evolves over time, undergoing both bug fixes and feature
+Each package evolves over time, undergoing both bug fixes and feature
 enhancements.  These changes are managed by giving each released package a
 different version number.  Furthermore, for performance reasons, some packages
 are compiled to run on the native machine architecture (e.g. Intel, ARM,
@@ -244,25 +227,17 @@ Finding a set of packages that can interoperate with one another can be quite
 challenging.  Ultimately, `EZPkg` encodes the package configuration in Python
 inline script metadata format at the beginning of each released copy of the
 Python file.  It is unlikely that you will ever need to read any of this
-metadata.  If you look at the `quick_start.py` example, the information between
-the `# /// script` and `# ///` lines is a very short example of the metadata.
-`EZPkg` accomplishes all of this by scanning your Python program
-for all `import` statements and reconciling them into a single, coherent,
-versioned package set.
+metadata.  However, if you look at the `quick_start.py` example, the
+information between the `# /// script` and `# ///` lines is a very short
+example of the metadata.  `EZPkg` accomplishes all of this by scanning your
+Python program for all `import` statements and reconciling them into a single,
+coherent, versioned package set.
 
-Frankly, `EZPkg` is trying to do all of the hard work of managing the
-metadata and other stuff so that you do not need to.  However, if you are curious,
-the following references provide a great deal of additional information:
-* [Python Package Index](https://pypi.org/):
-  The most common place to store freely accessible Python packages.
-* [Inline script metadata](
-  https://packaging.python.org/en/latest/specifications/inline-script-metadata):
-  The Python standard inline configuration information.
-* [TOML (Tom's Obvious Minimal Language)](https://toml.io/en/) format:
-  This is the syntax used for the inline script metadata.
-* [Dependency specifiers](
-  https://packaging.python.org/en/latest/specifications/dependency-specifiers):
-  This is the syntax of each entry in `dependencies=[...]`.
+Sometimes people create a Python file with the same name as a PyPI package
+name.  This is mostly harmless, but sometimes it creates very baffling errors
+that typically result in program crashes.  `EZPkg` never guesses.  Whenever a
+package conflict occurs, `EZPkg` will explain the issue, ask the developer to
+resolve it, and remember their answer.
 
 ### `PROG_NAME.py.toml` Settings
 
@@ -400,19 +375,17 @@ a more durable single file package.  Currently three formats are supported:
   compiled and pure Python packages together.  The recipient must have `uv`
   installed, and `uv` fetches the packages over the network on the first run.
 
-The requirement is that at least one of the values for `release = [ ... ]`
-is enabled (`email`, `zipapp` or `uv`), and that `version` is set.  Once
-both are set, run your program.  As a side effect of running your program
-the appropriate files are generated.  Whenever `version` changes, the
-appropriate files are (re)generated.
+At least one form in `release = [ ... ]` must be enabled (`email`,
+`zipapp` or `uv`), and `version` must be set.  The next run then builds
+the release, and runs your program as usual.  After that, a new release
+is built only when you change `version`.  Each release is frozen to the
+package versions that your last run used.
 
-<!-- Proposed by Claude for I.mlmfpn: new paragraph:
-
-Every format is a single file, so a program that imports a module of its
+Each form is a single file, so a program that imports a module of its
 own (a file or directory beside `PROG_NAME.py`, or a module listed in
-`local`) is not released: the release stops and names each such import.
-Put that code into `PROG_NAME.py`, or publish it as a package.
--->
+`local`) is not released.  The release stops and names each such
+import, and the program still runs.  A later `EZPkg` will let a
+`zipapp` carry them.
 
 ## The Bootstrap
 
@@ -432,15 +405,12 @@ are trusting:
 * **The program's author**:
   The one question on a first run is about them.  If you do not trust
   them, answer `n`.  A `y` is remembered, so you are not asked again.
-<!-- Proposed by Claude for I.mlmfpn: new bullet, before **PyPI**:
-
 * **Package names**:
   Anybody can publish a package under any free name on PyPI, so a name
   is no proof that a package is the one your program means.  When a
   developer's import could only be matched by its name, `EZPkg` asks
   which it is rather than fetching it; with nobody at the terminal, it
   fetches nothing.
--->
 * **PyPI**:
   Every package, `ezpkg` included, comes from the
   [Python Package Index](https://pypi.org), and each download is checked
@@ -549,6 +519,18 @@ Program That Uses `EZPkg`](#running-a-program-that-uses-ezpkg).
   called `tabulat` ``**:
   Usually a misspelt import.  If the package's name on PyPI differs from
   the module's, add the right name to `dependencies` yourself.
+* **``PROG_NAME.py line 12 imports `foo`, which is neither beside
+  PROG_NAME.py nor installed, so nothing was fetched without asking
+  ...``**:
+  `EZPkg` had nobody at a terminal to ask which `foo` this is (see
+  [Enabling `EZPkg` for a Program](#enabling-ezpkg-for-a-program)).
+  Run the program from a terminal and answer the question, or choose
+  by hand as the message says: add the package to `dependencies`, put
+  `foo.py` beside `PROG_NAME.py`, or list `foo` in `local`.
+* **``PROG_NAME.py line 11 imports `foo`, which is both `foo.py` beside
+  it and a module of PyPI's PKG_NAME 1.2.3 ...``**:
+  One of your packages brought a `foo` of its own, and Python loads only
+  one `foo` in a run.  Rename your `foo.py`, and your imports of it.
 * **``line 12: `cowsay` is imported above the bootstrap; move it below,
   with the other imports``**:
   On a computer whose `~/.ezpkg` is still empty, that import runs before

@@ -131,11 +131,16 @@ hyphens, as PEP 723 does (Wayne, 2026-10-23).
 
 A `prog.py.toml` beside `prog.py` makes it its developer's: the
 packages kept in step with the imports, and the versions frozen.  The
-one question (`I.mlmfpn`, 2026-10-25): an import matched to a PyPI
+one question (`I.mlmfpn`, 2026-10-25; reworded 2026-10-26, "Where
+should it come from?", its last option `Create Locally` making an empty
+`MODULE.py`): an import matched to a PyPI
 package by its name alone (not beside the program, not installed, not
 in `MODULE_PACKAGES`) is the developer's to choose, from numbered
-options (`EZPkg.choose`; a `1` is kept in the stash's `chosen`); with
-no terminal nothing is fetched.  `local` in `prog.py.toml` names the
+options (`EZPkg.choose`; a package chosen is kept in the stash's
+`chosen`); with no terminal nothing is fetched.  An import that
+several real packages provide (`MODULE_CHOICES`, such as `xdg`:
+`pyxdg` or `xdg`) offers each one `prove` passes, and says why any
+other is not offered (2026-10-26).  `local` in `prog.py.toml` names the
 program's own modules that `ezpkg` cannot see, and a release refuses a
 program that imports its own modules (`local_imports`).  There is no `auto-dependencies` any more (Wayne,
 2026-10-22): `dependencies` in `prog.py.toml` names what the imports
