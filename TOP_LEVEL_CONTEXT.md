@@ -261,10 +261,18 @@ program, ever, and the program is never edited.  `prog.ezpkg`,
   `release.yml`'s `listed` job and `release_check.py` (`newest_named`)
   wait until it names the new version (S5.1, S5.2).
 
-## Next Steps (2026-10-25, after 0.0.3)
+## Next Steps (2026-10-26, after 0.0.5)
 
-Nothing is open in `TASKS/` or `ISSUES/`.  Claude offered these, in
-this order of recommendation; Wayne has not chosen yet:
+`T.zcpom~9` (a `zipapp` carries the program's own modules) is
+Pending, agreed but not built; Wayne's decisions are in its
+`Context.md`, which startup does not load while it is Pending, so read
+it first.  The `6fd240c` commit message says this was built; it was
+not.  Nothing else is open.  The `ux13`, `ux14` and `ux19`
+transcripts are stale (the question was reworded); Wayne will batch
+read fresh ones (`ux/drive.py --ux-dir` into the scratchpad).
+
+Older offers (2026-10-25, after 0.0.3), in this order of
+recommendation; Wayne has not chosen yet:
 
 1. Settle `R.pcr` (Python Coding Rules), switched on mid-session on
    2026-10-25, probably by Wayne's other Claude instance.  `--strict`
