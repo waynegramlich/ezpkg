@@ -207,6 +207,22 @@ its settings, each commented out at its default; see
 `PROG_NAME.py.toml`, whoever runs `PROG_NAME.py` is an end user, the same
 as in the Quick Start.
 
+<!-- Proposed by Claude for I.mlmfpn: replacement for the first sentence
+of the paragraph above ("The `PROG_NAME.py.toml` makes you the program's
+developer: `EZPkg` asks you nothing and fetches whatever your imports
+need."):
+
+The `PROG_NAME.py.toml` makes you the program's developer: `EZPkg` fetches
+whatever your imports need.  It asks you one thing, once per module: when
+an import is not beside `PROG_NAME.py`, not installed, and could only be
+matched to a PyPI package by its name (`import cowsay` is matched to the
+`cowsay` package), it lists the choices, numbered, and you pick one:
+the PyPI package, with its version and summary, or a module of your own.
+A module of your own that `EZPkg` cannot see, such as one in a directory
+your program adds to `sys.path` itself, is listed in `local` in
+`PROG_NAME.py.toml`.
+-->
+
 ### What are packages and where do they come from?
 
 Since the primary purpose of `EZPkg` is to manage Python packages, it is
@@ -343,6 +359,13 @@ release = [
 # Python for its own reasons, such as a library function that is new.
 # requires-python = ">=3.11"  # The default: EZPkg itself needs 3.11.
 
+# "local" lists modules of your program's own that EZPkg cannot see.  A
+# module in a file or directory beside PROG_NAME.py needs no entry; one in
+# a directory that PROG_NAME.py adds to sys.path itself does.  EZPkg never
+# looks for these on PyPI, and a release stops while the program imports
+# any of them, since a release is one file and cannot carry them.
+# local = ["helpers", "plotting"]  # For example.
+
 # "dependencies" provides a way to manually specify values to be inserted
 # into the dependencies portion of the Python inline script metadata.  They
 # use the standard Python dependency specifier format.  See:
@@ -383,6 +406,14 @@ both are set, run your program.  As a side effect of running your program
 the appropriate files are generated.  Whenever `version` changes, the
 appropriate files are (re)generated.
 
+<!-- Proposed by Claude for I.mlmfpn: new paragraph:
+
+Every format is a single file, so a program that imports a module of its
+own (a file or directory beside `PROG_NAME.py`, or a module listed in
+`local`) is not released: the release stops and names each such import.
+Put that code into `PROG_NAME.py`, or publish it as a package.
+-->
+
 ## The Bootstrap
 
 Never edit the bootstrap, not even a space or a comment.  Indenting the
@@ -401,6 +432,15 @@ are trusting:
 * **The program's author**:
   The one question on a first run is about them.  If you do not trust
   them, answer `n`.  A `y` is remembered, so you are not asked again.
+<!-- Proposed by Claude for I.mlmfpn: new bullet, before **PyPI**:
+
+* **Package names**:
+  Anybody can publish a package under any free name on PyPI, so a name
+  is no proof that a package is the one your program means.  When a
+  developer's import could only be matched by its name, `EZPkg` asks
+  which it is rather than fetching it; with nobody at the terminal, it
+  fetches nothing.
+-->
 * **PyPI**:
   Every package, `ezpkg` included, comes from the
   [Python Package Index](https://pypi.org), and each download is checked

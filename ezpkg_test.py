@@ -3618,7 +3618,8 @@ class InstallTest(unittest.TestCase):
                 2010, 1, 1, tzinfo=datetime.UTC).timestamp()
             os.utime(wheel, (stamp, stamp))
         program: Path = self.synced_program(
-            "too_new_stash", '["widget"]', "import sprocket")
+            "too_new_stash", '["widget"]', "import sprocket",
+            chosen=("sprocket",))
         dating: Path | None = dating_pip()
         assert dating is not None
         self.give_pip(program, dating)
@@ -5692,6 +5693,7 @@ class InstallTest(unittest.TestCase):
             "import paned\nimport widget\nprint(paned.__version__)")
         self.developer_settings(program,
                                 'version = "1.0.0"\nrelease = ["email"]\n')
+        self.chose(program, "widget", cache=home / ".ezpkg")
         written: str = program.read_text()
         done: subprocess.CompletedProcess[str] = self.run_program(
             program, HOME=str(home))
@@ -5896,8 +5898,8 @@ class InstallTest(unittest.TestCase):
                           if one.parent.name == "scans"], records)
 
     def synced_program(self, name: str, declared: str, tail: str,
-                       settings: str = 'verbosity = "low"\n'
-                       ) -> Path:
+                       settings: str = 'verbosity = "low"\n',
+                       chosen: tuple[str, ...] = ()) -> Path:
         """Write a program, run it once clean, then change its imports.
 
         The program is its developer's (a `prog.py.toml`), so downloads
@@ -5914,6 +5916,9 @@ class InstallTest(unittest.TestCase):
           What to put below `import widget` after the first run.
         * `settings` (`str`):
           The `prog.py.toml`, as `developer_settings` takes it.
+        * `chosen` (`tuple[str, ...]`):
+          Modules whose PyPI package the developer chose already
+          (`chose`), for a test that is not about that question.
 
         Returns:
         * (`Path`): The program, edited but not run again.
@@ -5926,10 +5931,42 @@ class InstallTest(unittest.TestCase):
         done: subprocess.CompletedProcess[str] = self.run_program(program)
         self.assertEqual(done.returncode, 0, done.stderr[-400:])
         self.assertNotIn("Traceback", done.stderr)
+        if chosen:
+            self.chose(program, *chosen)
         program.write_text(program.read_text().replace(
             'dependencies = ["widget"]', f"dependencies = {declared}").replace(
             "import widget\n", f"import widget\n{tail}\n"))
         return program
+
+    def chose(self, program: Path, *modules: str,
+              cache: Path | None = None) -> None:
+        """Choose PyPI's package for modules, as a developer's `1` does.
+
+        A guess from a module's name alone is the developer's to choose
+        (`EZPkg.choose`, `I.mlmfpn`), and a test with nobody at a
+        terminal would fetch nothing; this writes the choice into the
+        program's stash, as an earlier `1` would have.
+
+        Arguments:
+        * `program` (`Path`):
+          The program.
+        * `modules` (`str`):
+          The modules, each the name of its package.
+        * `cache` (`Path | None`):
+          The program's cache; `None` means `cache` beside it, as
+          `declaring_program` makes.
+        """
+        # As the program itself would find its stash.
+        venv: ezpkg.EZPkg = ezpkg.EZPkg(cache or program.parent / "cache")
+        with (unittest.mock.patch.object(ezpkg, "main_path",
+                                         return_value=program),
+              unittest.mock.patch.object(
+                  ezpkg, "main_source",
+                  return_value=(program, program.read_text()))):
+            held: object = venv.stash().get("chosen")
+            venv.put_stash(chosen={
+                **(held if isinstance(held, dict) else {}),
+                **{module: ezpkg.normal_name(module) for module in modules}})
 
     def developer_settings(self, program: Path,
                            settings: str = 'verbosity = "low"\n'
@@ -6009,7 +6046,8 @@ class InstallTest(unittest.TestCase):
         """
         # Added silently, then settled.
         program: Path = self.synced_program(
-            "added", '["widget"]', "import sprocket")
+            "added", '["widget"]', "import sprocket",
+            chosen=("sprocket",))
         done: subprocess.CompletedProcess[str] = self.run_program(program)
         self.assertEqual((done.returncode, done.stdout, done.stderr),
                          (0, "ran\n", ""))
@@ -6028,7 +6066,8 @@ class InstallTest(unittest.TestCase):
         """
         # Added to the stash, not to the file.
         program: Path = self.synced_program(
-            "stashed", '["widget"]', "import sprocket")
+            "stashed", '["widget"]', "import sprocket",
+            chosen=("sprocket",))
         before: str = program.read_text()
         done: subprocess.CompletedProcess[str] = self.run_program(program)
         self.assertEqual((done.returncode, done.stdout, done.stderr),
@@ -6168,7 +6207,8 @@ class InstallTest(unittest.TestCase):
         """
         # No index: the guess cannot be proved, and nothing changes.
         program: Path = self.synced_program(
-            "offline", '["widget"]', "import sprocket")
+            "offline", '["widget"]', "import sprocket",
+            chosen=("sprocket",))
         done: subprocess.CompletedProcess[str] = self.run_program(
             program, PIP_INDEX_URL="http://127.0.0.1:1/")
         self.assertIn('"sprocket" could not be fetched',
@@ -6273,7 +6313,8 @@ class InstallTest(unittest.TestCase):
         """
         # Added, and no `ezpkg` tree in the cache.
         program: Path = self.synced_program(
-            "own_entry", '["ezpkg>=0.0.1.dev0", "widget"]', "import sprocket")
+            "own_entry", '["ezpkg>=0.0.1.dev0", "widget"]', "import sprocket",
+            chosen=("sprocket",))
         done: subprocess.CompletedProcess[str] = self.run_program(program)
         self.assertEqual(done.returncode, 0, done.stderr[-400:])
         self.assertIn("sprocket>=2.0.0,<3", self.declared_now(program))
@@ -6529,7 +6570,8 @@ class InstallTest(unittest.TestCase):
                 2010, 1, 1, tzinfo=datetime.UTC).timestamp()
             os.utime(wheel, (stamp, stamp))
         program: Path = self.synced_program(
-            "too_new", '["widget"]', "import sprocket")
+            "too_new", '["widget"]', "import sprocket",
+            chosen=("sprocket",))
         dating: Path | None = dating_pip()
         assert dating is not None
         self.give_pip(program, dating)
@@ -6554,7 +6596,7 @@ class InstallTest(unittest.TestCase):
         # An addition, so something is fetched and recorded.
         program: Path = self.synced_program(
             "chatty", '["widget"]', "import sprocket",
-            settings='verbosity = "high"\n')
+            settings='verbosity = "high"\n', chosen=("sprocket",))
         done: subprocess.CompletedProcess[str] = self.run_program(program)
         self.assertEqual(done.returncode, 0, done.stderr[-400:])
         self.assertRegex(done.stderr, r"ezpkg: lock: (\d+ pin\(s\)|none)")
@@ -6610,6 +6652,202 @@ class InstallTest(unittest.TestCase):
         self.assertEqual(program.read_text(), before)
         self.assertFalse(list((program.parent / "cache" / "versions")
                               .glob("decoy-*")))
+
+    def test_a_name_only_guess_is_not_fetched_unasked(self) -> None:
+        """A guess from a module's name alone is never fetched unasked.
+
+        A scratch copy of a program lacks its `sprocket.py`, and the
+        index's `sprocket` is a stranger's (`I.mlmfpn`, the reporter's
+        `scplot`).  With nobody at a terminal, nothing is fetched, and
+        one line says how to choose by hand; the next run says it again.
+        """
+        # One line, then Python's error; nothing added or fetched.
+        program: Path = self.synced_program(
+            "namesake", '["widget"]',
+            "import sprocket\nprint(sprocket.__version__)")
+        flat: str = ""
+        for _ in range(2):
+            done: subprocess.CompletedProcess[str] = self.run_program(
+                program)
+            self.assertNotEqual(done.returncode, 0)
+            flat = " ".join(done.stderr.split())
+            self.assertIn(
+                "`prog.py` line 12 imports `sprocket`, which is neither "
+                "beside `prog.py` nor installed, so nothing was fetched "
+                "without asking. If it means PyPI's sprocket 2.0.0, add "
+                '"sprocket" to `dependencies` in `prog.py.toml`; if it is '
+                "`prog.py`'s own, put `sprocket.py` beside `prog.py`, or "
+                "list `sprocket` in `local` in `prog.py.toml`.", flat)
+            self.assertIn("No module named 'sprocket'", flat)
+        self.assertEqual(self.declared_now(program), ["widget"])
+        self.assertFalse(list((program.parent / "cache" / "versions")
+                              .glob("sprocket-*")))
+
+    def test_a_name_only_guess_is_chosen_on_the_terminal(self) -> None:
+        """The developer chooses among the options, numbered.
+
+        `1` is PyPI's package, with its version and summary, which is
+        then added for good; `2` is the program's own module, for which
+        nothing is fetched (Wayne, 2026-10-25, `I.mlmfpn`).
+        """
+        # `2` first: the program's own, so nothing is fetched.
+        program: Path = self.synced_program(
+            "chosen", '["widget"]',
+            "import sprocket\nprint(sprocket.__version__)")
+        seen: str = self.answer_on_a_terminal(program, b"2\n")
+        flat: str = " ".join(seen.split())
+        self.assertIn(
+            "`prog.py` line 12 imports `sprocket`, which is neither beside "
+            "`prog.py` nor installed. Which is it? 1. PyPI's sprocket "
+            "2.0.0: A versioned throwaway. 2. A module of `prog.py`'s own "
+            "[1=>PyPI|2=>Own]:", flat)
+        self.assertIn("`prog.py` line 12 imports `sprocket`, `prog.py`'s "
+                      "own module, so nothing was fetched: put "
+                      "`sprocket.py` beside `prog.py`, or list `sprocket` "
+                      "in `local` in `prog.py.toml`.", flat)
+        self.assertEqual(self.declared_now(program), ["widget"])
+
+        # A typo asks again, and `1` fetches it, added for good.
+        seen = self.answer_on_a_terminal(program, b"3\n1\n")
+        self.assertIn("Please answer 1 or 2.", seen)
+        self.assertEqual(seen.split()[-2:], ["2.0.0", "ran"])
+        self.assertIn("sprocket", " ".join(self.declared_now(program)))
+        seen = self.answer_on_a_terminal(program, b"")
+        self.assertNotIn("Which is it?", seen)
+        self.assertEqual(seen.split()[-2:], ["2.0.0", "ran"])
+
+    def test_a_module_loaded_at_run_time_is_chosen_too(self) -> None:
+        """`add_missing` asks the same question for a name-only guess.
+
+        A module named only when the program runs, here
+        `import_module('sprock' + 'et')`, is `add_missing`'s; with
+        nobody at a terminal nothing is added (`I.mlmfpn`).
+        """
+        # Nobody to choose: one line, nothing added.
+        program: Path = self.synced_program(
+            "computed", '["widget"]',
+            "import importlib\n"
+            "m = importlib.import_module('sprock' + 'et')\n"
+            "print(m.__version__)")
+        done: subprocess.CompletedProcess[str] = self.run_program(program)
+        self.assertNotEqual(done.returncode, 0)
+        self.assertIn("`prog.py` needed `sprocket`, which is neither beside "
+                      "`prog.py` nor installed, so nothing was fetched "
+                      "without asking.", " ".join(done.stderr.split()))
+        self.assertEqual(self.declared_now(program), ["widget"])
+
+        # `1` on a terminal adds it, and the next run runs it.
+        seen: str = self.answer_on_a_terminal(program, b"1\n")
+        self.assertIn("`ezpkg` added `sprocket` to `prog.py`'s packages",
+                      " ".join(seen.split()))
+        done = self.run_program(program)
+        self.assertEqual(done.returncode, 0, done.stderr[-400:])
+        self.assertEqual(done.stdout.split(), ["2.0.0", "ran"])
+
+    def test_a_local_module_beats_its_namesake(self) -> None:
+        """A module beside the program is never looked for on the index.
+
+        The same program as the test above, with its `sprocket.py`.
+        """
+        # The local `sprocket` runs; nothing is added or fetched.
+        program: Path = self.synced_program(
+            "local", '["widget"]',
+            "import sprocket\nprint(sprocket.__version__)")
+        (program.parent / "sprocket.py").write_text(
+            '__version__ = "local"\n')
+        done: subprocess.CompletedProcess[str] = self.run_program(program)
+        self.assertEqual(done.returncode, 0, done.stderr[-400:])
+        self.assertEqual(done.stdout.split(), ["local", "ran"])
+        self.assertEqual(self.declared_now(program), ["widget"])
+        self.assertFalse(list((program.parent / "cache" / "versions")
+                              .glob("sprocket-*")))
+
+    def test_a_local_module_on_an_added_path(self) -> None:
+        """A local module the program finds by adding to `sys.path`.
+
+        `ezpkg` judges imports before the program runs, so it cannot see
+        a `lib/` the program puts on `sys.path` itself (`I.mlmfpn`).
+        The index's namesake is a name-only guess, so with nobody to
+        choose it is not fetched, the local one runs, and the line says
+        to list it in `local` (the next test).
+        """
+        # `lib/sprocket.py`, found only after the program's own insert.
+        program: Path = self.synced_program(
+            "added", '["widget"]',
+            "import sys\nimport pathlib\n"
+            "sys.path.insert(0, str(pathlib.Path(__file__).parent"
+            " / 'lib'))\n"
+            "import sprocket\nprint(sprocket.__version__)")
+        (program.parent / "lib").mkdir()
+        (program.parent / "lib" / "sprocket.py").write_text(
+            '__version__ = "local"\n')
+        done: subprocess.CompletedProcess[str] = self.run_program(program)
+        self.assertEqual(done.returncode, 0, done.stderr[-400:])
+        self.assertEqual(done.stdout.split(), ["local", "ran"])
+        self.assertIn("list `sprocket` in `local` in `prog.py.toml`",
+                      " ".join(done.stderr.split()))
+        self.assertEqual(self.declared_now(program), ["widget"])
+        self.assertFalse(list((program.parent / "cache" / "versions")
+                              .glob("sprocket-*")))
+
+    def test_local_names_a_module_on_an_added_path(self) -> None:
+        """`local` in `prog.py.toml` names a module `ezpkg` cannot see.
+
+        The same program as the test above, which lists `sprocket` in
+        `local`, so the index is never asked for it (`I.mlmfpn`).
+        """
+        # `lib/sprocket.py` runs; nothing is added or fetched.
+        program: Path = self.synced_program(
+            "listed", '["widget"]',
+            "import sys\nimport pathlib\n"
+            "sys.path.insert(0, str(pathlib.Path(__file__).parent"
+            " / 'lib'))\n"
+            "import sprocket\nprint(sprocket.__version__)",
+            settings='verbosity = "low"\nlocal = ["sprocket"]\n')
+        (program.parent / "lib").mkdir()
+        (program.parent / "lib" / "sprocket.py").write_text(
+            '__version__ = "local"\n')
+        done: subprocess.CompletedProcess[str] = self.run_program(program)
+        self.assertEqual(done.returncode, 0, done.stderr[-400:])
+        self.assertEqual(done.stdout.split(), ["local", "ran"])
+        self.assertEqual(self.declared_now(program), ["widget"])
+        self.assertFalse(list((program.parent / "cache" / "versions")
+                              .glob("sprocket-*")))
+
+    def test_a_release_refuses_the_programs_own_modules(self) -> None:
+        """A program that imports its own modules is not released.
+
+        A release is one file, which cannot carry them (Wayne,
+        2026-10-25, `I.mlmfpn`): one beside the program and one listed
+        in `local` are both named, and the program still runs.
+        """
+        # `sprocket.py` beside it, and `gear` in `lib/`, listed.
+        program: Path = self.program("own", "widget")
+        program.write_text(
+            program.read_text()
+            + "sys.path.insert(0, str(pathlib.Path(__file__).parent"
+            " / 'lib'))\nimport sprocket\nimport gear\n"
+            "print(sprocket.__version__, gear.__version__)\n")
+        (program.parent / "sprocket.py").write_text(
+            '__version__ = "beside"\n')
+        (program.parent / "lib").mkdir()
+        (program.parent / "lib" / "gear.py").write_text(
+            '__version__ = "listed"\n')
+        self.developer_settings(program, 'version = "1.0.0"\n'
+                                'release = ["email"]\nlocal = ["gear"]\n')
+        done: subprocess.CompletedProcess[str] = self.run_program(program)
+        self.assertEqual(done.returncode, 0, done.stderr[-400:])
+        self.assertEqual(done.stdout.split(), ["1.2.3", "beside", "listed"])
+        flat: str = " ".join(done.stderr.split())
+        self.assertRegex(
+            flat, r"`prog\.py` 1\.0\.0 was not released: `prog\.py` line "
+            r"\d+ imports `sprocket` \(`sprocket\.py` beside it\) and line "
+            r'\d+ imports `gear` \(listed in `prog\.py\.toml` line 3, '
+            r'`local = \["gear"\]`\), but a release is one file, which '
+            r"cannot carry them; put the code into `prog\.py`, or publish "
+            r"it as a package\.")
+        self.assertFalse(program.with_name("prog-1.0.0.py").exists())
+        self.assertFalse(ezpkg.releases_path(program).exists())
 
     def test_a_source_only_package_is_not_added(self) -> None:
         """A name the index has only as source code is never added.
@@ -6685,7 +6923,8 @@ class InstallTest(unittest.TestCase):
         """
         # Added by an import, which then goes, with no run on record.
         program: Path = self.synced_program(
-            "lingering", '["widget"]', "import sprocket")
+            "lingering", '["widget"]', "import sprocket",
+            chosen=("sprocket",))
         done: subprocess.CompletedProcess[str] = self.run_program(program)
         self.assertEqual(done.returncode, 0, done.stderr[-400:])
         self.assertEqual(self.declared_now(program),
@@ -8469,8 +8708,8 @@ class MetadataTest(unittest.TestCase):
                  ("`prog.py.toml` line 3, `[colour]`: unknown setting `colour` (the "
                  "settings are `verbosity`, `version`, `release`, "
                  "`bootstrap`, `update-frequency`, `purge-unused-after`, "
-                 "`dependencies` and "
-                 "`requires-python`)")),
+                 "`dependencies`, `requires-python` and "
+                 "`local`)")),
                 ("update-frequency = true\n",
                  ("`prog.py.toml` line 1, `update-frequency = true`: "
                   '`update-frequency` must be one of "never", "monthly", '
@@ -8498,6 +8737,12 @@ class MetadataTest(unittest.TestCase):
                  ('`prog.py.toml` line 1, `dependencies = [">=2"]`: '
                   '`dependencies` must be a list of requirements in quotes, '
                   'such as "numpy>=2"')),
+                ('local = ["helpers", "plotting"]\n',
+                 ezpkg.Settings(local=("helpers", "plotting"))),
+                ('local = ["lib.helpers"]\n',
+                 ('`prog.py.toml` line 1, `local = ["lib.helpers"]`: '
+                  '`local` must be a list of top-level module names in '
+                  'quotes, such as "helpers"')),
                 ('requires-python = "3.12"\n',
                  ('`prog.py.toml` line 1, `requires-python = "3.12"`: '
                   '`requires-python` must be a Python version range in '
@@ -9438,10 +9683,13 @@ class MetadataTest(unittest.TestCase):
         stash, each change is said at `medium`.  With the program edited,
         an edit that cannot be worked out or written is said, not made.
         """
-        # Fetching fails, or is declined.
+        # Fetching fails, or is declined.  The developer chose PyPI's
+        # `sprocket` (`EZPkg.choose`).
         venv: ezpkg.EZPkg
         run: Callable[[], list[str]]
         venv, run = self.reconciling()
+        self.enterContext(unittest.mock.patch.object(
+            venv, "choose", return_value="fetch"))
         with (unittest.mock.patch.object(
                 venv, "provide",
                 side_effect=RuntimeError("could not fetch: ERROR: nope")),

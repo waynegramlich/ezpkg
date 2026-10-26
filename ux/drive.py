@@ -78,6 +78,9 @@ STEP_SECONDS: float = 900.0
 QUESTION: re.Pattern[str] = re.compile(
     r"(\[[^\[\]\n]*=>[^\[\]\n]*\]:?|Enter to skip\):) $")
 DOWNLOAD: str = "and run `prog.py`?"
+# The developer's question about a guess from a module's name alone
+# (`I.mlmfpn`).
+WHICH: str = "Which is it?"
 CONTROL_C: str = "\x03"
 CONTROL_D: str = "\x04"
 # An answer that is never typed, for a question nobody is there to answer.
@@ -302,14 +305,17 @@ STEPS: list[Step] = [
          environment={"EZPKG_ANSWER_SECONDS": "3"}, mode="gone"),
     Step("2.1 Becoming the developer",
          "The Quick Start without Part 1, and touch prog.py.toml: the "
-         "file is filled in, nothing is asked, and the cow.",
-         None, present=["was empty, so `ezpkg` filled it", WORKS],
+         "file is filled in, the developer chooses PyPI's cowsay (1), "
+         "and the cow.",
+         None, [(WHICH, "1")],
+         present=["was empty, so `ezpkg` filled it", WORKS],
          absent=[DOWNLOAD, "Traceback"], before=developer_first_run,
          declared=BASE, mode="developer"),
     Step("2.2 A new import",
-         "import tabulate added: it gets a package with a range, "
-         "silently, then the cow.",
-         ["tabulate"], present=[WORKS], absent=[DOWNLOAD, "Traceback"],
+         "import tabulate added: the developer chooses PyPI's tabulate "
+         "(1), which gets a range, then the cow.",
+         ["tabulate"], [(WHICH, "1")], present=[WORKS],
+         absent=[DOWNLOAD, "Traceback"],
          declared=[*BASE, "tabulate"], mode="developer"),
     Step("2.3 An import removed",
          "import tabulate taken out again: its package goes, silently.",
@@ -337,7 +343,8 @@ STEPS: list[Step] = [
     Step("2.7 Medium verbosity",
          'verbosity = "medium", the misspelling fixed and humanize '
          "imported: each change said.",
-         ["tabulate", "humanize"], present=["Added humanize", WORKS],
+         ["tabulate", "humanize"], [(WHICH, "1")],
+         present=["Added humanize", WORKS],
          absent=["Traceback", "now retained"],
          before=settings('verbosity = "medium"\n'),
          declared=[*BASE, "tabulate", "humanize"], mode="developer"),

@@ -1,5 +1,6 @@
-@../ISSUES/25_Bootstrap_comments_exceed_72_columns/Details.md
-@../ISSUES/25_Bootstrap_comments_exceed_72_columns/Context.md
+@../ISSUES/26_A_missing_local_module_fetches_a_PyPI_namesake/Details.md
+@../ISSUES/26_A_missing_local_module_fetches_a_PyPI_namesake/Context.md
+@../ISSUES/25_Bootstrap_comments_exceed_72_columns/Summary.md
 @../ISSUES/24_The_bootstrap_fails_mypy_strict/Summary.md
 @../ISSUES/23_The_second_run_looks_for_a_newer_pip/Summary.md
 @7_A_fetch_from_the_real_PyPI/Summary.md
@@ -49,5 +50,4 @@
 @6.15_No_preinstalled_pip/Details.md
 @6.1_Error_on_a_failed_fetch/Details.md
 @6.2_Several_packages_in_one_call/Details.md
-@6.4_Concurrent_installs/Details.md
 @Closed.md

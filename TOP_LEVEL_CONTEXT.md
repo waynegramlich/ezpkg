@@ -129,9 +129,15 @@ hyphens, as PEP 723 does (Wayne, 2026-10-23).
 
 ## The Two Modes (`T.abfd`, 2026-10-19)
 
-A `prog.py.toml` beside `prog.py` makes it its developer's: no
-questions, the packages kept in step with the imports silently, and
-the versions frozen.  There is no `auto-dependencies` any more (Wayne,
+A `prog.py.toml` beside `prog.py` makes it its developer's: the
+packages kept in step with the imports, and the versions frozen.  The
+one question (`I.mlmfpn`, 2026-10-25): an import matched to a PyPI
+package by its name alone (not beside the program, not installed, not
+in `MODULE_PACKAGES`) is the developer's to choose, from numbered
+options (`EZPkg.choose`; a `1` is kept in the stash's `chosen`); with
+no terminal nothing is fetched.  `local` in `prog.py.toml` names the
+program's own modules that `ezpkg` cannot see, and a release refuses a
+program that imports its own modules (`local_imports`).  There is no `auto-dependencies` any more (Wayne,
 2026-10-22): `dependencies` in `prog.py.toml` names what the imports
 cannot (extras, exact versions), and Part 1's or its entries are never
 removed.  A platform-guarded import gets a marker (`import_markers`);

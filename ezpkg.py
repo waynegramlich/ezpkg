@@ -1107,6 +1107,13 @@ release = [
 # Python for its own reasons, such as a library function that is new.
 # requires-python = ">=3.11"  # The default: EZPkg itself needs 3.11.
 
+# "local" lists modules of your program's own that EZPkg cannot see.  A
+# module in a file or directory beside PROG_NAME.py needs no entry; one in
+# a directory that PROG_NAME.py adds to sys.path itself does.  EZPkg never
+# looks for these on PyPI, and a release stops while the program imports
+# any of them, since a release is one file and cannot carry them.
+# local = ["helpers", "plotting"]  # For example.
+
 # "dependencies" provides a way to manually specify values to be inserted
 # into the dependencies portion of the Python inline script metadata.  They
 # use the standard Python dependency specifier format.  See:
@@ -1169,6 +1176,11 @@ class Settings:
     * `requires_python` (`str | None`):
       The Pythons a release's Part 1 admits, or `None` for the floor
       the release works out (`EZPkg.python_range`).
+    * `local` (`tuple[str, ...]`):
+      Top-level modules of the program's own that `ezpkg` cannot see
+      beside it, such as ones in a `lib/` the program puts on
+      `sys.path` itself: never looked for on PyPI (`EZPkg.exempt`),
+      and a release refuses them (`EZPkg.local_imports`; `I.mlmfpn`).
     """
 
     verbosity: str = "low"
@@ -1179,6 +1191,7 @@ class Settings:
     purge_unused_after: str | None = None
     dependencies: tuple[str, ...] = ()
     requires_python: str | None = None
+    local: tuple[str, ...] = ()
 
 
 def settings_path(program: Path) -> Path:
@@ -1587,6 +1600,14 @@ def read_settings(path: Path) -> Settings:
                 value = tuple(value)
             else:
                 wrong = 'a list of requirements in quotes, such as "numpy>=2"'
+        elif key == "local":
+            if isinstance(value, list) and all(
+                    isinstance(one, str) and one.isidentifier()
+                    for one in value):
+                value = tuple(value)
+            else:
+                wrong = ('a list of top-level module names in quotes, such '
+                         'as "helpers"')
         elif key == "requires-python" and not (
                 isinstance(value, str) and python_floor(value)):
             wrong = 'a Python version range in quotes, such as ">=3.11"'
@@ -4121,6 +4142,9 @@ class EZPkg:
         self.chosen_settings: Settings | None = None  # See `settings`.
         self.declined: bool = False  # `n` to `reconcile`, this run.
         self.reported: set[str] = set()  # Modules `reconcile` named.
+        # What `prove` found in each guess's wheel, by normalized name:
+        # its name and version, and summary, for `choose`.
+        self.proved: dict[str, tuple[str, str]] = {}
         self.stashed: dict[str, Any] | None = None  # See `stash`.
         # A release's copy of the program while it is built (`staged`).
         self.staging: tuple[str, str, bool] | None = None
@@ -4827,6 +4851,10 @@ class EZPkg:
             if module not in wheel_modules(wheel):
                 return (f'the index\'s "{package}" does not provide '
                         f'`{module}`')
+            fields: dict[str, str] = self.metadata(wheel)
+            self.proved[normal_name(package)] = (
+                f"{fields.get('Name', package)} {wheel.name.split('-')[1]}",
+                fields.get("Summary", ""))
             return ""
         except (RuntimeError, ValueError) as error:
             return f'"{package}" could not be fetched: ' + (
@@ -4839,11 +4867,13 @@ class EZPkg:
     def reconcile(self, found: Discrepancy, asking: list[str],
                   argv: Sequence[str], record: Path, kept: dict[str, Any],
                   fingerprint: str, approved: set[str]) -> list[str]:
-        """Fix a discrepancy without asking, as `sync_dependencies` says.
+        """Fix a discrepancy, as `sync_dependencies` says.
 
         Each new import gets an entry, a guessed name only once `prove`
         shows it provides the module (else one line, and Python's
-        `ImportError` follows), with a range from the version that
+        `ImportError` follows), and a guess from the module's name alone
+        only once the developer chooses it (`choose`), with a range from
+        the version that
         arrived (`version_range`).  An entry nothing imports, with no
         comment, is removed once the last `RUNS_KEPT` runs show it unused
         (`unused_lately`): declared, but never loaded behind the scenes
@@ -4893,8 +4923,22 @@ class EZPkg:
                     f"spelling, or name the right package in "
                     + f"`dependencies` in `{program.name}.toml`.")
                 self.reported.add(module)
-            else:
-                modules[package] = module
+                continue
+
+            # A guess from the module's name alone is the developer's
+            # to choose (`I.mlmfpn`).
+            if (package in found.guessed and holds_here(package)
+                    and module not in MODULE_PACKAGES):
+                wanting: str = (f"`{program.name}` line {line} imports "
+                                f"`{module}`")
+                guessed: str = requirement_name(package)
+                choice: str = self.choose(program, wanting, module, guessed)
+                if choice != "fetch":
+                    doubts.append(self.unchosen(program, wanting, module,
+                                                guessed, choice))
+                    self.reported.add(module)
+                    continue
+            modules[package] = module
 
         # An entry nothing imports goes once recent runs show it unused.
         unused: set[str] = self.unused_lately(kept)
@@ -5353,8 +5397,9 @@ class EZPkg:
         """Return the running program's developer settings, if it has any.
 
         `ezpkg` has two customers (`T.abfd`).  A program with a
-        `prog.py.toml` beside it is its developer's, who is never asked
-        anything and whose settings are in that file; without one, it is
+        `prog.py.toml` beside it is its developer's, who is asked only
+        what a name-only guess is (`choose`) and whose settings are in
+        that file; without one, it is
         an end user's, who is asked one question and whose program is
         never edited.  Nothing else decides.
 
@@ -5519,7 +5564,8 @@ class EZPkg:
         `.toml` (Wayne, 2026-10-22): `dependencies`, the entries for
         imports Part 1 does not declare; `checksums` and `tags`, the
         approvals (`record_approvals`); `exclude-newer`, the frozen
-        date.  A program with none yet
+        date; `chosen`, the name-only guesses the developer chose
+        (`choose`).  A program with none yet
         (a new program, a deleted `~/.ezpkg`, another computer, a moved
         program) is seeded once from what Part 1 itself holds, as an
         older `ezpkg` wrote it there, else from the newest entry of
@@ -5893,12 +5939,11 @@ class EZPkg:
                 uncovered.append((line, module, names))
         return program, text, uncovered
 
-    @staticmethod
-    def exempt(program: Path, module: str) -> bool:
+    def exempt(self, program: Path, module: str) -> bool:
         """Say whether an import needs no package from Part 1.
 
         The standard library, `ezpkg` itself (the bootstrap's
-        business), and a file or directory beside the program.
+        business), and the program's own modules (`local_module`).
 
         Arguments:
         * `program` (`Path`):
@@ -5911,8 +5956,68 @@ class EZPkg:
         """
         # Three kinds of import that never travel as packages.
         return (module in sys.stdlib_module_names or module == "ezpkg"
-                or (program.parent / f"{module}.py").is_file()
-                or (program.parent / module).is_dir())
+                or bool(self.local_module(program, module)))
+
+    def local_imports(self, program: Path) -> None:
+        """Refuse a release whose program imports a module of its own.
+
+        Every release form is one file that leaves without the modules
+        beside the program, so its recipient would stop at the import
+        (Wayne, 2026-10-25, `I.mlmfpn`).  An import the program is ready
+        to see fail, in a `try` that catches `ImportError`, is allowed:
+        `program_imports` leaves it out.
+
+        Arguments:
+        * `program` (`Path`):
+          The program.
+
+        Raises:
+        * `RuntimeError`:
+          Naming each such import, its line and where it comes from.
+        """
+        # Each required import of the program's own, in order.
+        found: list[str] = []
+        module: str
+        line: int
+        for module, line, _ in program_imports(
+                self.program_text(program)[0]):
+            where: str = self.local_module(program, module)
+            if where:
+                found.append(f"line {line} imports `{module}` ({where})")
+        if found:
+            raise RuntimeError(
+                f"`{program.name}` " + and_list(found) + ", but a release "
+                "is one file, which cannot carry "
+                + ("it" if len(found) == 1 else "them")
+                + f"; put the code into `{program.name}`, or publish it as "
+                "a package")
+
+    def local_module(self, program: Path, module: str) -> str:
+        """Say where a module of the program's own comes from, if it is.
+
+        A file or directory beside the program, or a name the developer
+        lists in `local` for a module `ezpkg` cannot see, such as one in
+        a `lib/` the program puts on `sys.path` itself (`I.mlmfpn`).
+
+        Arguments:
+        * `program` (`Path`):
+          The program.
+        * `module` (`str`):
+          A top-level module it imports.
+
+        Returns:
+        * (`str`): Where it comes from, for a message, or an empty
+          string when it is not the program's own.
+        """
+        # Beside the program first, then the developer's `local` list.
+        if (program.parent / f"{module}.py").is_file():
+            return f"`{module}.py` beside it"
+        if (program.parent / module).is_dir():
+            return f"`{module}/` beside it"
+        settings: Settings | None = self.settings()
+        if settings is not None and module in settings.local:
+            return "listed in " + self.setting_at("local", module)
+        return ""
 
     @staticmethod
     def module_origin(module: str) -> str:
@@ -6834,6 +6939,122 @@ class EZPkg:
                 writer.write("Please answer y, n, or ? for more.\n")
         return False
 
+    def choose(self, program: Path, wanting: str, module: str,
+               package: str) -> str:
+        """Ask a developer what a module guessed only by its name is.
+
+        A module that is not beside the program, not installed, and not
+        in `MODULE_PACKAGES` is guessed to be the package of its name,
+        and `prove` shows that package provides it.  That is no proof it
+        is the one meant: it may be the program's own module, missing
+        from a scratch copy, and a stranger's package of the same name
+        would run unasked (`I.mlmfpn`, the reporter's `scplot`).  So the
+        developer, who is at the terminal, chooses from every option,
+        numbered (Wayne, 2026-10-25), which is a developer's only
+        question.  As for `consent`, there is no default, a typo asks
+        again, and no answer, or no terminal (or a set `CI`), is nobody
+        to choose: nothing is fetched.  A `1` is remembered in the
+        stash's `chosen`, so the same module is never asked about again,
+        even after its import has gone and come back.
+
+        Arguments:
+        * `program` (`Path`):
+          The program.
+        * `wanting` (`str`):
+          What needs the module, to begin the question, such as
+          ``prog.py` line 12 imports `scplot``.
+        * `module` (`str`):
+          The module.
+        * `package` (`str`):
+          The guessed package, which `prove` accepted.
+
+        Returns:
+        * (`str`): `fetch` for the package, `own` for the program's own
+          module, or empty when nobody chose.
+        """
+        # Chosen before, or nobody to choose.
+        held: object = self.stash().get("chosen")
+        chosen: dict[str, str] = held if isinstance(held, dict) else {}
+        if chosen.get(module) == normal_name(package):
+            return "fetch"
+        opened: tuple[IO[str], IO[str]] | None = self.terminal()
+        if opened is None:
+            return ""
+
+        # The options, numbered, each said in full.
+        title: str
+        summary: str
+        title, summary = self.proved.get(normal_name(package),
+                                         (package, ""))
+        width: int
+        writer: IO[str]
+        reader: IO[str]
+        writer, reader = opened
+        width = columns(writer)
+        options: list[str] = [
+            cut(f"1. PyPI's {title}" + (f": {summary}" if summary else ""),
+                width),
+            f"2. A module of `{program.name}`'s own"]
+        question: str = (
+            wrapped(f"{wanting}, which is neither beside "
+                    f"`{program.name}` nor installed.  Which is it?", width)
+            + "\n" + "\n".join(options) + "\n[1=>PyPI|2=>Own]: ")
+        answer: str
+        typos: int = 0
+        with writer, reader:
+            while typos < ATTEMPTS:
+                writer.write(question)
+                writer.flush()
+                answer = answer_from(reader, writer)
+
+                # Standard error sent to a file tells the whole story.
+                if not sys.stderr.isatty():
+                    print(f"{question}{answer.strip()}", file=sys.stderr)
+
+                # A terminal that has gone away is nobody; an empty line
+                # asks again; anything else but 1 or 2 is a typo.
+                if not answer:
+                    writer.write("\n")
+                    return ""
+                answer = answer.strip()
+                if not answer:
+                    continue
+                if answer == "1":
+                    self.put_stash(chosen={**chosen,
+                                           module: normal_name(package)})
+                    return "fetch"
+                if answer == "2":
+                    return "own"
+                typos += 1
+                writer.write("Please answer 1 or 2.\n")
+        return ""
+
+    def unchosen(self, program: Path, wanting: str, module: str,
+                 package: str, choice: str) -> str:
+        """Say why a guessed package was not fetched, after `choose`.
+
+        Arguments:
+        * `program`, `wanting`, `module`, `package` (`str`):
+          As `choose` takes them.
+        * `choice` (`str`):
+          What `choose` returned, `own` or empty.
+
+        Returns:
+        * (`str`): One message, saying how to choose by hand.
+        """
+        # The program's own, or nobody chose.
+        own: str = (f"put `{module}.py` beside `{program.name}`, or list "
+                    f"`{module}` in `local` in `{program.name}.toml`")
+        if choice == "own":
+            return (f"{wanting}, `{program.name}`'s own module, so nothing "
+                    f"was fetched: {own}.")
+        title: str = self.proved.get(normal_name(package), (package, ""))[0]
+        return (f"{wanting}, which is neither beside `{program.name}` nor "
+                f"installed, so nothing was fetched without asking.  If it "
+                f'means PyPI\'s {title}, add "{package}" to `dependencies` '
+                f"in `{program.name}.toml`; if it is `{program.name}`'s "
+                f"own, {own}.")
+
     def gate(self, wheels: Sequence[Path], asking: Sequence[str] = (),
              new: Sequence[Path] | None = None) -> None:
         """Record, enforce or ask, as the program's mode says.
@@ -6845,8 +7066,8 @@ class EZPkg:
         judgement replaces the recipient's prompt rather than being
         added to it.
 
-        The program's developer is never asked, and an end user is asked
-        once per program (its path): a yes covers it and its later
+        The program's developer is never asked this, and an end user is
+        asked once per program (its path): a yes covers it and its later
         versions, whose new packages arrive silently, as Ubuntu updates
         do (`T.abfd`).  The run that agrees sets `agreeing`, so that
         `provide` lists what was stored.  Approvals stand in for the
@@ -7817,6 +8038,7 @@ class EZPkg:
         try:
             asking = self.range_ezpkg(asking)
             self.check_imports(asking)
+            self.local_imports(program)
 
             # Ranges, then what `release` lists, beside the program.
             # Every form takes the pasted bootstrap out or sends it, so a
@@ -8290,6 +8512,16 @@ class EZPkg:
             elif name == "__main__":
                 wanting = program.name
             trace = trace.tb_next
+
+        # A guess from the module's name alone is the developer's to
+        # choose (`I.mlmfpn`).
+        if top not in MODULE_PACKAGES:
+            needing: str = f"`{wanting}` needed `{top}`"
+            choice: str = self.choose(program, needing, top, package)
+            if choice != "fetch":
+                self.say(0, self.unchosen(program, needing, top, package,
+                                          choice))
+                return False
         held: object = self.stash().get("dependencies")
         self.put_stash(dependencies=[
             *(held if isinstance(held, list) else []), package])
