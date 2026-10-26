@@ -25,3 +25,16 @@ Done, not yet released:
 Next: the suite; then Wayne commits, and the release (`T.ffrp`'s
 procedure) makes `2026-10-26` known on pypi.org.  The other 74
 over-long comment lines in the rest of `R.pcr` are not part of this.
+
+## 2026-10-25, the release
+
+* Wayne committed and pushed `ea695ee` ("Fixing bootstrap issues.").
+  The full suite before it: 341 of 342 passed; the one failure was a
+  stale test list of published bootstraps, fixed (its class passes).
+* `release.yml` testpypi run 40250369533: 28/28, built
+  `0.0.4.dev202610260039`; `./release_check.py testpypi` passed here.
+* Tag `v0.0.4` on `ea695ee`, pushed.
+* The `pypi` run (`gh workflow run release.yml --ref v0.0.4 -f
+  target=pypi`) was refused by Claude Code's permission check, so it
+  waits for Wayne's typed go.  Then: approve, watch, `./release_check.py
+  pypi 0.0.4`, `Summary.md`, close.
