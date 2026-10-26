@@ -24,3 +24,13 @@ so the stash records the new pin.  End users' release pins hold.
 Seen end to end in the scratch home: the stash's 0.0.1 gave way,
 `ezpkg==0.0.5` came alone from pypi.org, `cowsay` kept its pin and
 date, and the next run fetched nothing.
+
+Wayne's machine, rehearsed 2026-10-26 on a copy of his real
+`~/.ezpkg` with `ezpkg.whl` deleted and the test.pypi.org
+`0.0.6.dev202610262058` wheel (SHA-256 checked) in its place, as the
+bootstrap would fetch 0.0.6 from pypi.org (`PIP_FIND_LINKS` stood in for
+pypi.org having it): the demo, unchanged, ran headless twice; its stash
+went from `ezpkg==0.0.1` to the dev pin and kept its date.  Cached
+0.0.1-0.0.5 cannot be rescued by new code (0.0.1 decides first, and
+with Part 1's floor raised it stops with `ResolutionImpossible` on its
+own stash pin), so the one repair is deleting `ezpkg.whl` once.

@@ -486,16 +486,12 @@ the `except` at the bottom stops the program with
     They are always referred to by their published date.
   * If Part 1's `ezpkg` entry asks for a different version, this `ezpkg`
     fetches that one and restarts the program using it instead.
-<!-- Claude (2026-10-26, I.cernb, I.mbicamp): proposed bullets to add
-     here, after "If Part 1's `ezpkg` entry ...":
-  * If the bootstrap is newer than every bootstrap this `ezpkg` knows
-    (its date is later), this `ezpkg` is too old for it: it fetches the
-    newest `ezpkg`, keeps it as `~/.ezpkg/ezpkg.whl` in place of the
-    old one, and restarts the program using it.
-  * A module the program imports may carry a bootstrap of its own, as a
-    program that is also a library does.  That bootstrap is checked
-    against the module's own text, and nothing is fetched again.
--->
+  * If the bootstrap is newer than any this `ezpkg` knows, this `ezpkg`
+    is too old for it: it fetches the newest `ezpkg` into
+    `~/.ezpkg/ezpkg.whl` and restarts the program using it.
+  * A module the program imports may carry a bootstrap of its own.  It
+    is checked against that module's own text, and nothing is fetched
+    again.
 
 `ezpkg` fetches packages with `pip`, the standard Python tool.  It downloads
 its own copy of `pip` (the newest one your Python can run) and keeps it

@@ -322,9 +322,9 @@ Every rule here takes its source from `../aicontexts/rule_sources/`
 (Wayne, 2026-10-25), as `aicontexts`' own rules do; a rule's copy is
 now its `Details.md`.  `../claude_code_rules/` is deleted.
 `rule_sources/` also holds `General_AI_Rules.md`, not a rule here.
-The `aic` and `ai_contexts` links (git-ignored) point into
-`../aicontexts/`, whose program is still `ai_contexts.py`; re-point
-them, and `.gitignore`, if it is renamed.  `aicontexts` builds from a
+`aic` and `ai_contexts` come from `uv tool install aicontexts` (in
+`~/.local/bin`, Wayne, 2026-10-26); the project has no links to
+them.  `aicontexts` builds from a
 `pyproject.toml`, so `R.gwr`'s `build` job (written from `ezpkg`'s
 hand-built wheel) may need a `python -m build` note when it goes to
 pypi.org.

@@ -31,3 +31,15 @@ Start's Part 1 is now `ezpkg>=0.0.4,<0.1` (`quick_start.py`,
 under "How `EZPkg` Actually Works".  Tested with mocks
 (`test_a_newer_bootstrap_fetches_a_newer_ezpkg`); a real run needs an
 `ezpkg` newer than a cached 0.0.6.
+
+Rehearsals, 2026-10-26: `release.yml` testpypi run 40400319739 28/28
+(`0.0.6.dev202610262058`), `email_check.yml` 40400324441 13/13,
+`./release_check.py testpypi` passed.  The newer-bootstrap fetch seen
+for real: a cached 0.0.6 wheel of this tree, a made-up 0.0.7 knowing a
+fake bootstrap `2026-11-01` (`None, 61`) served by a local static index
+(`PIP_INDEX_URL`), and a program carrying it.  Run 1 said "`prog.py`
+carries the bootstrap `2026-11-01`, which is newer than `ezpkg` 0.0.6,
+so `ezpkg` 0.0.7 was fetched to run it." and ran with 0.0.7; run 2
+started on 0.0.7 with nothing fetched.  README "How `EZPkg` Actually
+Works" has a bullet for it (Wayne: small edits there are fine).
+Wayne declined a Troubleshooting entry: he is the only user.
