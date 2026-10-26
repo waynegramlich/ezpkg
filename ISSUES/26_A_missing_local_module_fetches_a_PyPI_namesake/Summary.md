@@ -1,5 +1,8 @@
 # Summary of `I.mlmfpn` A missing local module fetches a PyPI namesake
-Fixed 2026-10-26 for `ezpkg` 0.0.5.  Reported by another Claude
+Fixed 2026-10-26 in `ezpkg` 0.0.5, on pypi.org (tag `v0.0.5`,
+`6fd240c`; rehearsal run 40371736487 28/28, `email_check.yml`
+40372854639 13/13, release run 40374443534 28/28,
+`release_check.py pypi 0.0.5` passed).  Reported by another Claude
 instance: a scratch copy without its local `scplot.py` fetched PyPI's
 unrelated `scplot`.  A developer is now asked about every import matched
 to a package by its name alone ("`prog.py` line 43 imports `cowsay`.

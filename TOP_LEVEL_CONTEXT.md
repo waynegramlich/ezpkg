@@ -249,7 +249,8 @@ program, ever, and the program is never edited.  `prog.ezpkg`,
   included, at Wayne's word for that release), and does GitHub's
   settings with `gh api` rather than sending Wayne to the web pages.
 * `ezpkg` is on pypi.org: 0.0.1 (2026-10-25, `T.utpat`), 0.0.2, 0.0.3
-  and 0.0.4 (the same day, `I.srlfnp`, `I.bfms` and `I.bce7c`), so the
+  and 0.0.4 (the same day, `I.srlfnp`, `I.bfms` and `I.bce7c`), and
+  0.0.5 (2026-10-26, `I.mlmfpn`), so the
   Quick Start works for a new user; `release_check.py pypi|testpypi
   VERSION` checks what was published.  A release follows `T.ffrp`'s procedure: bump
   `__version__`, Wayne commits, Claude pushes, rehearses on
