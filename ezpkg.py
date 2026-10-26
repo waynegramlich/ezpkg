@@ -74,7 +74,7 @@ from typing import IO, Any, overload
 # The one place the version is written down.  `bootstrap.py` prints it
 # after importing, and `release_wheel` in the test suite writes the
 # wheel's version over it in the copy that it packages.
-__version__: str = "0.0.3"
+__version__: str = "0.0.4"
 
 # How many times `EZPkg.consent` will put the same question, when the
 # answer is neither yes nor no.  Bounded, so that a terminal feeding
@@ -159,6 +159,8 @@ BOOTSTRAPS: dict[str, str] = {
         "2026-10-23",
     "a3efb4355b3db21d6107b2ee652e96fda9b9c01d20f9d70cd87808d54774796a":
         "2026-10-25",
+    "177563c5e3ed768aea5e5bbfcf46865e4fce6be48797750749c9cc4994cd62ea":
+        "2026-10-26",
 }
 
 # The constructor writes this into the cache as `remove.py`, so that
@@ -274,8 +276,9 @@ for _, row in sorted(rows, reverse=True):
 # written with `\x23`, which is `#`, so that this file's own source
 # holds only one PEP 723 block: two would be refused as ambiguous.
 QUICK_START: str = '''#!/usr/bin/env python3
-# Part 1: These lines look like `#` comments, but they are Python's inline
-# script metadata (PEP 723) that the EZPkg bootstrap needs.  Never remove them.
+# Part 1: These lines look like `#` comments, but they are Python's
+# inline script metadata (PEP 723) that the EZPkg bootstrap needs.
+# Never remove them.
 \x23 /// script
 # requires-python = ">=3.11"
 # dependencies = ["ezpkg>=0.0.1.dev0,<0.1", "cowsay"]
@@ -296,13 +299,13 @@ import urllib.request as req
 
 try:  # Do not edit try block!  See https://pypi.org/project/ezpkg/
     s = "find ezpkg"; t = pathlib.Path.home()/".ezpkg"; w = t/"ezpkg.whl"
-    def g(u: str) -> bytes:  # Fetch u; with curl if no certificates.
+    def g(u: str) -> bytes:  # Fetch u; curl if no certificates.
         try: return bytes(req.urlopen(u, None, 60).read())
-        except urllib.error.URLError as y: z = y  # python.org's macOS.
+        except urllib.error.URLError as y: z = y  # python.org Macs.
         try: return subprocess.run(["curl", "-fsSL", u],
                                    capture_output=True, check=True).stdout
         except Exception: raise z from None
-    try: m = None; m = importlib.import_module("ezpkg")  # Already importable?
+    try: m = None; m = importlib.import_module("ezpkg")  # Present?
     except ImportError: pass
     if m is None and not w.is_file():  # Not downloaded yet.
         s = "download ezpkg"; d = g("https://pypi.org/pypi/ezpkg/json")
@@ -315,9 +318,9 @@ try:  # Do not edit try block!  See https://pypi.org/project/ezpkg/
     if m is None:  # Python imports it straight from the wheel.
         s = "import ezpkg"; sys.path.insert(0, str(w))
         m = importlib.import_module("ezpkg")
-    s = "fetch packages"; m.EZPkg().install(bootstrap="2026-10-25")
-except Exception as x:
-    raise SystemExit(f"ezpkg: {s} failed: {x!r}")  # Do not edit try block!
+    s = "fetch packages"; m.EZPkg().install(bootstrap="2026-10-26")
+except Exception as x:  # Do not edit try block!
+    raise SystemExit(f"ezpkg: {s} failed: {x!r}")
 # End the EZPkg bootstrap.  Your imports go below it.
 
 # Part 3: Your imports, all after the bootstrap.
@@ -453,6 +456,30 @@ except Exception as x:
     s = "fetch packages"; m.EZPkg().install(bootstrap="2026-10-23")
 except Exception as x:
     raise SystemExit(f"ezpkg: {s} failed: {x!r}")''',
+    "2026-10-25": '''try:  # Do not edit try block!  See https://pypi.org/project/ezpkg/
+    s = "find ezpkg"; t = pathlib.Path.home()/".ezpkg"; w = t/"ezpkg.whl"
+    def g(u: str) -> bytes:  # Fetch u; with curl if no certificates.
+        try: return bytes(req.urlopen(u, None, 60).read())
+        except urllib.error.URLError as y: z = y  # python.org's macOS.
+        try: return subprocess.run(["curl", "-fsSL", u],
+                                   capture_output=True, check=True).stdout
+        except Exception: raise z from None
+    try: m = None; m = importlib.import_module("ezpkg")  # Already importable?
+    except ImportError: pass
+    if m is None and not w.is_file():  # Not downloaded yet.
+        s = "download ezpkg"; d = g("https://pypi.org/pypi/ezpkg/json")
+        e = next(e for e in json.loads(d)["urls"] if e["url"][-4:] == ".whl")
+        r = g(e["url"])
+        if hashlib.sha256(r).hexdigest() != e["digests"]["sha256"]:
+            raise ValueError(f"{e['filename']} fails its SHA-256 check")
+        t.mkdir(parents=True, exist_ok=True); p = t/"ezpkg.part"
+        p.write_bytes(r); p.replace(w)  # The rename is atomic.
+    if m is None:  # Python imports it straight from the wheel.
+        s = "import ezpkg"; sys.path.insert(0, str(w))
+        m = importlib.import_module("ezpkg")
+    s = "fetch packages"; m.EZPkg().install(bootstrap="2026-10-25")
+except Exception as x:
+    raise SystemExit(f"ezpkg: {s} failed: {x!r}")  # Do not edit try block!''',
 }
 
 
@@ -1068,7 +1095,7 @@ release = [
 # "bootstrap" specifies which EZPkg bootstrap the program carries.  Each
 # bootstrap is named by the date it was published ("YYYY-MM-DD").
 # bootstrap = "update"      # A release replaces an older one (default).
-# bootstrap = "2026-10-25"  # Keep exactly this one.
+# bootstrap = "2026-10-26"  # Keep exactly this one.
 
 # The next options are rarely needed.  Most people can stop reading now.
 # They are needed for difficult situations that EZPkg simply cannot figure
@@ -1127,7 +1154,7 @@ class Settings:
       says otherwise, and with none there are no releases.
     * `bootstrap` (`str`):
       `update`, or the short name of the published bootstrap the
-      program must carry, such as `2026-10-25` (Wayne, S5.1).
+      program must carry, such as `2026-10-26` (Wayne, S5.1).
     * `update_frequency` (`str`):
       How old the frozen date may grow before a run takes the newest
       versions, from `UPDATE_FREQUENCY` (`EZPkg.declared_date`).

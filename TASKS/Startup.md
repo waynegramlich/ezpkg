@@ -1,3 +1,5 @@
+@../ISSUES/25_Bootstrap_comments_exceed_72_columns/Details.md
+@../ISSUES/25_Bootstrap_comments_exceed_72_columns/Context.md
 @../ISSUES/24_The_bootstrap_fails_mypy_strict/Summary.md
 @../ISSUES/23_The_second_run_looks_for_a_newer_pip/Summary.md
 @7_A_fetch_from_the_real_PyPI/Summary.md

@@ -105,7 +105,7 @@ the tests nothing more (5.1 of `T.rps`).  Nor do the helpers need
 dependencies as the thing it tests.
 
 `EZPKG_TEST` chooses which `bootstrap.py` cases run: `FAST`, the
-default, runs the shipping bootstrap (`2026-10-25`); `NONE` runs none,
+default, runs the shipping bootstrap (`2026-10-26`); `NONE` runs none,
 and is only the coverage tool's baseline; a case's name runs that one.
 `EZPKG_PYPI=1` adds `PyPITest`, which fetches a few pinned packages
 from the real pypi.org; it is opt in because it can fail for reasons
@@ -296,7 +296,7 @@ PROMPT: str = "[y=>Yes|n=>No|?=>Explain]:"
 # straight from it, so it needs no `pip` on the machine; `EZPkg.own_pip`
 # fetches one later.  It fetches with `curl` when this Python has no
 # certificates.  See `T.ewar`, `I.btosc` and `T.abfd`.
-SHIPPING: str = "2026-10-25"
+SHIPPING: str = "2026-10-26"
 
 
 # How long the `slow` fault waits.  Long enough that several processes
@@ -6874,14 +6874,14 @@ class BootstrapCheckTest(unittest.TestCase):
                              + textwrap.indent(edited, indent))
                 first: int = 3 if indent else 2
                 refusal: str | None = ezpkg.bootstrap_refusal(
-                    Path("prog.py"), text, "2026-10-25")
+                    Path("prog.py"), text, "2026-10-26")
                 assert refusal is not None
                 self.assertIn("ezpkg: prog.py: its bootstrap (lines "
                               f"{first}-", refusal)
                 self.assertIn(
                     f'  line {first + offset}:    s = "download ezpkgx"; d = '
                     'g("https://pypi.org/pypi/ezpkg/json")\n'
-                    '  2026-10-25: s = "download ezpkg"; d = '
+                    '  2026-10-26: s = "download ezpkg"; d = '
                     'g("https://pypi.org/pypi/ezpkg/json")\n'
                     "                                 |\n", refusal)
                 self.assertTrue(refusal.endswith("then run it again."))
@@ -6896,8 +6896,8 @@ class BootstrapCheckTest(unittest.TestCase):
         # Published code, wherever it is indented.
         block: str = self.shipping()
         fine: list[tuple[str, str]] = [
-            (block, "2026-10-25"),
-            ("if True:\n" + textwrap.indent(block, "    "), "2026-10-25"),
+            (block, "2026-10-26"),
+            ("if True:\n" + textwrap.indent(block, "    "), "2026-10-26"),
             (ezpkg.OLD_BOOTSTRAP_TEXTS["nopip5 of 2026-10-12"], "nopip5"),
         ]
         text: str
@@ -6919,7 +6919,7 @@ class BootstrapCheckTest(unittest.TestCase):
         for text in edits:
             with self.subTest(edit=text):
                 self.assertIsNotNone(ezpkg.bootstrap_refusal(
-                    Path("prog.py"), text, "2026-10-25"))
+                    Path("prog.py"), text, "2026-10-26"))
 
     def test_added_and_missing_lines_say_where(self) -> None:
         """A line only one side has is named, and long lists are cut."""
@@ -6931,13 +6931,13 @@ class BootstrapCheckTest(unittest.TestCase):
         added: str = "".join([lines[0], '    print("hi")\n', *lines[1:]])
         dropped: str = "".join([*lines[:gone], *lines[gone + 1:]])
         more: str | None = ezpkg.bootstrap_refusal(Path("prog.py"), added,
-                                                   "2026-10-25")
+                                                   "2026-10-26")
         fewer: str | None = ezpkg.bootstrap_refusal(Path("prog.py"),
-                                                    dropped, "2026-10-25")
+                                                    dropped, "2026-10-26")
         assert more is not None and fewer is not None
         self.assertIn('  line 2:     print("hi")\n'
-                      "              (not in 2026-10-25)\n", more)
-        self.assertIn(f"  2026-10-25: {lines[gone].strip()}\n", fewer)
+                      "              (not in 2026-10-26)\n", more)
+        self.assertIn(f"  2026-10-26: {lines[gone].strip()}\n", fewer)
         self.assertIn(f"(missing after line {gone})\n", fewer)
 
         # Seven changed lines show six, then a count.  Trailing space
@@ -6945,7 +6945,7 @@ class BootstrapCheckTest(unittest.TestCase):
         many: str = "".join(f"{line.rstrip()}  # Seven.\n" if 0 < index < 8
                             else line for index, line in enumerate(lines))
         cut: str | None = ezpkg.bootstrap_refusal(Path("prog.py"), many,
-                                                  "2026-10-25")
+                                                  "2026-10-26")
         assert cut is not None
         self.assertEqual(cut.count("|\n"), 6, cut)
         self.assertIn("  ... and 1 more\n", cut)
@@ -6973,7 +6973,7 @@ class BootstrapCheckTest(unittest.TestCase):
 
         # A caller naming a bootstrap the program does not have.
         missing: str | None = ezpkg.bootstrap_refusal(
-            Path("prog.py"), "print('hello')\n", "2026-10-25")
+            Path("prog.py"), "print('hello')\n", "2026-10-26")
         assert missing is not None
         self.assertIn("no ezpkg bootstrap was found", missing)
 
@@ -7173,7 +7173,7 @@ class BootstrapCheckTest(unittest.TestCase):
                          first.stderr)
         self.assertRegex(" ".join(first.stderr.split()),
                          r"`prog\.py` carries the bootstrap `nopip6` \(lines "
-                         r"6-\d+\), but `ezpkg` now has `2026-10-25`\. The next "
+                         r"6-\d+\), but `ezpkg` now has `2026-10-26`\. The next "
                          r"release replaces it\.")
         second: subprocess.CompletedProcess[str] = run()
         self.assertEqual((second.returncode, second.stderr), (0, ""))
@@ -7203,7 +7203,7 @@ class BootstrapCheckTest(unittest.TestCase):
                          (0, "ran\n"), released.stderr)
         flat: str = " ".join(released.stderr.split())
         self.assertRegex(flat, r"This release's copies carry the bootstrap "
-                         r"`2026-10-25` in place of `nopip6` \(lines "
+                         r"`2026-10-26` in place of `nopip6` \(lines "
                          r"\d+-\d+ of `prog\.py`\)\.")
         self.assertIn("`prog.py` 1.0.0 was not released: the declared "
                       "packages did not come from the cache", flat)
@@ -8379,7 +8379,7 @@ class MetadataTest(unittest.TestCase):
                 self.assertFalse(venv.build_release(
                     program, ezpkg.Settings(
                         version="1.0.0", release=("email", "zipapp", "uv"),
-                        bootstrap="2026-10-25"),
+                        bootstrap="2026-10-26"),
                     [], [], "1.0.0"))
             said: str = " ".join(told.getvalue().split())
             self.assertIn("no `prog-1.0.0.pyz`: cannot bundle tracer: "
@@ -8459,7 +8459,8 @@ class MetadataTest(unittest.TestCase):
                   "keep only one of them")),
                 ('bootstrap = "nopip9"\n',
                  ('`prog.py.toml` line 1, `bootstrap = "nopip9"`: `bootstrap` must be "update" or a '
-                  'published bootstrap, "2026-10-23" or "2026-10-25"')),
+                  'published bootstrap, "2026-10-23", "2026-10-25" or '
+                  '"2026-10-26"')),
                 ('\nupdate_frequency = "daily"\n',
                  ('`prog.py.toml` line 2, `update_frequency = "daily"`: '
                   "unknown setting `update_frequency` (did you mean "
@@ -9182,7 +9183,7 @@ class MetadataTest(unittest.TestCase):
         """
         # Each state with no name, and the words for it.
         venv: ezpkg.EZPkg = self.developer_here()[1]
-        settings: ezpkg.Settings = ezpkg.Settings(bootstrap="2026-10-25")
+        settings: ezpkg.Settings = ezpkg.Settings(bootstrap="2026-10-26")
         state: str
         said: str
         for state, said in [("edited", r"an\s+edited\s+one"),
@@ -9191,7 +9192,7 @@ class MetadataTest(unittest.TestCase):
                   unittest.mock.patch.object(
                       venv, "bootstrap_status", return_value=(state, "")),
                   self.assertRaisesRegex(
-                      SystemExit, rf"carries\s+{said},\s+not\s+`2026-10-25`")):
+                      SystemExit, rf"carries\s+{said},\s+not\s+`2026-10-26`")):
                 venv.named_bootstrap(settings)
 
     def test_no_program_means_no_release_and_no_check(self) -> None:
@@ -9205,7 +9206,7 @@ class MetadataTest(unittest.TestCase):
             self.assertFalse(venv.release(
                 ezpkg.Settings(version="1.0.0", release=("email",)),
                 [], [], "1.0.0"))
-            venv.refuse_an_edited_bootstrap("2026-10-25")
+            venv.refuse_an_edited_bootstrap("2026-10-26")
 
     def test_settings_that_are_not_utf8_are_refused(self) -> None:
         """TOML is UTF-8, so other bytes stop the run, naming the file."""
