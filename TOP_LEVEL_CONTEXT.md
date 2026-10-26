@@ -106,13 +106,24 @@ A changed bootstrap is a new one, comments and spaces included
 trimmed, a published one).  It needs a new name, the date it is published
 (`DATED`; `nopip3`-`nopip7` were never released and stay only as test
 fixtures), its
-fingerprint added to the end of `BOOTSTRAPS` in `ezpkg.py`, and the
-previous text kept in `OLD_BOOTSTRAP_TEXTS`.  `bootstrap.py`'s copy
+fingerprint added to the end of `BOOTSTRAPS` in `ezpkg.py`, its name
+and the `ezpkg` version first carrying it added to `BOOTSTRAP_FLOORS`,
+and the previous text kept whole in `OLD_BOOTSTRAP_TEXTS` (the last
+line's comment included; `I.r2birae`).  The Quick Start's Part 1 floor
+moves to that version too.  `bootstrap.py`'s copy
 spells things as variables, so the suite runs it with
 `EZPKG_BOOTSTRAP=unchecked`.
 
+Since 0.0.6 (2026-10-26): a bootstrap dated after every one this
+`ezpkg` knows fetches the newest `ezpkg` into `ezpkg.whl` and restarts
+(`outgrown`, `I.cernb`); a developer's stash pin older than the
+bootstrap's floor or Part 1's entry gives way (`stale_pin`, `fetch`,
+`I.dspef`); a bootstrap in an imported module is checked against that
+module (`calling_module`, `DECLARED`, `I.mbicamp`).
+
 Part 1 of every released program lists `ezpkg` first (the Quick
-Start's is `ezpkg>=0.0.1.dev0,<0.1` until the real release), and that
+Start's is `ezpkg>=0.0.4,<0.1`, the first `ezpkg` that knows
+`2026-10-26`), and that
 entry chooses which `ezpkg` runs it (`T.eui`).  A release writes Part 1
 into its copy when the program has none (`with_script_block`), with a
 `requires-python` worked out from the syntax and the packages
@@ -262,6 +273,13 @@ program, ever, and the program is never edited.  `prog.ezpkg`,
   wait until it names the new version (S5.1, S5.2).
 
 ## Next Steps (2026-10-26, after 0.0.5)
+
+0.0.6 in progress: `I.cernb~27`, `I.mbicamp~28`, `I.dspef~29` and
+`I.r2birae~30` are built and tested, from Wayne's one customer's
+report (the `solidcraftcnc` demo, `notes.txt`).  Wayne wants these
+real-use failures found, not worked around.  Then the release
+procedure, and Wayne's demo with its 0.0.1 `ezpkg.whl` (Part 1's floor
+switches it, `T.eui`).
 
 `T.zcpom~9` (a `zipapp` carries the program's own modules) is
 Pending, agreed but not built; Wayne's decisions are in its

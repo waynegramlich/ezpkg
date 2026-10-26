@@ -1,4 +1,12 @@
 @9_A_zipapp_carries_the_programs_own_modules/Details.md
+@../ISSUES/27_A_cached_ezpkg_refuses_a_newer_bootstrap/Details.md
+@../ISSUES/27_A_cached_ezpkg_refuses_a_newer_bootstrap/Context.md
+@../ISSUES/28_A_modules_bootstrap_is_checked_against_the_main_program/Details.md
+@../ISSUES/28_A_modules_bootstrap_is_checked_against_the_main_program/Context.md
+@../ISSUES/29_A_developers_stash_pins_ezpkg_forever/Details.md
+@../ISSUES/29_A_developers_stash_pins_ezpkg_forever/Context.md
+@../ISSUES/30_A_real_2026_10_25_bootstrap_is_refused_as_edited/Details.md
+@../ISSUES/30_A_real_2026_10_25_bootstrap_is_refused_as_edited/Context.md
 @../ISSUES/26_A_missing_local_module_fetches_a_PyPI_namesake/Summary.md
 @../ISSUES/25_Bootstrap_comments_exceed_72_columns/Summary.md
 @../ISSUES/24_The_bootstrap_fails_mypy_strict/Summary.md

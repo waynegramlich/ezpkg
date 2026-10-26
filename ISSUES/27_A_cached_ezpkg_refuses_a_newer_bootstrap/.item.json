@@ -1,0 +1,17 @@
+{
+  "state": "Open",
+  "created": "2026-10-26T19:43:05Z",
+  "updated": "2026-10-26T19:43:09Z",
+  "history": [
+    {
+      "state": "Pending",
+      "time": "2026-10-26T19:43:05Z"
+    },
+    {
+      "state": "Open",
+      "time": "2026-10-26T19:43:09Z"
+    }
+  ],
+  "tag": "cernb",
+  "priority": 1
+}

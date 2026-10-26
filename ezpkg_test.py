@@ -205,6 +205,7 @@ import importlib
 import importlib.metadata
 import inspect
 import io
+import itertools
 import json
 import os
 import pickle
@@ -7266,6 +7267,24 @@ class BootstrapCheckTest(unittest.TestCase):
                     ezpkg.BOOTSTRAPS[ezpkg.bootstrap_fingerprint(text)], name)
                 self.assertEqual(ezpkg.bootstrap_name(text), name)
 
+    def test_a_pasted_text_is_found_whole(self) -> None:
+        """Each published text, pasted and indented, is found as it is.
+
+        `2026-10-25` ends in a comment, which a segment cut where the
+        code ends left behind, so every real paste of it was refused as
+        edited (`I.r2birae`).
+        """
+        # Nested, as `if False:` nests it, and at the top level.
+        name: str
+        text: str
+        for name, text in ezpkg.OLD_BOOTSTRAP_TEXTS.items():
+            nested: str = f"if False:\n{textwrap.indent(text, '    ')}\n"
+            for program in (f"import sys\n{text}\nprint()\n", nested):
+                with self.subTest(name=name, nested=program[:2]):
+                    self.assertEqual(ezpkg.find_bootstrap(program), text)
+                    self.assertIsNone(ezpkg.bootstrap_refusal(
+                        Path("prog.py"), program, name.split()[0]))
+
     def test_a_wrong_name_or_no_bootstrap_is_refused(self) -> None:
         """The name must be the fingerprint's, and a bootstrap must exist."""
         # A published bootstrap calling itself another's name.
@@ -7425,6 +7444,232 @@ class BootstrapCheckTest(unittest.TestCase):
         self.assertEqual((unchecked.returncode, unchecked.stdout),
                          (0, "ran\n"), unchecked.stderr)
         self.assertIn("EZPKG_BOOTSTRAP=unchecked", unchecked.stderr)
+
+    def module_programs(self, mine: str, theirs: str, calls: str
+                        ) -> subprocess.CompletedProcess[str]:
+        """Run a program that imports a module carrying a bootstrap.
+
+        Each paste sits under `if False:`, and the file makes the call
+        its bootstrap would have made, as `install` sees it.
+
+        Arguments:
+        * `mine` (`str`):
+          The program's own bootstrap call, or empty for none.
+        * `theirs` (`str`):
+          The `try` block pasted into `mod.py`.
+        * `calls` (`str`):
+          The name `mod.py`'s call gives its bootstrap.
+
+        Returns:
+        * (`subprocess.CompletedProcess[str]`): The program's run.
+        """
+        # Both find this tree's `ezpkg` and one cache.
+        reach: str = (
+            "import sys\n"
+            f"sys.path.insert(0, {str(Path(__file__).resolve().parent)!r})\n"
+            "import ezpkg\n"
+            "from pathlib import Path\n"
+            f"cache = Path({str(self.root / 'cache')!r})\n")
+        (self.root / "mod.py").write_text(
+            "if False:\n"
+            f"{textwrap.indent(theirs, '    ')}\n"
+            f"{reach}"
+            f"ezpkg.EZPkg(cache).install(bootstrap={calls!r})\n")
+        program: Path = self.root / "prog.py"
+        program.write_text(
+            ("if False:\n"
+             f"{textwrap.indent(self.shipping(), '    ')}\n"
+             f"{reach}"
+             f"ezpkg.EZPkg(cache).install(bootstrap={mine!r})\n"
+             if mine else "")
+            + f"import sys\nsys.path.insert(0, {str(self.root)!r})\n"
+            "import mod\n"
+            "print('ran')\n")
+        environment: dict[str, str] = dict(os.environ)
+        environment.pop("EZPKG_BOOTSTRAP", None)
+        return subprocess.run([sys.executable, str(program)],
+                              env=environment, capture_output=True,
+                              text=True, check=False)
+
+    def test_a_modules_bootstrap_answers_for_itself(self) -> None:
+        """A module's bootstrap is checked against its own file.
+
+        A program carrying `2026-10-26` imports a module carrying
+        `2026-10-25`, as `solidcraftcnc_demo.py` imports
+        `pysolidcraft.py`; each is judged by its own text, and an
+        edit in the module is named as the module's (`I.mbicamp`).
+        """
+        # An older published bootstrap in the module passes.
+        older: str = ezpkg.OLD_BOOTSTRAP_TEXTS["2026-10-25"]
+        both: subprocess.CompletedProcess[str] = self.module_programs(
+            "2026-10-26", older, "2026-10-25")
+        self.assertEqual((both.returncode, both.stdout), (0, "ran\n"),
+                         both.stderr)
+
+        # An edited one is the module's, at its own lines.
+        edited: str = older.replace('"download ezpkg"', '"download x"', 1)
+        refused: subprocess.CompletedProcess[str] = self.module_programs(
+            "2026-10-26", edited, "2026-10-25")
+        self.assertEqual((refused.returncode, refused.stdout), (1, ""))
+        self.assertTrue(refused.stderr.startswith(
+            "ezpkg: mod.py: its bootstrap (lines 2-"), refused.stderr)
+
+        # A module's bootstrap acts for a program that has none.
+        alone: subprocess.CompletedProcess[str] = self.module_programs(
+            "", older, "2026-10-25")
+        self.assertEqual((alone.returncode, alone.stdout), (0, "ran\n"),
+                         alone.stderr)
+
+    def test_calling_module_names_only_an_imported_module(self) -> None:
+        """The main program, or a caller without a file, is `None`."""
+        # Frames whose callers are the main program, a module, and none.
+        def frame(caller: dict[str, object] | None) -> types.FrameType:
+            """Return a frame whose caller has these globals."""
+            back: object = (None if caller is None
+                            else types.SimpleNamespace(f_globals=caller))
+            return cast(types.FrameType,
+                        types.SimpleNamespace(f_back=back))
+        here: str = str(Path(__file__).resolve())
+        self.assertIsNone(ezpkg.calling_module(None))
+        self.assertIsNone(ezpkg.calling_module(frame(None)))
+        self.assertIsNone(ezpkg.calling_module(
+            frame({"__name__": "__main__", "__file__": here})))
+        self.assertIsNone(ezpkg.calling_module(frame({"__name__": "mod"})))
+        self.assertIsNone(ezpkg.calling_module(
+            frame({"__name__": "mod", "__file__": "/no/such/mod.py"})))
+        self.assertEqual(ezpkg.calling_module(
+            frame({"__name__": "mod", "__file__": here})), Path(here))
+
+    def test_every_released_bootstrap_has_a_floor(self) -> None:
+        """Each dated bootstrap names the first `ezpkg` to know it."""
+        # No later than this one, and in order.
+        dated: list[str] = [name for name in ezpkg.BOOTSTRAPS.values()
+                            if ezpkg.DATED.fullmatch(name)]
+        self.assertEqual(list(ezpkg.BOOTSTRAP_FLOORS), dated)
+        floors: list[str] = list(ezpkg.BOOTSTRAP_FLOORS.values())
+        for earlier, later in itertools.pairwise(floors):
+            self.assertTrue(ezpkg.meets(later, f">={earlier}"))
+        self.assertTrue(ezpkg.meets(ezpkg.__version__, f">={floors[-1]}"))
+        self.assertEqual(ezpkg.bootstrap_floor("nopip6"), "")
+
+    def test_newer_than_known_is_a_later_date(self) -> None:
+        """Only a date after the newest known bootstrap is newer."""
+        # The current one, an older one, a later one and no date.
+        newest: str = list(ezpkg.BOOTSTRAPS.values())[-1]
+        self.assertFalse(ezpkg.newer_than_known(newest))
+        self.assertFalse(ezpkg.newer_than_known("2026-10-23"))
+        self.assertTrue(ezpkg.newer_than_known("2099-01-01"))
+        self.assertFalse(ezpkg.newer_than_known("nopip9"))
+
+    def test_a_stale_developer_pin_gives_way(self) -> None:
+        """A pin older than the bootstrap or entry allows will not do.
+
+        And `chosen` then takes this `ezpkg`, where it would otherwise
+        switch to the pinned one (`I.dspef`).
+        """
+        # Pins against the bootstrap `2026-10-26`, whose floor is 0.0.4.
+        venv: ezpkg.EZPkg = ezpkg.EZPkg(self.root / "cache")
+        venv.bootstrap = "2026-10-26"
+        cases: list[tuple[bool, str, str | None, bool]] = [
+            (True, "0.0.1", "ezpkg", True),
+            (True, "0.0.4", "ezpkg", False),
+            (True, "0.0.4", "ezpkg>=0.0.5", True),
+            (True, "0.0.5", None, False),
+            (False, "0.0.1", "ezpkg", False),
+        ]
+        developing: bool
+        pin: str
+        entry: str | None
+        wanted: bool
+        for developing, pin, entry, wanted in cases:
+            with (self.subTest(developing=developing, pin=pin, entry=entry),
+                  unittest.mock.patch.object(venv, "developing",
+                                             return_value=developing),
+                  unittest.mock.patch.object(
+                      venv, "locked",
+                      return_value=["cowsay==6.1", f"ezpkg=={pin}"])):
+                self.assertIs(venv.stale_pin(entry), wanted)
+                if entry is not None:
+                    self.assertIs(venv.chosen(entry),
+                                  wanted or pin == ezpkg.__version__)
+
+    def test_a_stale_pin_fetches_ezpkg_on_its_own(self) -> None:
+        """`ezpkg` comes by a `pip` of its own, without pin or date."""
+        # A developer's stash pinning 0.0.1, for bootstrap 2026-10-26.
+        venv: ezpkg.EZPkg = ezpkg.EZPkg(self.root / "cache")
+        venv.bootstrap = "2026-10-26"
+        locked: list[str] = ["cowsay==6.1", "ezpkg==0.0.1"]
+        with (unittest.mock.patch.object(venv, "developing",
+                                         return_value=True),
+              unittest.mock.patch.object(venv, "locked",
+                                         return_value=locked),
+              unittest.mock.patch.object(
+                  venv, "download",
+                  side_effect=[[Path("b.whl")], [Path("a.whl")]]
+              ) as download):
+            arrived: list[Path] = venv.fetch(
+                ["ezpkg>=0.0.5,<0.1", "cowsay"], [], locked, "2026-10-26")
+        self.assertEqual(arrived, [Path("a.whl"), Path("b.whl")])
+        self.assertEqual(download.call_args_list, [
+            unittest.mock.call(["cowsay"], [], ["cowsay==6.1"],
+                               "2026-10-26"),
+            unittest.mock.call(["ezpkg>=0.0.5,<0.1,>=0.0.4"], [])])
+
+        # A pin that will do is one `pip` for everything.
+        with (unittest.mock.patch.object(venv, "developing",
+                                         return_value=True),
+              unittest.mock.patch.object(
+                  venv, "locked", return_value=["ezpkg==0.0.5"]),
+              unittest.mock.patch.object(venv, "download",
+                                         return_value=[]) as download):
+            venv.fetch(["ezpkg==0.0.5"], [], ["ezpkg==0.0.5"], "")
+        download.assert_called_once_with(["ezpkg==0.0.5"], [],
+                                         ["ezpkg==0.0.5"], "")
+
+    def test_a_newer_bootstrap_fetches_a_newer_ezpkg(self) -> None:
+        """A bootstrap with a later date starts a newer `ezpkg`.
+
+        The newest wheel replaces `ezpkg.whl` and the program starts
+        again with it first on `PYTHONPATH`; an index with nothing
+        newer, or none at all, leaves this `ezpkg` to judge (`I.cernb`).
+        """
+        # An index offering this version and a newer one.
+        venv: ezpkg.EZPkg = ezpkg.EZPkg(self.root / "cache")
+        body: bytes = b"a newer ezpkg"
+
+        def index(*versions: str) -> bytes:
+            """Return the JSON an index gives for these versions."""
+            return json.dumps({"urls": [
+                {"filename": f"ezpkg-{one}-py3-none-any.whl",
+                 "url": f"https://example.invalid/ezpkg-{one}.whl",
+                 "digests": {"sha256": hashlib.sha256(body).hexdigest()}}
+                for one in versions]}).encode()
+        newer: str = "9.9.9"
+        with (unittest.mock.patch.object(
+                ezpkg, "fetch_url",
+                side_effect=[index(ezpkg.__version__, newer), body]),
+              unittest.mock.patch.object(ezpkg, "run_again") as again):
+            venv.outgrown("2099-01-01", Path("prog.py"))
+        whl: Path = self.root / "cache" / "ezpkg.whl"
+        self.assertEqual(whl.read_bytes(), body)
+        environment: dict[str, str] = again.call_args.args[0]
+        self.assertEqual(environment["EZPKG_SWITCHED"], newer)
+        self.assertEqual(environment["PYTHONPATH"].split(os.pathsep)[0],
+                         str(whl))
+
+        # Nothing newer, no index, or a known bootstrap: nothing done.
+        whl.unlink()
+        with (unittest.mock.patch.object(
+                ezpkg, "fetch_url",
+                side_effect=[index(ezpkg.__version__),
+                             urllib.error.URLError("down")]) as fetched,
+              unittest.mock.patch.object(ezpkg, "run_again") as again):
+            venv.outgrown("2099-01-01", None)
+            venv.outgrown("2099-01-01", None)
+            venv.outgrown("2026-10-26", None)
+        self.assertEqual(fetched.call_count, 2)
+        again.assert_not_called()
+        self.assertFalse(whl.exists())
 
     def test_a_newer_bootstrap_is_told_once_and_replaced_at_release(
             self) -> None:

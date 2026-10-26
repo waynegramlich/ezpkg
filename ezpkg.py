@@ -69,13 +69,13 @@ import zipapp
 import zipfile
 from collections.abc import Collection, Mapping, Sequence
 from pathlib import Path
-from types import ModuleType
+from types import FrameType, ModuleType
 from typing import IO, Any, overload
 
 # The one place the version is written down.  `bootstrap.py` prints it
 # after importing, and `release_wheel` in the test suite writes the
 # wheel's version over it in the copy that it packages.
-__version__: str = "0.0.5"
+__version__: str = "0.0.6"
 
 # How many times `EZPkg.consent` will put the same question, when the
 # answer is neither yes nor no.  Bounded, so that a terminal feeding
@@ -162,6 +162,16 @@ BOOTSTRAPS: dict[str, str] = {
         "2026-10-25",
     "177563c5e3ed768aea5e5bbfcf46865e4fce6be48797750749c9cc4994cd62ea":
         "2026-10-26",
+}
+
+# The first `ezpkg` that knows each released bootstrap.  A program
+# carrying one needs at least that `ezpkg`, so a developer's stash
+# pinning an older one gives way (`I.dspef`).  Publishing a bootstrap
+# adds its name here with the version that first carries it.
+BOOTSTRAP_FLOORS: dict[str, str] = {
+    "2026-10-23": "0.0.1",
+    "2026-10-25": "0.0.3",
+    "2026-10-26": "0.0.4",
 }
 
 # The constructor writes this into the cache as `remove.py`, so that
@@ -282,7 +292,7 @@ QUICK_START: str = '''#!/usr/bin/env python3
 # Never remove them.
 \x23 /// script
 # requires-python = ">=3.11"
-# dependencies = ["ezpkg>=0.0.1.dev0,<0.1", "cowsay"]
+# dependencies = ["ezpkg>=0.0.4,<0.1", "cowsay"]
 \x23 ///
 """Try `EZPkg`: fetch the `cowsay` package on first use, then run."""
 
@@ -365,7 +375,7 @@ OLD_BOOTSTRAP_TEXTS: dict[str, str] = {
         importlib.invalidate_caches(); m = importlib.import_module("ezpkg")
     s = "fetch packages"; m.EZPkg().install(bootstrap="nopip5")
 except Exception as x:
-    raise SystemExit(f"ezpkg: {s} failed: {x!r}")''',
+    raise SystemExit(f"ezpkg: {s} failed: {x!r}")  # Do not edit try block!''',
     "nopip6 of 2026-10-16": '''try:  # Do not edit try block!  See https://pypi.org/project/ezpkg/
     s = "find home"; t = pathlib.Path.home()/".ezpkg"; w = t/"pip.whl"
     m = None
@@ -398,7 +408,7 @@ except Exception as x:
         importlib.invalidate_caches(); m = importlib.import_module("ezpkg")
     s = "fetch packages"; m.EZPkg().install(bootstrap="nopip6")
 except Exception as x:
-    raise SystemExit(f"ezpkg: {s} failed: {x!r}")''',
+    raise SystemExit(f"ezpkg: {s} failed: {x!r}")  # Do not edit try block!''',
     "nopip7 of 2026-10-17": '''try:  # Do not edit try block!  See https://pypi.org/project/ezpkg/
     s = "find home"; t = pathlib.Path.home()/".ezpkg"; w = t/"pip.whl"
     m = n = None
@@ -432,7 +442,7 @@ except Exception as x:
         importlib.invalidate_caches(); m = importlib.import_module("ezpkg")
     s = "fetch packages"; m.EZPkg(pip=n).install(bootstrap="nopip7")
 except Exception as x:
-    raise SystemExit(f"ezpkg: {s} failed: {x!r}")''',
+    raise SystemExit(f"ezpkg: {s} failed: {x!r}")  # Do not edit try block!''',
     "2026-10-23": '''try:  # Do not edit try block!  See https://pypi.org/project/ezpkg/
     s = "find ezpkg"; t = pathlib.Path.home()/".ezpkg"; w = t/"ezpkg.whl"
     def g(u):  # Fetch u, with curl if this Python has no certificates.
@@ -456,7 +466,7 @@ except Exception as x:
         m = importlib.import_module("ezpkg")
     s = "fetch packages"; m.EZPkg().install(bootstrap="2026-10-23")
 except Exception as x:
-    raise SystemExit(f"ezpkg: {s} failed: {x!r}")''',
+    raise SystemExit(f"ezpkg: {s} failed: {x!r}")  # Do not edit try block!''',
     "2026-10-25": '''try:  # Do not edit try block!  See https://pypi.org/project/ezpkg/
     s = "find ezpkg"; t = pathlib.Path.home()/".ezpkg"; w = t/"ezpkg.whl"
     def g(u: str) -> bytes:  # Fetch u; with curl if no certificates.
@@ -1003,7 +1013,23 @@ def main_source() -> tuple[Path, str] | None:
     where: Path | None = main_path()
     if where is None:
         return None
+    return source_of(where)
 
+
+def source_of(where: Path) -> tuple[Path, str] | None:
+    """Return a Python file and its text, as the interpreter reads it.
+
+    See `main_source`, whose reasons for `tokenize.open` hold for any
+    module.
+
+    Arguments:
+    * `where` (`Path`):
+      The file.
+
+    Returns:
+    * (`tuple[Path, str] | None`): The file and its contents, or `None`
+      when it cannot be read.
+    """
     # `SyntaxError` is what `tokenize` raises for an encoding it cannot
     # make sense of, and such a file would not have got this far.
     try:
@@ -1011,6 +1037,38 @@ def main_source() -> tuple[Path, str] | None:
             return where, source.read()
     except (OSError, UnicodeDecodeError, SyntaxError):
         return None
+
+
+# The caches for which a bootstrap has provided the program's packages
+# in this process, so that a bootstrap in a module the program imports
+# afterwards answers only for itself (`I.mbicamp`).
+DECLARED: set[Path] = set()
+
+
+def calling_module(frame: FrameType | None) -> Path | None:
+    """Return the calling module's file, unless it is the main program.
+
+    A module the program imports may carry a bootstrap of its own, as
+    a program that is also a library does, and its bootstrap is then
+    that module's to answer for, not the program's (`I.mbicamp`).
+
+    Arguments:
+    * `frame` (`FrameType | None`):
+      The frame of the function that was called, such as `install`'s.
+
+    Returns:
+    * (`Path | None`): The calling module's file, resolved, or `None`
+      for the main program, or a caller with no file that exists.
+    """
+    # The caller's globals say which module it is.
+    caller: FrameType | None = frame.f_back if frame is not None else None
+    if caller is None or caller.f_globals.get("__name__") == "__main__":
+        return None
+    where: object = caller.f_globals.get("__file__")
+    if not isinstance(where, str):
+        return None
+    found: Path = Path(where).resolve()
+    return found if found.is_file() else None
 
 
 # What an empty `prog.py.toml` is filled with: every setting, commented
@@ -1667,14 +1725,16 @@ def find_bootstrap(text: str) -> str | None:
     * (`str | None`): The block, or `None` when there is none or the
       program does not parse.
     """
-    # Padded and then dedented, because the segment's first line
-    # otherwise comes without its indentation and the rest with theirs,
-    # which `tokenize` rejects when the `try` is nested.
+    # Whole lines, then dedented: the segment `ast` gives ends where
+    # the code does, before a comment on the last line, which
+    # `2026-10-25` has (`I.r2birae`), and its first line would come
+    # without its indentation and the rest with theirs.
     found: ast.Try | None = bootstrap_node(text)
     if found is None:
         return None
-    return textwrap.dedent(
-        ast.get_source_segment(text, found, padded=True) or "")
+    lines: list[str] = text.splitlines()[
+        found.lineno - 1:found.end_lineno or found.lineno]
+    return textwrap.dedent("\n".join(lines))
 
 
 def bootstrap_node(text: str) -> ast.Try | None:
@@ -1718,6 +1778,55 @@ def own_entry(asking: Sequence[str]) -> str | None:
     # By name, as `pip` compares them.
     return next((entry for entry in asking
                  if normal_name(requirement_name(entry)) == "ezpkg"), None)
+
+
+def entry_specifier(entry: str) -> str:
+    """Return the version specifier of a requirement, such as `>=0.1`.
+
+    Arguments:
+    * `entry` (`str`):
+      A requirement, such as `ezpkg>=0.1,<0.2`.
+
+    Returns:
+    * (`str`): What follows its name, stripped; empty for a bare name.
+    """
+    # After the name, as `pip` spells it.
+    name: str = requirement_name(entry)
+    return entry[entry.find(name) + len(name):].strip()
+
+
+def bootstrap_floor(bootstrap: str) -> str:
+    """Return the oldest `ezpkg` that knows a bootstrap, or empty.
+
+    Arguments:
+    * `bootstrap` (`str`):
+      The name a bootstrap gives itself, such as `2026-10-26`.
+
+    Returns:
+    * (`str`): Such as `0.0.4`, from `BOOTSTRAP_FLOORS`; empty for an
+      unreleased or unknown one.
+    """
+    # Only the released ones are listed.
+    return BOOTSTRAP_FLOORS.get(bootstrap, "")
+
+
+def newer_than_known(bootstrap: str) -> bool:
+    """Say whether a bootstrap is dated after every one known here.
+
+    Bootstrap names are their dates (`DATED`), so a later date is a
+    bootstrap published after this `ezpkg`, which a newer `ezpkg`
+    knows (`I.cernb`).
+
+    Arguments:
+    * `bootstrap` (`str`):
+      The name a bootstrap gives itself, such as `2026-10-26`.
+
+    Returns:
+    * (`bool`): True for a date later than the newest in `BOOTSTRAPS`.
+    """
+    # The newest known name is its date.
+    newest: str = list(BOOTSTRAPS.values())[-1].split()[-1]
+    return DATED.fullmatch(bootstrap) is not None and bootstrap > newest
 
 
 def from_wheel() -> bool:
@@ -4097,7 +4206,11 @@ class EZPkg:
     Attributes:
     * `bootstrap` (`str`):
       Which bootstrap the program carries, as `install` was told, or the
-      empty string.  Nothing reads it yet; see `T.fbanwiis`.
+      empty string.  Its floor decides whether a developer's `ezpkg`
+      pin will do (`stale_pin`).
+    * `carrier` (`Path | None`):
+      The module whose bootstrap called `install`, when that is not
+      the main program (`I.mbicamp`), else `None`.
     * `readme` (`Path`):
       The `README.md` written into `root`.
     * `quick_start` (`Path`):
@@ -4114,6 +4227,7 @@ class EZPkg:
     readme: Path
     root: Path
     bootstrap: str = ""
+    carrier: Path | None = None
 
     def __init__(self, root: Path | None = None,
                  pip: subprocess.CompletedProcess[str] | None = None,
@@ -7688,6 +7802,51 @@ class EZPkg:
                 continue
         return added
 
+    def fetch(self, asking: Sequence[str], argv: Sequence[str],
+              locked: Sequence[str], before: str) -> list[Path]:
+        """Download what `provide` asks for, `ezpkg` apart if need be.
+
+        A developer's stash pinning an `ezpkg` that will no longer do
+        (`stale_pin`) would hold `ezpkg` back by its pin and its date,
+        and `pip` would find no way to satisfy both, so `ezpkg` is then
+        fetched by a `pip` of its own, without either, as the newest
+        that meets the program's entry and its bootstrap's floor.  It
+        has no dependencies, so nothing else is resolved apart from the
+        rest (`I.dspef`).
+
+        Arguments:
+        * `asking` (`Sequence[str]`):
+          Requirements as `pip` spells them.
+        * `argv` (`Sequence[str]`):
+          Extra arguments for `pip download`.
+        * `locked` (`Sequence[str]`):
+          The constraints `locked` returned.
+        * `before` (`str`):
+          The date `cutoff` returned.
+
+        Returns:
+        * (`list[Path]`): The wheels that arrived, in sorted order.
+        """
+        # Usually one `pip` for everything.
+        own: str | None = own_entry(asking)
+        if own is None or not self.stale_pin(own):
+            return self.download(asking, argv, locked, before)
+
+        # Otherwise `ezpkg` alone, at the newest that will do.
+        floor: str = bootstrap_floor(self.bootstrap)
+        wanted: str = "ezpkg" + ",".join(filter(None, [
+            entry_specifier(own), f">={floor}" if floor else ""]))
+        others: list[str] = [one for one in asking if one != own]
+        unpinned: list[str] = [
+            one for one in locked
+            if normal_name(requirement_name(one)) != "ezpkg"]
+        self.say(3, f"ezpkg: the stash's ezpkg {self.ezpkg_pin()} will not "
+                 f"do, so {wanted} is fetched on its own")
+        return sorted([
+            *(self.download(others, argv, unpinned, before) if others
+              else []),
+            *self.download([wanted], argv)])
+
     def download(self, requirements: Sequence[str],
                  argv: Sequence[str] = (),
                  constraints: Sequence[str] = (),
@@ -7911,7 +8070,8 @@ class EZPkg:
         """Report whether this `ezpkg` is the one the program asks for.
 
         It must meet the program's `ezpkg` entry and, when the approvals
-        pin `ezpkg`, be that version.  See `T.eui`.
+        pin `ezpkg`, be that version, unless the pin is a developer's
+        that no longer will do (`stale_pin`).  See `T.eui`.
 
         Arguments:
         * `entry` (`str`):
@@ -7921,15 +8081,53 @@ class EZPkg:
         * (`bool`): True when this `ezpkg` will do.
         """
         # The entry, then the pin.
-        name: str = requirement_name(entry)
-        specifier: str = entry[entry.find(name) + len(name):].strip()
-        if not meets(__version__, specifier):
+        if not meets(__version__, entry_specifier(entry)):
             return False
+        pinned: str = self.ezpkg_pin()
+        if not pinned or self.stale_pin(entry):
+            return True
+        return pinned == __version__
+
+    def ezpkg_pin(self) -> str:
+        """Return the version of `ezpkg` the approvals pin, or empty.
+
+        Returns:
+        * (`str`): Such as `0.0.1`, from `locked`.
+        """
+        # As `locked` hands them to `pip`.
         pinned: str
         for pinned in self.locked():
             if normal_name(requirement_name(pinned)) == "ezpkg":
-                return pinned.split("==", 1)[-1] == __version__
-        return True
+                return pinned.split("==", 1)[-1]
+        return ""
+
+    def stale_pin(self, entry: str | None) -> bool:
+        """Say whether a developer's `ezpkg` pin must give way.
+
+        One that fails the program's `ezpkg` entry, or is older than
+        the first `ezpkg` to know the bootstrap the program carries
+        (`BOOTSTRAP_FLOORS`), gives way: `ezpkg` is then fetched on its
+        own, without the pin or the date, and the stash records the new
+        one (Wayne, 2026-10-26, `I.dspef`).  An end user's approvals are
+        a release's, which pin the `ezpkg` that built it, so they hold.
+
+        Arguments:
+        * `entry` (`str | None`):
+          The program's `ezpkg` entry, from `own_entry`, if it has one.
+
+        Returns:
+        * (`bool`): True when the pin must give way.
+        """
+        # Only a developer's pin, and only one there is.
+        if not self.developing():
+            return False
+        pinned: str = self.ezpkg_pin()
+        if not pinned:
+            return False
+        floor: str = bootstrap_floor(self.bootstrap)
+        return ((entry is not None
+                 and not meets(pinned, entry_specifier(entry)))
+                or (floor != "" and not meets(pinned, f">={floor}")))
 
     def providing(self, asked: Sequence[str], own: str | None,
                   switching: bool) -> list[str]:
@@ -8005,6 +8203,72 @@ class EZPkg:
         run_again(dict(
             os.environ, EZPKG_SWITCHED=version, EZPKG_PYTHONPATH=paths,
             PYTHONPATH=os.pathsep.join(filter(None, [str(tree), paths]))))
+
+    def outgrown(self, bootstrap: str, carrier: Path | None) -> None:
+        """Fetch a newer `ezpkg` when the bootstrap is newer than it.
+
+        The bootstrap fetches `ezpkg.whl` only when there is none, so a
+        computer that ran a program before keeps that `ezpkg`, which
+        does not know any bootstrap published since, and would refuse
+        it as edited.  A bootstrap's name is its date, so a later date
+        than any this `ezpkg` knows means this `ezpkg` is too old: the
+        newest is fetched from the index, as the bootstrap fetches it,
+        replaces `ezpkg.whl`, and the program starts again with it, as
+        `switch` does (Wayne, 2026-10-26; `I.cernb`).  When the index
+        has nothing newer, or cannot be reached, this `ezpkg` judges the
+        bootstrap as usual, so a made-up date is still an edit.
+
+        Arguments:
+        * `bootstrap` (`str`):
+          The name the calling bootstrap gave itself.
+        * `carrier` (`Path | None`):
+          The file carrying that bootstrap, for the notice.
+
+        Raises:
+        * `SystemExit`:
+          With the program's own exit status on Windows.
+        """
+        # Only a date later than every bootstrap this `ezpkg` knows.
+        if not newer_than_known(bootstrap):
+            return
+        try:
+            # The newest wheel of those the bootstrap would choose from.
+            index: Any = json.loads(fetch_url(json_api("ezpkg")))
+            wheels: dict[str, dict[str, Any]] = {
+                one["filename"].split("-")[1]: one for one in index["urls"]
+                if one["filename"].endswith(".whl")}
+            version: str = next(
+                one for one in wheels
+                if all(meets(one, f">={other}") for other in wheels))
+            if not meets(version, f">{__version__}"):
+                self.say(3, f"ezpkg: the index has no ezpkg newer than "
+                         f"{__version__} for the bootstrap {bootstrap}")
+                return
+            wheel: dict[str, Any] = wheels[version]
+            body: bytes = fetch_url(wheel["url"])
+            if hashlib.sha256(body).hexdigest() != wheel["digests"]["sha256"]:
+                raise ValueError(f"{wheel['filename']} fails its SHA-256 "
+                                 f"check")
+        except (OSError, ValueError, KeyError, TypeError,
+                StopIteration) as error:
+            self.say(3, f"ezpkg: no newer ezpkg for the bootstrap "
+                     f"{bootstrap} ({error!r})")
+            return
+
+        # Kept where the bootstrap keeps it, so the next run starts with
+        # it, and this one starts again with it first.
+        part: Path = self.root / "ezpkg.part"
+        part.write_bytes(body)
+        whl: Path = self.root / "ezpkg.whl"
+        part.replace(whl)  # Atomic, as the bootstrap's.
+        named: str = f"`{carrier.name}`" if carrier else "This program"
+        self.say(1, f"{named} carries the bootstrap `{bootstrap}`, which "
+                 f"is newer than `ezpkg` {__version__}, so `ezpkg` "
+                 f"{version} was fetched to run it.")
+        paths: str = os.environ.get("PYTHONPATH", "")
+        run_again(dict(
+            os.environ, EZPKG_SWITCHED=version, EZPKG_PYTHONPATH=paths,
+            PYTHONPATH=os.pathsep.join(filter(None, [str(whl), paths]))))
 
     def release_due(self, settings: Settings | None) -> str:
         """Return the version to release now, or empty for none.
@@ -8404,7 +8668,10 @@ class EZPkg:
         """Stop the program if the bootstrap that called is not published.
 
         Called by `install` for a caller that names its bootstrap, which
-        every published bootstrap does and nothing else need.  A program
+        every published bootstrap does and nothing else need.  The text
+        checked is the caller's: the main program's, or a module's it
+        imports that carries a bootstrap of its own (`carrier`,
+        `I.mbicamp`).  A program
         whose source cannot be read (`python -c`, a frozen program) has
         nothing to compare, and goes on.  `EZPKG_BOOTSTRAP=unchecked`
         skips the check, saying so every time, for this project's own
@@ -8424,7 +8691,9 @@ class EZPkg:
             print("ezpkg: the bootstrap is not checked "
                   "(EZPKG_BOOTSTRAP=unchecked)", file=sys.stderr)
             return
-        found: tuple[Path, str] | None = main_source()
+        found: tuple[Path, str] | None = (
+            source_of(self.carrier) if self.carrier is not None
+            else main_source())
         if found is None:
             return
         refusal: str | None = bootstrap_refusal(found[0], found[1],
@@ -8844,12 +9113,11 @@ class EZPkg:
           a repeated option.
         * `bootstrap` (`str`):
           Which bootstrap the calling program carries, as the pasted code
-          names itself -- `"nopip6"` for the one that ships.  Kept on
-          the instance as `self.bootstrap` and **read by nothing yet**:
-          `T.fbanwiis` wants to notice a pasted bootstrap that has gone
-          stale, and telling it which one this is costs the caller no
-          line and saves it guessing.  An empty string means the caller
-          did not say.
+          names itself, such as `"2026-10-26"`.  It is checked against
+          the text of the file that called, the main program or a
+          module it imports (`I.mbicamp`), and kept on the instance as
+          `self.bootstrap`.  An empty string means the caller did not
+          say.
 
         Returns:
         * (`ModuleType | list[ModuleType] | None`): The imported module
@@ -8878,8 +9146,11 @@ class EZPkg:
           form.  The no-argument form imports nothing and so cannot
           raise it.
         """
-        # Remembered, though nothing reads it yet; see `T.fbanwiis`.
+        # Remembered, with the module that called when it is not the
+        # main program; see `stale_pin` and
+        # `refuse_an_edited_bootstrap`.
         self.bootstrap = bootstrap
+        self.carrier = calling_module(inspect.currentframe())
 
         # A program run again with the `ezpkg` it asked for puts things
         # back as they were for its own children; see `switch`.
@@ -8889,6 +9160,15 @@ class EZPkg:
         # interpreter is checked first, because a program on the wrong
         # Python should be told that rather than handed packages.
         if requirements is None:
+            # A bootstrap newer than this `ezpkg` fetches a newer one
+            # (`I.cernb`).  A module's bootstrap, once the program's
+            # packages are there, answers only for itself (`I.mbicamp`).
+            if bootstrap:
+                self.outgrown(bootstrap, self.carrier or main_path())
+                if self.root in DECLARED:
+                    self.refuse_an_edited_bootstrap(bootstrap)
+                    return None
+                DECLARED.add(self.root)
             try:
                 self.install_declared(argv, bootstrap)
             except KeyboardInterrupt:
@@ -9210,8 +9490,7 @@ class EZPkg:
                  f"ezpkg: fetching {' '.join(asking)}")
         trees: list[Path]
         if remembered is None:
-            arrived: list[Path] = self.download(asking, argv, locked,
-                                                before)
+            arrived: list[Path] = self.fetch(asking, argv, locked, before)
             holding: Path
             try:
                 # Nothing arriving is a real answer, not a failure: every

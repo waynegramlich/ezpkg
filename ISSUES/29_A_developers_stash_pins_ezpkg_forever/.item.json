@@ -1,0 +1,17 @@
+{
+  "state": "Open",
+  "created": "2026-10-26T19:51:39Z",
+  "updated": "2026-10-26T19:51:39Z",
+  "history": [
+    {
+      "state": "Pending",
+      "time": "2026-10-26T19:51:39Z"
+    },
+    {
+      "state": "Open",
+      "time": "2026-10-26T19:51:39Z"
+    }
+  ],
+  "tag": "dspef",
+  "priority": 1
+}
