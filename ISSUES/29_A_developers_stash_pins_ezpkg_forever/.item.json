@@ -1,7 +1,7 @@
 {
-  "state": "Open",
+  "state": "Closed",
   "created": "2026-10-26T19:51:39Z",
-  "updated": "2026-10-26T19:51:39Z",
+  "updated": "2026-10-26T22:20:19Z",
   "history": [
     {
       "state": "Pending",
@@ -10,6 +10,10 @@
     {
       "state": "Open",
       "time": "2026-10-26T19:51:39Z"
+    },
+    {
+      "state": "Closed",
+      "time": "2026-10-26T22:20:19Z"
     }
   ],
   "tag": "dspef",

@@ -1,12 +1,8 @@
 @9_A_zipapp_carries_the_programs_own_modules/Details.md
-@../ISSUES/27_A_cached_ezpkg_refuses_a_newer_bootstrap/Details.md
-@../ISSUES/27_A_cached_ezpkg_refuses_a_newer_bootstrap/Context.md
-@../ISSUES/28_A_modules_bootstrap_is_checked_against_the_main_program/Details.md
-@../ISSUES/28_A_modules_bootstrap_is_checked_against_the_main_program/Context.md
-@../ISSUES/29_A_developers_stash_pins_ezpkg_forever/Details.md
-@../ISSUES/29_A_developers_stash_pins_ezpkg_forever/Context.md
-@../ISSUES/30_A_real_2026_10_25_bootstrap_is_refused_as_edited/Details.md
-@../ISSUES/30_A_real_2026_10_25_bootstrap_is_refused_as_edited/Context.md
+@../ISSUES/27_A_cached_ezpkg_refuses_a_newer_bootstrap/Summary.md
+@../ISSUES/28_A_modules_bootstrap_is_checked_against_the_main_program/Summary.md
+@../ISSUES/29_A_developers_stash_pins_ezpkg_forever/Summary.md
+@../ISSUES/30_A_real_2026_10_25_bootstrap_is_refused_as_edited/Summary.md
 @../ISSUES/26_A_missing_local_module_fetches_a_PyPI_namesake/Summary.md
 @../ISSUES/25_Bootstrap_comments_exceed_72_columns/Summary.md
 @../ISSUES/24_The_bootstrap_fails_mypy_strict/Summary.md
@@ -53,8 +49,4 @@
 @6.8_Number_not_used/Summary.md
 @../ISSUES/5_Vendor_the_packages_into_the_repository/Summary.md
 @6.11_Garbage_collection/Details.md
-@6.12_Find_the_bootstrap_and_notice_when_it_is_stale/Details.md
-@6.14_The_shipping_bootstrap/Details.md
-@6.15_No_preinstalled_pip/Details.md
-@6.1_Error_on_a_failed_fetch/Details.md
 @Closed.md

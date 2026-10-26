@@ -5,6 +5,10 @@
 These items are only listed by tag and title; `ai_contexts TAG
 show` shows the rest.
 
+- `T.fbanwiis` Find the bootstrap, and notice when it is stale
+- `T.sb` The shipping bootstrap
+- `T.npp` No preinstalled `pip`
+- `T.eoff` Error on a failed fetch
 - `T.spioc` Several packages in one call
 - `T.ci` Concurrent installs
 - `T.ccp` Coverage of child processes

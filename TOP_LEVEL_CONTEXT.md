@@ -261,7 +261,8 @@ program, ever, and the program is never edited.  `prog.ezpkg`,
   settings with `gh api` rather than sending Wayne to the web pages.
 * `ezpkg` is on pypi.org: 0.0.1 (2026-10-25, `T.utpat`), 0.0.2, 0.0.3
   and 0.0.4 (the same day, `I.srlfnp`, `I.bfms` and `I.bce7c`), and
-  0.0.5 (2026-10-26, `I.mlmfpn`), so the
+  0.0.5 and 0.0.6 (2026-10-26, `I.mlmfpn`; `I.cernb`, `I.mbicamp`,
+  `I.dspef`, `I.r2birae`), so the
   Quick Start works for a new user; `release_check.py pypi|testpypi
   VERSION` checks what was published.  A release follows `T.ffrp`'s procedure: bump
   `__version__`, Wayne commits, Claude pushes, rehearses on
@@ -272,14 +273,13 @@ program, ever, and the program is never edited.  `prog.ezpkg`,
   `release.yml`'s `listed` job and `release_check.py` (`newest_named`)
   wait until it names the new version (S5.1, S5.2).
 
-## Next Steps (2026-10-26, after 0.0.5)
+## Next Steps (2026-10-26, after 0.0.6)
 
-0.0.6 in progress: `I.cernb~27`, `I.mbicamp~28`, `I.dspef~29` and
-`I.r2birae~30` are built and tested, from Wayne's one customer's
-report (the `solidcraftcnc` demo, `notes.txt`).  Wayne wants these
-real-use failures found, not worked around.  Then the release
-procedure, and Wayne's demo with its 0.0.1 `ezpkg.whl` (Part 1's floor
-switches it, `T.eui`).
+0.0.6 is on pypi.org (`v0.0.6`, `c615a2e`), fixing what Wayne's
+`solidcraftcnc` demo found (`I.cernb~27`, `I.mbicamp~28`, `I.dspef~29`,
+`I.r2birae~30`).  Wayne is the one user, and wants real-use failures
+found and fixed, not worked around.  His own `~/.ezpkg/ezpkg.whl` is
+0.0.1, which no new code can rescue: deleting it once is the repair.
 
 `T.zcpom~9` (a `zipapp` carries the program's own modules) is
 Pending, agreed but not built; Wayne's decisions are in its
